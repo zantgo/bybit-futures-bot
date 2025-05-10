@@ -1,17 +1,18 @@
-# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (v8.7.x - Corregida Lógica Transferencia PNL) ===============
+# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (v8.7.x - Lógica Transferencia PNL y Print Debug Corregidos) ===============
 """
 Módulo dedicado a gestionar los balances LÓGICOS de las cuentas
 (Long Margin, Short Margin, Profit Balance) durante el backtesting y live.
 
+v8.7.x - Corregido Print Debug: Asegura que los prints de debug en initialize()
+                                muestren el available_margin usando la función
+                                get_available_margin() para consistencia.
 v8.7.x - Corregida Lógica Transferencia PNL: Las transferencias de PNL a la cuenta de profit
                                            ya no reducen el capital operativo total del lado (_operational_margin).
                                            El margen operativo total solo cambia con la inicialización o ajuste de slots.
 v8.7.x - Corregido: Asegura que en modo Live, los márgenes operativos lógicos iniciales
-                 se basen en el balance real disponible (UTA Wallet o Available) de las
+                 se basen en el balance real disponible (UTA Wallet) de las
                  cuentas correspondientes, si no se especifica un capital operativo menor
                  mediante base_position_size_usdt * initial_max_logical_positions.
-v8.7.x - Final: Corregida simulate_profit_transfer para deducir del margen operativo
-                 y añadida record_real_profit_transfer_logically para modo Live.
 v8.7.x: Modificada la inicialización para usar tamaño base por posición y número inicial de slots.
 v8.5.8: Guarda correctamente los márgenes lógicos iniciales para get_initial_total_capital.
 """
@@ -117,10 +118,12 @@ def initialize(
         short_acc_name_cfg = getattr(config, 'ACCOUNT_SHORTS', None)
         main_acc_name_cfg = getattr(config, 'ACCOUNT_MAIN', 'main')
 
+        # ---- 1. Determinar Balances Reales de API para Profit y Operaciones ----
         real_profit_balance_api = 0.0
         real_operational_long_margin_api = 0.0
         real_operational_short_margin_api = 0.0
 
+        # Profit Balance (igual que antes)
         try:
             if profit_acc_name and profit_acc_name in real_balances_data:
                 unified_prof = real_balances_data[profit_acc_name].get('unified_balance')
@@ -132,6 +135,7 @@ def initialize(
         except Exception as e_read_profit_api:
             print(f"ERROR [BM Init]: Leyendo balance de profit real: {e_read_profit_api}");
 
+        # Operational Long Margin (API)
         target_long_acc_name = long_acc_name_cfg if long_acc_name_cfg else main_acc_name_cfg
         if target_long_acc_name in real_balances_data:
             unified_long_data = real_balances_data[target_long_acc_name].get('unified_balance')
@@ -139,7 +143,7 @@ def initialize(
                 usdt_coin_data = next((c for c in unified_long_data.get('coin', []) if c.get('coin') == 'USDT'), None)
                 if usdt_coin_data:
                     real_operational_long_margin_api = utils.safe_float_convert(usdt_coin_data.get('walletBalance'), 0.0)
-                else: 
+                else: # Fallback al totalWalletBalance general de la cuenta si no hay desglose de USDT
                     real_operational_long_margin_api = utils.safe_float_convert(unified_long_data.get('totalWalletBalance'), 0.0)
                 print(f"    INFO: Balance Real API para Longs ('{target_long_acc_name}' USDT Wallet): {real_operational_long_margin_api:.4f} USDT")
             else:
@@ -147,6 +151,8 @@ def initialize(
         else:
              print(f"    WARN: No hay datos de API para la cuenta Long/Main '{target_long_acc_name}'. Margen Long API será 0.")
 
+
+        # Operational Short Margin (API)
         target_short_acc_name = short_acc_name_cfg if short_acc_name_cfg else main_acc_name_cfg
         if target_short_acc_name in real_balances_data:
             unified_short_data = real_balances_data[target_short_acc_name].get('unified_balance')
@@ -162,10 +168,12 @@ def initialize(
         else:
             print(f"    WARN: No hay datos de API para la cuenta Short/Main '{target_short_acc_name}'. Margen Short API será 0.")
 
+
         _profit_balance = real_profit_balance_api
         _initial_profit_balance = real_profit_balance_api
         print(f"    Balance Profit Lógico Inicial (API Real): {_profit_balance:.4f} USDT")
 
+        # ---- 2. Establecer Márgenes Operativos Lógicos ----
         logical_capital_per_side_config = current_base_size * current_slots
 
         if _trading_mode_config == "LONG_ONLY" or _trading_mode_config == "LONG_SHORT":
@@ -209,9 +217,13 @@ def initialize(
 
     print(f"[Balance Manager] Balances LÓGICOS inicializados -> OpLong: {_operational_long_margin:.4f}, OpShort: {_operational_short_margin:.4f}, Profit: {_profit_balance:.4f} USDT")
     print(f"  (DEBUG Iniciales Guardados: OpLong={_initial_operational_long_margin:.4f}, OpShort={_initial_operational_short_margin:.4f}, Profit={_initial_profit_balance:.4f})")
+    
+    # <<<<<<< CORRECCIÓN PRINT DEBUG >>>>>>>
+    # Asegurar que el _initialized = True esté ANTES de llamar a get_available_margin
+    _initialized = True 
     print(f"DEBUG BM INIT FINAL: _opL={_operational_long_margin:.4f}, _usedL={_used_long_margin:.4f}, availL={get_available_margin('long'):.4f}")
     print(f"DEBUG BM INIT FINAL: _opS={_operational_short_margin:.4f}, _usedS={_used_short_margin:.4f}, availS={get_available_margin('short'):.4f}")
-    _initialized = True
+    # <<<<<<< FIN CORRECCIÓN PRINT DEBUG >>>>>>>
 
 
 def get_available_margin(side: str) -> float:
@@ -283,13 +295,13 @@ def update_operational_margins_based_on_slots(new_max_slots: int):
         new_total_op_long = _initial_base_position_size_usdt_session * new_max_slots
         _operational_long_margin = max(new_total_op_long, _used_long_margin)
     else:
-        _operational_long_margin = _used_long_margin # Si es SHORT_ONLY, OpLong es solo lo que esté usado (idealmente 0)
+        _operational_long_margin = _used_long_margin 
 
     if _trading_mode_config != "LONG_ONLY":
         new_total_op_short = _initial_base_position_size_usdt_session * new_max_slots
         _operational_short_margin = max(new_total_op_short, _used_short_margin)
     else:
-        _operational_short_margin = _used_short_margin # Si es LONG_ONLY, OpShort es solo lo que esté usado (idealmente 0)
+        _operational_short_margin = _used_short_margin
 
 
     print(f"  INFO [BM Update Op Margins]: Márgenes operativos TOTALES actualizados para {new_max_slots} slots.")
@@ -298,17 +310,12 @@ def update_operational_margins_based_on_slots(new_max_slots: int):
 
 
 def simulate_profit_transfer(from_side: str, amount: float) -> bool:
-    # Esta función es SOLO para BACKTEST.
-    # Aquí, el 'amount' es el PNL Neto que se va a la cuenta de profit.
-    # El capital operativo (_operational_..._margin) NO se reduce por esta transferencia.
-    # La reducción/aumento del margen disponible ya ocurrió a través de
-    # decrease_operational_margin (al abrir) e increase_operational_margin (al cerrar, que incluye la reinversión).
     global _profit_balance
     if not _initialized: return False
 
     if _operation_mode.startswith("live"):
          print("DEBUG [BM Sim Transfer]: Llamado en modo Live. Esta función es solo para Backtest. No se realizarán cambios lógicos aquí.")
-         return True # Indica que la "operación" (no hacer nada) fue "exitosa" para Live.
+         return True 
 
     if not isinstance(amount, (int, float)) or amount < 0:
         print(f"WARN [BM Sim Transfer]: Amount inválido ({amount}). No se transfiere."); return False
@@ -318,24 +325,19 @@ def simulate_profit_transfer(from_side: str, amount: float) -> bool:
     print_updates = getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False) if config else False
     amount_to_transfer = abs(amount)
 
-    # En Backtest, simplemente se añade al balance de profit.
-    # El margen operativo del lado no se reduce aquí porque la simulación de
-    # 'cosechar' ganancias no implica reducir el capital base asignado a las operaciones.
+    # Lógica corregida: SOLO acredita a profit_balance en Backtest
     _profit_balance += amount_to_transfer
+    
     if print_updates:
         print(f"  SIMULATED [BM Transfer]: {amount_to_transfer:.4f} USDT añadidos a Profit Balance. Nuevo Profit: {_profit_balance:.4f}.")
-        # Mostrar márgenes disponibles para debug, no cambian por esta función en sí.
-        print(f"    Margen Disponible Long : {get_available_margin('long'):.4f}")
-        print(f"    Margen Disponible Short: {get_available_margin('short'):.4f}")
+        print(f"    Margen Disponible Long : {get_available_margin('long'):.4f} (Sin cambios por esta transferencia)")
+        print(f"    Margen Disponible Short: {get_available_margin('short'):.4f} (Sin cambios por esta transferencia)")
+        
     return True
 
 
 def record_real_profit_transfer_logically(from_side: str, amount_transferred: float):
-    # Esta función actualiza los balances lógicos DESPUÉS de una transferencia API REAL.
-    # El 'amount_transferred' (PNL Neto) se añade al profit_balance.
-    # El capital operativo (_operational_..._margin) del lado NO se reduce por esta transferencia.
-    # La reducción/aumento del margen disponible ya ocurrió a través de
-    # decrease_operational_margin (al abrir) e increase_operational_margin (al cerrar).
+   # Lógica Corregida: SOLO acredita a profit_balance en modo Live.
     global _profit_balance
     if not _initialized: print("ERROR [BM Record Transfer]: BM no inicializado."); return
     if not _operation_mode.startswith("live"): print("WARN [BM Record Transfer]: Esta función es para modo Live."); return
@@ -346,7 +348,7 @@ def record_real_profit_transfer_logically(from_side: str, amount_transferred: fl
 
     print(f"DEBUG [BM Record Real Transfer]: Registrando lógicamente PNL Neto transferido de {amount_transferred:.4f} del lado {from_side} a profit.")
 
-    # Solo se acredita al balance de profit. El margen operativo del lado no se modifica.
+    # Solo se acredita al balance de profit.
     _profit_balance += amount_transferred
 
     if print_updates:
@@ -370,7 +372,7 @@ def get_balances() -> dict:
         "available_short_margin": round(get_available_margin('short'), 8),
         "used_long_margin": round(_used_long_margin, 8),
         "used_short_margin": round(_used_short_margin, 8),
-        "operational_long_margin": round(_operational_long_margin, 8),
+        "operational_long_margin": round(_operational_long_margin, 8), 
         "operational_short_margin": round(_operational_short_margin, 8),
         "profit_balance": round(_profit_balance, 8)
      }

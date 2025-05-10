@@ -1,9 +1,12 @@
-# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v1.6.2 - LiqP Individual en Apertura) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v1.6.3 - LiqP Individual con Recálculo Post-Sync) ===============
 """
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución
 para abrir y cerrar posiciones, interactuando con la API (live) o simulando
 (backtest), y gestionando el estado interno (balance, lógico, físico).
 
+v1.6.3: Asegura que el 'est_liq_price' individual se recalcule y actualice
+        en PositionState después de una sincronización exitosa de precio/cantidad
+        en modo Live.
 v1.6.2: Modificado execute_open para calcular y almacenar 'est_liq_price'
         individual para cada nueva posición lógica.
 v1.6.1: Adapta execute_close para usar nuevas claves de reinversión/transferencia de PNL Neto.
@@ -94,13 +97,11 @@ class PositionExecutor:
 
         logical_position_id = str(uuid.uuid4()); tp_price = self._position_calculations.calculate_take_profit(side, entry_price)
         
-        # <<<<<<< INICIO MODIFICACIÓN: Calcular y añadir est_liq_price individual >>>>>>>
         est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
             side=side,
-            avg_entry_price=entry_price, # Usar el precio de entrada de esta posición lógica
+            avg_entry_price=entry_price, 
             leverage=self._leverage
         )
-        # <<<<<<< FIN MODIFICACIÓN >>>>>>>
 
         new_position_data = {
             'id': logical_position_id, 
@@ -110,7 +111,7 @@ class PositionExecutor:
             'size_contracts': size_contracts_final_float, 
             'leverage': self._leverage, 
             'take_profit_price': tp_price,
-            'est_liq_price': est_liq_price_individual, # <<<<<<< AÑADIDO >>>>>>>
+            'est_liq_price': est_liq_price_individual, 
             'api_order_id': None, 
             'api_avg_fill_price': None, 
             'api_filled_qty': None
@@ -133,8 +134,7 @@ class PositionExecutor:
             else: # Backtest
                 print(f"  Ejecutando Apertura BACKTEST (Simulada)..."); execution_success = True; api_order_id = None; print(f"  -> ÉXITO Simulado.")
             if execution_success:
-                self._balance_manager.decrease_operational_margin(side, margin_used_final) # Esto ahora aumenta el "used_margin"
-                # El mensaje de BM ya es suficientemente descriptivo, no es necesario repetir aquí
+                self._balance_manager.decrease_operational_margin(side, margin_used_final) 
         except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); execution_success = False
 
         add_ok = False; sync_ok = not self._is_live_mode; updated_pos_details = None
@@ -150,24 +150,33 @@ class PositionExecutor:
                     sync_ok = self._position_state.sync_new_logical_entry_price(side, logical_position_id, api_order_id)
                     if sync_ok: 
                         print(f"    Sincronización de precio/tamaño OK para pos ...{logical_position_id[-6:]}.")
-                        # Si la sync fue OK, los datos en PositionState (y por ende en new_position_data si se re-obtuviera) estarían actualizados.
-                        # Recalcular LiqP con datos sincronizados si es posible
                         updated_pos_after_sync = self._position_state.get_position_by_id(side, logical_position_id)
                         if updated_pos_after_sync:
                             new_entry_price_synced = updated_pos_after_sync.get('entry_price', entry_price)
+                            # <<<<<<< INICIO RECALCULO Y ACTUALIZACIÓN LiqP Individual >>>>>>>
                             est_liq_price_individual_synced = self._position_calculations.calculate_liquidation_price(
                                 side=side,
-                                avg_entry_price=new_entry_price_synced,
-                                leverage=self._leverage
+                                avg_entry_price=new_entry_price_synced, # Usar el precio de entrada sincronizado
+                                leverage=updated_pos_after_sync.get('leverage', self._leverage) # Usar el leverage de la posición
                             )
                             if est_liq_price_individual_synced is not None:
-                                self._position_state.update_logical_position_details(side, logical_position_id, {'est_liq_price': est_liq_price_individual_synced})
+                                update_liq_details = {'est_liq_price': est_liq_price_individual_synced}
+                                # Actualizar también el precio de TP si el precio de entrada cambió
+                                if abs(new_entry_price_synced - entry_price) > 1e-9: # Si el precio de entrada cambió
+                                    new_tp_price_synced = self._position_calculations.calculate_take_profit(side, new_entry_price_synced)
+                                    update_liq_details['take_profit_price'] = new_tp_price_synced
+                                
+                                self._position_state.update_logical_position_details(side, logical_position_id, update_liq_details)
                                 print(f"    Precio Liq. Estimado Individual Actualizado para ...{logical_position_id[-6:]}: {est_liq_price_individual_synced:.{self._price_prec}f}")
+                                if 'take_profit_price' in update_liq_details:
+                                     print(f"    Take Profit Price Actualizado para ...{logical_position_id[-6:]}: {new_tp_price_synced:.{self._price_prec}f}")
+                            # <<<<<<< FIN RECALCULO Y ACTUALIZACIÓN LiqP Individual >>>>>>>
+                            updated_pos_details = updated_pos_after_sync # Guardar para el log y actualización física
                     else: 
                         print(f"WARN [Exec Open]: Falló sync post-apertura para pos ...{logical_position_id[-6:]}. Usando datos estimados!")
                     
                     if self._print_updates:
-                        if sync_ok: updated_pos_details = self._position_state.get_position_by_id(side, logical_position_id)
+                        # 'updated_pos_details' ya se obtuvo arriba si sync_ok
                         if updated_pos_details: print(f"      > Px Entrada Real: {updated_pos_details.get('entry_price', 0.0):.{self._price_prec}f}, Tamaño Real: {updated_pos_details.get('size_contracts', 0.0):.{qty_precision_used}f}")
                         else: print("      (WARN: No se pudieron leer detalles actualizados)")
                         print("\n  --- ESTADO POST-SYNC PRECIO/QTY ---"); self._position_state.display_logical_table(side); print("  " + "-"*60)
@@ -175,11 +184,9 @@ class PositionExecutor:
                 print(f"  Actualizando estado físico agregado...")
                 open_positions_now = self._position_state.get_open_logical_positions(side)
                 aggregates = self._position_calculations.calculate_physical_aggregates(open_positions_now)
-                # El LiqP para el estado físico agregado se calcula sobre el precio promedio de todas las posiciones lógicas abiertas
-                # Esto es diferente del est_liq_price individual de cada posición lógica.
                 liq_price_aggregate = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
                 ts_for_phys_update = timestamp
-                if self._is_live_mode and sync_ok and updated_pos_details: # updated_pos_details se refiere a la última pos abierta
+                if self._is_live_mode and sync_ok and updated_pos_details: 
                     updated_ts = updated_pos_details.get('entry_timestamp')
                     if isinstance(updated_ts, datetime.datetime): ts_for_phys_update = updated_ts
                 self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price_aggregate, ts_for_phys_update)
@@ -289,8 +296,7 @@ class PositionExecutor:
 
                 if remove_ok and removed_pos_data: 
                     margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin 
-                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op) # Esto ahora disminuye el "used_margin"
-                    # El print de BM ya es descriptivo
+                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op) 
                 elif remove_ok and ret_code == 110001:
                      print("  Balance Manager: No se modifica margen operativo (posición no encontrada).")
                 
@@ -436,4 +442,4 @@ class PositionExecutor:
             print(f"    -------------------------------------------------")
         except Exception as sync_err: print(f"    ERROR SYNC: Excepción durante sincronización {side.upper()}: {sync_err}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/position_executor.py (v1.6.2 - LiqP Individual en Apertura) ===============
+# =============== FIN ARCHIVO: core/strategy/position_executor.py (v1.6.3 - LiqP Individual con Recálculo Post-Sync) ===============

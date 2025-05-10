@@ -15,20 +15,20 @@ import traceback
 import pandas as pd
 import numpy as np
 import json
-import sys 
+import sys
 from typing import Optional, Dict, Any, List
 
 # --- Importaciones Core y Strategy ---
 try:
-    import config 
+    import config
     from core import utils
     from . import ta_manager
     from . import signal_generator
-    position_manager = None 
+    position_manager = None
     _pm_enabled_in_config = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if _pm_enabled_in_config:
         try:
-            from . import position_manager 
+            from . import position_manager
             print("DEBUG [Event Proc Import]: Position Manager importado.")
         except ImportError as e_pm:
             print(f"ERROR CRITICO [Event Proc Import]: Import relativo de position_manager falló: {e_pm}")
@@ -40,7 +40,7 @@ try:
     signal_logger = None
     if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
         try:
-            from core.logging import signal_logger 
+            from core.logging import signal_logger
             print("DEBUG [Event Proc Import]: Signal Logger importado.")
         except ImportError:
             print("WARN [Event Proc Import]: No se pudo cargar signal_logger (habilitado en config).")
@@ -69,7 +69,7 @@ def initialize(
     initial_max_logical_positions: Optional[int] = None
 ):
     global _previous_raw_event_price, _is_first_event, _operation_mode
-    global position_manager 
+    global position_manager
 
     if not config or not utils or not ta_manager or not signal_generator:
         print("ERROR CRITICO [EP Init]: Faltan dependencias esenciales (config, utils, TA, SignalGen).")
@@ -96,7 +96,7 @@ def initialize(
                      f"initial_slots={initial_max_logical_positions if initial_max_logical_positions is not None else 'Default_PM'}"
                  )
                  print(debug_msg_pm_init)
-                 
+
                  position_manager.initialize(
                      operation_mode=operation_mode,
                      initial_real_state=initial_real_state,
@@ -217,11 +217,11 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                     max_p = summary.get('max_logical_positions',0)
                     lc = summary.get('open_long_positions_count', 0)
                     sc = summary.get('open_short_positions_count', 0)
-                    al = summary.get('bm_available_long_margin', 0.0) 
-                    ul = summary.get('bm_used_long_margin', 0.0)       
-                    as_val = summary.get('bm_available_short_margin', 0.0) 
-                    us_val = summary.get('bm_used_short_margin', 0.0)      
-                    pb = summary.get('bm_profit_balance', 0.0)             
+                    al = summary.get('bm_available_long_margin', 0.0)
+                    ul = summary.get('bm_used_long_margin', 0.0)
+                    as_val = summary.get('bm_available_short_margin', 0.0)
+                    us_val = summary.get('bm_used_short_margin', 0.0)
+                    pb = summary.get('bm_profit_balance', 0.0)
                     pnl_l = summary.get('total_realized_pnl_long', 0.0)
                     pnl_s = summary.get('total_realized_pnl_short', 0.0)
                     tf = summary.get('total_transferred_profit', 0.0)
@@ -231,11 +231,10 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                     print(f"    Margen Disp(S): {as_val:<15.4f} Usado(S): {us_val:<15.4f}")
                     print(f"    Balance Profit: {pb:<15.4f} PNL Neto(L): {pnl_l:<+15.4f}")
                     print(f"    Transferido:    {tf:<15.4f} PNL Neto(S): {pnl_s:<+15.4f}")
-                    
+
                     liq_price_fmt_str = f".{config.PRICE_PRECISION}f" if hasattr(config, 'PRICE_PRECISION') else ".2f"
                     qty_fmt_str = f".{config.DEFAULT_QTY_PRECISION}f" if hasattr(config, 'DEFAULT_QTY_PRECISION') else ".3f"
 
-                    # <<<<<<< INICIO MODIFICACIÓN PARA AVG LIQP >>>>>>>
                     # --- Para Avg LiqP Long ---
                     open_longs = summary.get('open_long_positions', [])
                     avg_liq_price_long_str = "N/A"
@@ -243,16 +242,16 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                         total_liq_price_weighted_sum_long = 0.0
                         total_size_long = 0.0
                         for p in open_longs:
-                            liq_p_val = utils.safe_float_convert(p.get('est_liq_price')) # 'est_liq_price' es la clave
+                            liq_p_val = utils.safe_float_convert(p.get('est_liq_price'))
                             pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
-                            if pd.notna(liq_p_val) and pd.notna(pos_size_val) and pos_size_val > 0:
+                            if pd.notna(liq_p_val) and pd.notna(pos_size_val) and pos_size_val > 0 and liq_p_val > 0:
                                 total_liq_price_weighted_sum_long += liq_p_val * pos_size_val
                                 total_size_long += pos_size_val
                         if total_size_long > 0:
                             avg_liq_price_long = total_liq_price_weighted_sum_long / total_size_long
                             avg_liq_price_long_str = f"{avg_liq_price_long:{liq_price_fmt_str}}"
                         elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_longs):
-                            avg_liq_price_long_str = "Error Promedio (Tamaño 0 con LiqP)" # Si hay LiqP pero tamaño total es 0
+                            avg_liq_price_long_str = "Inv.Calc"
                     print(f"    Avg LiqP Long : {avg_liq_price_long_str}")
 
                     # --- Para Avg LiqP Short ---
@@ -262,18 +261,17 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                         total_liq_price_weighted_sum_short = 0.0
                         total_size_short = 0.0
                         for p_short in open_shorts:
-                            liq_p_val_s = utils.safe_float_convert(p_short.get('est_liq_price')) # 'est_liq_price' es la clave
+                            liq_p_val_s = utils.safe_float_convert(p_short.get('est_liq_price'))
                             pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
-                            if pd.notna(liq_p_val_s) and pd.notna(pos_size_val_s) and pos_size_val_s > 0:
+                            if pd.notna(liq_p_val_s) and pd.notna(pos_size_val_s) and pos_size_val_s > 0 and liq_p_val_s > 0:
                                 total_liq_price_weighted_sum_short += liq_p_val_s * pos_size_val_s
                                 total_size_short += pos_size_val_s
                         if total_size_short > 0:
                             avg_liq_price_short = total_liq_price_weighted_sum_short / total_size_short
                             avg_liq_price_short_str = f"{avg_liq_price_short:{liq_price_fmt_str}}"
                         elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_shorts):
-                             avg_liq_price_short_str = "Error Promedio (Tamaño 0 con LiqP)"
+                             avg_liq_price_short_str = "Inv.Calc"
                     print(f"    Avg LiqP Short: {avg_liq_price_short_str}")
-                    # <<<<<<< FIN MODIFICACIÓN PARA AVG LIQP >>>>>>>
 
                     # --- Detalles de posiciones individuales (SIN LiqP individual) ---
                     if lc > 0 and open_longs:
@@ -286,7 +284,7 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                             size_str_print = f"{pos_size_val:{qty_fmt_str}}" if pd.notna(pos_size_val) else "N/A"
                             pos_details.append(f"ID:{pos_id_short}(Ent:{entry_p_str} Sz:{size_str_print})")
                         print(f"    Open Longs Det: {', '.join(pos_details)}")
-                    elif lc > 0: 
+                    elif lc > 0:
                         print(f"    Open Longs    : {lc} (Detalles no disponibles en summary)")
 
                     if sc > 0 and open_shorts:
@@ -299,9 +297,9 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                             size_str_print_s = f"{pos_size_val_s:{qty_fmt_str}}" if pd.notna(pos_size_val_s) else "N/A"
                             pos_details_short.append(f"ID:{pos_id_short_s}(Ent:{entry_p_str_s} Sz:{size_str_print_s})")
                         print(f"    Open Shorts Det: {', '.join(pos_details_short)}")
-                    elif sc > 0: 
+                    elif sc > 0:
                         print(f"    Open Shorts   : {sc} (Detalles no disponibles en summary)")
-                
+
                 elif summary and 'error' in summary: print(f"    Error resumen PM: {summary.get('error', 'N/A')}")
                 else: print(f"    Error resumen PM (Respuesta inválida).")
             elif pm_enabled_runtime and position_manager and not pm_initialized_runtime_print: print("    (PM no inicializado)")

@@ -81,8 +81,8 @@ POSITION_TRADING_MODE = "LONG_SHORT"        # Sobrescrito interactivamente
 POSITION_BASE_SIZE_USDT = 3.0              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
 POSITION_MAX_LOGICAL_POSITIONS = 3          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
 POSITION_LEVERAGE = 50.0 #
-POSITION_TAKE_PROFIT_PCT_LONG = 0.5 #
-POSITION_TAKE_PROFIT_PCT_SHORT = 0.5 #
+POSITION_TAKE_PROFIT_PCT_LONG = 0.3 #
+POSITION_TAKE_PROFIT_PCT_SHORT = 0.3 #
 POSITION_COMMISSION_RATE = 0.001
 # <<<<<<< CAMBIO IMPORTANTE AQUÍ >>>>>>>
 POSITION_REINVEST_PROFIT_PCT = 1.0 # Para 1% reinversión en margen operacional y 99% transferible a profit. (Anteriormente 0.01)
