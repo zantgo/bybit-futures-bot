@@ -1,0 +1,18 @@
+# Bybit Futures Bot (DFE Futures Bot B - v8.7.x) Dependencies
+
+# Core Libraries
+python-dotenv>=0.19.0     # Para cargar variables de entorno desde el archivo .env (API Keys, UIDs)
+pybit>=5.4.0              # Cliente oficial de Bybit API v5 (para operaciones Live)
+pandas>=1.4.0             # Para manipulación de DataFrames (datos históricos, TA, tablas lógicas)
+numpy>=1.21.0             # Para cálculos numéricos (usado extensivamente en TA y cálculos de posición)
+
+# Visualization (Requerido para el modo Backtest con gráfico)
+matplotlib>=3.5.0         # Para generar los gráficos de resultados del backtesting
+
+# --- Notas ---
+# - Asegúrate de que las versiones sean compatibles entre sí y con tu versión de Python (3.8+ recomendado).
+# - Para asegurar la reproducibilidad exacta del entorno, una vez que hayas instalado
+#   estas dependencias en tu entorno virtual y verificado que todo funciona, puedes
+#   generar un archivo con las versiones exactas usando el comando:
+#   pip freeze > requirements_exact.txt
+#   (Y podrías usar ese archivo `requirements_exact.txt` en su lugar).

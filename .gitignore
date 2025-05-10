@@ -1,0 +1,15 @@
+# --- Secrets ---
+# ¡NUNCA subas tus claves API o secretos a GitHub!
+.env
+*.env
+
+# --- Python ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Entorno virtual
+venv/

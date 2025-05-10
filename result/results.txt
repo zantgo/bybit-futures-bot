@@ -1,0 +1,49 @@
+======================================================================
+ Reporte de Ejecución - Bot v8.7.x
+ Generado: 2025-05-10 02:58:07
+ Modo: LIVE_INTERACTIVE
+======================================================================
+
+----------------------------------------------------------------------
+ Configuración Clave Utilizada
+----------------------------------------------------------------------
+  Símbolo: BTCUSDT
+  Gestión de Posiciones: Activada
+    Modo Trading: LONG_SHORT
+    Capital Inicial Asignado: 18.00 USDT (total asignado)
+    Apalancamiento: 50.0x
+    Max Pos Lógicas (Final): 3 (por lado)
+    TP % (L/S): 50.00% / 50.00%
+    Comisión %: 0.100%
+    Reinvertir PNL Operacional %: 1.00%
+    Cooldown Señales: Activado
+      -> Periodo Espera Long:  3 eventos
+      -> Periodo Espera Short: 3 eventos
+
+----------------------------------------------------------------------
+ Resumen Trades Cerrados
+----------------------------------------------------------------------
+  Total Trades Cerrados: 2 (Long: 1, Short: 1)
+  Trades Ganadores:    2 (100.00%) (Long: 1, Short: 1)
+  Trades Perdedores:   0
+  PNL Neto Total:      +0.6219 USDT (Long: +0.3104, Short: +0.3115)
+  Ganancia Promedio:   +0.3110 USDT
+  Pérdida Promedio:    +0.0000 USDT
+  Profit Factor:       inf
+
+----------------------------------------------------------------------
+ Estado Final
+----------------------------------------------------------------------
+  Margen Operativo Total Final Long:  8.6927 USDT (Balance Manager)
+  Margen Operativo Total Final Short: 8.6916 USDT (Balance Manager)
+  Margen Operativo Disponible Long:   8.6927 USDT
+  Margen Operativo Disponible Short:  8.6916 USDT
+  Margen Total Usado Lógico (L/S):    0.0000 / 0.0000 USDT
+  Balance Cuenta Profit Final:        4.8340 USDT
+  PNL Neto Total Realizado:           +0.6219 USDT
+  Total Transferido a Profit:         0.6157 USDT (Real API)
+  Capital Inicial Total Operativo:    18.00 USDT (Balance Manager (get_initial_total_capital))
+  Capital Final Total (Equity Lóg.):  18.6219 USDT
+  Retorno Sobre Capital Inicial (%):  +3.46%
+
+  Posiciones Abiertas al Final: 0
