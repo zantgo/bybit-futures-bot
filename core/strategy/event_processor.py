@@ -1,8 +1,11 @@
-# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v8.7.x - Nueva Lógica Capital) ===============
+# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v8.7.x - LiqP Promedio Ponderado) ===============
 """
 Procesa un único evento de precio (tick).
 Calcula TA, genera señal, gestiona posiciones (live/backtest), y loguea/imprime.
 
+v8.7.x - LiqP Promedio: Modificado PRINT_TICK_LIVE_STATUS para calcular y mostrar
+                        el precio de liquidación promedio ponderado por tamaño para
+                        posiciones lógicas abiertas. Elimina LiqP individual de detalle.
 v8.7.x: Modificada la inicialización para aceptar y pasar base_position_size e initial_slots a PM.
 v8.7.8: Corrige firma de initialize para aceptar initial_real_state.
 v8.5.5: Acepta instance_capital y lo pasa a PM.initialize.
@@ -12,18 +15,16 @@ import traceback
 import pandas as pd
 import numpy as np
 import json
-import sys # Para sys.exit en caso de error crítico de importación
+import sys 
 from typing import Optional, Dict, Any, List
 
 # --- Importaciones Core y Strategy ---
 try:
-    # Importar config desde la raíz y utils desde core
     import config 
     from core import utils
-    # Imports relativos dentro de strategy (asumiendo que este archivo está en core/strategy)
     from . import ta_manager
     from . import signal_generator
-    position_manager = None # Inicializar a None
+    position_manager = None 
     _pm_enabled_in_config = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if _pm_enabled_in_config:
         try:
@@ -64,14 +65,9 @@ _operation_mode = "unknown"
 def initialize(
     operation_mode: str,
     initial_real_state: Optional[Dict[str, Dict[str, Any]]] = None,
-    # instance_capital_override: Optional[float] = None, # Eliminado
-    # Nuevos parámetros para la configuración de posiciones
     base_position_size_usdt: Optional[float] = None,
     initial_max_logical_positions: Optional[int] = None
 ):
-    """
-    Inicializa el procesador, loggers y position manager, pasando la nueva configuración de posiciones.
-    """
     global _previous_raw_event_price, _is_first_event, _operation_mode
     global position_manager 
 
@@ -88,12 +84,10 @@ def initialize(
         except Exception as e: print(f"ERROR [Event Proc]: Inicializando signal_logger: {e}")
     elif getattr(config, 'LOG_SIGNAL_OUTPUT', False) and not signal_logger: print("WARN [Event Proc]: LOG_SIGNAL_OUTPUT=True pero signal_logger no disponible.")
 
-    # --- Inicializar Position Manager ---
     pm_enabled = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if pm_enabled:
         if position_manager and hasattr(position_manager, 'initialize'):
              try:
-                 # Preparar mensaje de debug con los nuevos parámetros
                  debug_msg_pm_init = (
                      f"DEBUG [EP Init]: Llamando a position_manager.initialize -> "
                      f"mode='{operation_mode}', "
@@ -103,11 +97,9 @@ def initialize(
                  )
                  print(debug_msg_pm_init)
                  
-                 # Pasar los nuevos parámetros a PM initialize
                  position_manager.initialize(
                      operation_mode=operation_mode,
                      initial_real_state=initial_real_state,
-                     # instance_capital_override ya no se pasa
                      base_position_size_usdt_param=base_position_size_usdt,
                      initial_max_logical_positions_param=initial_max_logical_positions
                  )
@@ -129,12 +121,6 @@ def initialize(
 
 # --- Procesamiento Principal de Evento ---
 def process_event(intermediate_ticks_info: list, final_price_info: dict):
-    """
-    Función principal: TA -> Señal -> Gestión Posiciones (Live/BT) -> Log/Print -> Incr Cooldown.
-    (El cuerpo de esta función se mantiene igual que la versión anterior que me proporcionaste,
-     ya que los cambios de lógica de capital afectan la inicialización y cómo PM decide
-     el tamaño de la posición, no cómo EP procesa el tick en sí).
-    """
     global _previous_raw_event_price, _is_first_event
     global position_manager
 
@@ -228,70 +214,94 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             if pm_enabled_runtime and position_manager and pm_initialized_runtime_print and hasattr(position_manager, 'get_position_summary'):
                 summary = position_manager.get_position_summary()
                 if summary and 'error' not in summary:
-                    max_p = summary.get('max_logical_positions',0); lc = summary.get('open_long_positions_count', 0); sc = summary.get('open_short_positions_count', 0); al = summary.get('available_long_margin', 0.0); ul = summary.get('used_long_margin_logical', 0.0); as_val = summary.get('available_short_margin', 0.0); us_val = summary.get('used_short_margin_logical', 0.0); pb = summary.get('profit_balance', 0.0); pnl_l = summary.get('total_realized_pnl_long', 0.0); pnl_s = summary.get('total_realized_pnl_short', 0.0); tf = summary.get('total_transferred_profit', 0.0);
-                    print(f"    Longs: {lc}/{max_p} Shorts: {sc}/{max_p}"); print(f"    Margen Disp(L): {al:<15.4f} Usado(L): {ul:<15.4f}"); print(f"    Margen Disp(S): {as_val:<15.4f} Usado(S): {us_val:<15.4f}"); print(f"    Balance Profit: {pb:<15.4f} PNL Neto(L): {pnl_l:<+15.4f}"); print(f"    Transferido:    {tf:<15.4f} PNL Neto(S): {pnl_s:<+15.4f}");
+                    max_p = summary.get('max_logical_positions',0)
+                    lc = summary.get('open_long_positions_count', 0)
+                    sc = summary.get('open_short_positions_count', 0)
+                    al = summary.get('bm_available_long_margin', 0.0) 
+                    ul = summary.get('bm_used_long_margin', 0.0)       
+                    as_val = summary.get('bm_available_short_margin', 0.0) 
+                    us_val = summary.get('bm_used_short_margin', 0.0)      
+                    pb = summary.get('bm_profit_balance', 0.0)             
+                    pnl_l = summary.get('total_realized_pnl_long', 0.0)
+                    pnl_s = summary.get('total_realized_pnl_short', 0.0)
+                    tf = summary.get('total_transferred_profit', 0.0)
+
+                    print(f"    Longs: {lc}/{max_p} Shorts: {sc}/{max_p}")
+                    print(f"    Margen Disp(L): {al:<15.4f} Usado(L): {ul:<15.4f}")
+                    print(f"    Margen Disp(S): {as_val:<15.4f} Usado(S): {us_val:<15.4f}")
+                    print(f"    Balance Profit: {pb:<15.4f} PNL Neto(L): {pnl_l:<+15.4f}")
+                    print(f"    Transferido:    {tf:<15.4f} PNL Neto(S): {pnl_s:<+15.4f}")
                     
                     liq_price_fmt_str = f".{config.PRICE_PRECISION}f" if hasattr(config, 'PRICE_PRECISION') else ".2f"
                     qty_fmt_str = f".{config.DEFAULT_QTY_PRECISION}f" if hasattr(config, 'DEFAULT_QTY_PRECISION') else ".3f"
 
-                    # --- Para LONGS ---
+                    # <<<<<<< INICIO MODIFICACIÓN PARA AVG LIQP >>>>>>>
+                    # --- Para Avg LiqP Long ---
                     open_longs = summary.get('open_long_positions', [])
                     avg_liq_price_long_str = "N/A"
                     if lc > 0 and open_longs:
-                        pos_details = []
                         total_liq_price_weighted_sum_long = 0.0
                         total_size_long = 0.0
-                        valid_liq_prices_long = 0
+                        for p in open_longs:
+                            liq_p_val = utils.safe_float_convert(p.get('est_liq_price')) # 'est_liq_price' es la clave
+                            pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
+                            if pd.notna(liq_p_val) and pd.notna(pos_size_val) and pos_size_val > 0:
+                                total_liq_price_weighted_sum_long += liq_p_val * pos_size_val
+                                total_size_long += pos_size_val
+                        if total_size_long > 0:
+                            avg_liq_price_long = total_liq_price_weighted_sum_long / total_size_long
+                            avg_liq_price_long_str = f"{avg_liq_price_long:{liq_price_fmt_str}}"
+                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_longs):
+                            avg_liq_price_long_str = "Error Promedio (Tamaño 0 con LiqP)" # Si hay LiqP pero tamaño total es 0
+                    print(f"    Avg LiqP Long : {avg_liq_price_long_str}")
+
+                    # --- Para Avg LiqP Short ---
+                    open_shorts = summary.get('open_short_positions', [])
+                    avg_liq_price_short_str = "N/A"
+                    if sc > 0 and open_shorts:
+                        total_liq_price_weighted_sum_short = 0.0
+                        total_size_short = 0.0
+                        for p_short in open_shorts:
+                            liq_p_val_s = utils.safe_float_convert(p_short.get('est_liq_price')) # 'est_liq_price' es la clave
+                            pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
+                            if pd.notna(liq_p_val_s) and pd.notna(pos_size_val_s) and pos_size_val_s > 0:
+                                total_liq_price_weighted_sum_short += liq_p_val_s * pos_size_val_s
+                                total_size_short += pos_size_val_s
+                        if total_size_short > 0:
+                            avg_liq_price_short = total_liq_price_weighted_sum_short / total_size_short
+                            avg_liq_price_short_str = f"{avg_liq_price_short:{liq_price_fmt_str}}"
+                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_shorts):
+                             avg_liq_price_short_str = "Error Promedio (Tamaño 0 con LiqP)"
+                    print(f"    Avg LiqP Short: {avg_liq_price_short_str}")
+                    # <<<<<<< FIN MODIFICACIÓN PARA AVG LIQP >>>>>>>
+
+                    # --- Detalles de posiciones individuales (SIN LiqP individual) ---
+                    if lc > 0 and open_longs:
+                        pos_details = []
                         for p in open_longs:
                             pos_id_short = "..." + str(p.get('id', 'N/A'))[-6:]
                             entry_p_val = utils.safe_float_convert(p.get('entry_price'))
                             entry_p_str = f"{entry_p_val:{liq_price_fmt_str}}" if pd.notna(entry_p_val) else "N/A"
-                            liq_p_val = utils.safe_float_convert(p.get('liq_price'))
-                            liq_p_str = f"{liq_p_val:{liq_price_fmt_str}}" if pd.notna(liq_p_val) else "N/A"
                             pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
                             size_str_print = f"{pos_size_val:{qty_fmt_str}}" if pd.notna(pos_size_val) else "N/A"
-                            pos_details.append(f"ID:{pos_id_short}(Ent:{entry_p_str} LiqP:{liq_p_str} Sz:{size_str_print})")
-                            if pd.notna(liq_p_val) and pd.notna(pos_size_val) and pos_size_val > 0:
-                                total_liq_price_weighted_sum_long += liq_p_val * pos_size_val
-                                total_size_long += pos_size_val
-                                valid_liq_prices_long += 1
+                            pos_details.append(f"ID:{pos_id_short}(Ent:{entry_p_str} Sz:{size_str_print})")
                         print(f"    Open Longs Det: {', '.join(pos_details)}")
-                        if total_size_long > 0:
-                            avg_liq_price_long = total_liq_price_weighted_sum_long / total_size_long
-                            avg_liq_price_long_str = f"{avg_liq_price_long:{liq_price_fmt_str}}"
-                        elif valid_liq_prices_long > 0: avg_liq_price_long_str = "Error Promedio (Tamaño 0)"
-                    elif lc > 0: print(f"    Open Longs    : {lc} (Detalles no disponibles)")
-                    print(f"    Avg LiqP Long : {avg_liq_price_long_str}")
+                    elif lc > 0: 
+                        print(f"    Open Longs    : {lc} (Detalles no disponibles en summary)")
 
-                    # --- Para SHORTS ---
-                    open_shorts = summary.get('open_short_positions', [])
-                    avg_liq_price_short_str = "N/A"
                     if sc > 0 and open_shorts:
                         pos_details_short = []
-                        total_liq_price_weighted_sum_short = 0.0
-                        total_size_short = 0.0
-                        valid_liq_prices_short = 0
                         for p_short in open_shorts:
                             pos_id_short_s = "..." + str(p_short.get('id', 'N/A'))[-6:]
                             entry_p_val_s = utils.safe_float_convert(p_short.get('entry_price'))
                             entry_p_str_s = f"{entry_p_val_s:{liq_price_fmt_str}}" if pd.notna(entry_p_val_s) else "N/A"
-                            liq_p_val_s = utils.safe_float_convert(p_short.get('liq_price'))
-                            liq_p_str_s = f"{liq_p_val_s:{liq_price_fmt_str}}" if pd.notna(liq_p_val_s) else "N/A"
                             pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
                             size_str_print_s = f"{pos_size_val_s:{qty_fmt_str}}" if pd.notna(pos_size_val_s) else "N/A"
-                            pos_details_short.append(f"ID:{pos_id_short_s}(Ent:{entry_p_str_s} LiqP:{liq_p_str_s} Sz:{size_str_print_s})")
-                            if pd.notna(liq_p_val_s) and pd.notna(pos_size_val_s) and pos_size_val_s > 0:
-                                total_liq_price_weighted_sum_short += liq_p_val_s * pos_size_val_s
-                                total_size_short += pos_size_val_s
-                                valid_liq_prices_short +=1
+                            pos_details_short.append(f"ID:{pos_id_short_s}(Ent:{entry_p_str_s} Sz:{size_str_print_s})")
                         print(f"    Open Shorts Det: {', '.join(pos_details_short)}")
-                        if total_size_short > 0:
-                            avg_liq_price_short = total_liq_price_weighted_sum_short / total_size_short
-                            avg_liq_price_short_str = f"{avg_liq_price_short:{liq_price_fmt_str}}"
-                        elif valid_liq_prices_short > 0 : avg_liq_price_short_str = "Error Promedio (Tamaño 0)"
-                    elif sc > 0: print(f"    Open Shorts   : {sc} (Detalles no disponibles)")
-                    print(f"    Avg LiqP Short: {avg_liq_price_short_str}")
-
+                    elif sc > 0: 
+                        print(f"    Open Shorts   : {sc} (Detalles no disponibles en summary)")
+                
                 elif summary and 'error' in summary: print(f"    Error resumen PM: {summary.get('error', 'N/A')}")
                 else: print(f"    Error resumen PM (Respuesta inválida).")
             elif pm_enabled_runtime and position_manager and not pm_initialized_runtime_print: print("    (PM no inicializado)")
@@ -299,4 +309,4 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             print("=" * len(hdr))
         except Exception as e_print: print(f"ERROR [Print Tick Status]: {e_print}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/event_processor.py (v8.7.x - Nueva Lógica Capital) ===============
+# =============== FIN ARCHIVO: core/strategy/event_processor.py (v8.7.x - LiqP Promedio Ponderado) ===============

@@ -1,9 +1,11 @@
-# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v1.6.1 - Adaptación a Reinversión Neta y Transferencia Lógica) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v1.6.2 - LiqP Individual en Apertura) ===============
 """
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución
 para abrir y cerrar posiciones, interactuando con la API (live) o simulando
 (backtest), y gestionando el estado interno (balance, lógico, físico).
 
+v1.6.2: Modificado execute_open para calcular y almacenar 'est_liq_price'
+        individual para cada nueva posición lógica.
 v1.6.1: Adapta execute_close para usar nuevas claves de reinversión/transferencia de PNL Neto.
         Clarifica responsabilidad de execute_transfer sobre actualización de balances lógicos.
 v1.5: Añade lógica de reintento a execute_transfer para modo Live y corrección para manejo de None en sync_physical_state.
@@ -22,8 +24,8 @@ from typing import Optional, Dict, Any, Tuple
 # --- Dependencias (inyectadas a través de __init__) ---
 # Se usarán type hints con Any para flexibilidad
 
-MAX_TRANSFER_RETRIES = 2 
-TRANSFER_RETRY_DELAY = 5 
+MAX_TRANSFER_RETRIES = 2
+TRANSFER_RETRY_DELAY = 5
 
 class PositionExecutor:
     """
@@ -75,13 +77,13 @@ class PositionExecutor:
 
         size_contracts_final_float = 0.0; margin_used_final = 0.0; qty_precision_used = self._qty_prec
         try:
-            if size_contracts_str_api is None: 
+            if size_contracts_str_api is None:
                 if not isinstance(margin_to_use, (int, float)) or margin_to_use <= 1e-6: result['message'] = f"Margen a usar inválido ({margin_to_use})."; print(f"ERROR [Exec Open]: {result['message']}"); return result
                 margin_used_final = margin_to_use; print(f"  Calculando tamaño desde Margen: {margin_used_final:.4f} USDT")
                 calc_qty_result = self._position_helpers.calculate_and_round_quantity(margin_usdt=margin_used_final, entry_price=entry_price, leverage=self._leverage, symbol=self._symbol, is_live=self._is_live_mode)
                 if not calc_qty_result['success']: result['message'] = calc_qty_result['error']; print(f"ERROR [Exec Open]: {result['message']}"); return result
                 size_contracts_final_float = calc_qty_result['qty_float']; size_contracts_str_api = calc_qty_result['qty_str']; qty_precision_used = calc_qty_result['precision']
-            else: 
+            else:
                 print(f"  Usando tamaño pre-calculado: {size_contracts_str_api}")
                 size_contracts_final_float = self._utils.safe_float_convert(size_contracts_str_api, 0.0)
                 if size_contracts_final_float <= 1e-12: result['message'] = f"Tamaño provisto inválido ({size_contracts_str_api})."; print(f"ERROR [Exec Open]: {result['message']}"); return result
@@ -91,7 +93,28 @@ class PositionExecutor:
         except Exception as e: result['message'] = f"Excepción calculando tamaño/margen: {e}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); return result
 
         logical_position_id = str(uuid.uuid4()); tp_price = self._position_calculations.calculate_take_profit(side, entry_price)
-        new_position_data = {'id': logical_position_id, 'entry_timestamp': timestamp, 'entry_price': entry_price, 'margin_usdt': margin_used_final, 'size_contracts': size_contracts_final_float, 'leverage': self._leverage, 'take_profit_price': tp_price, 'api_order_id': None, 'api_avg_fill_price': None, 'api_filled_qty': None}
+        
+        # <<<<<<< INICIO MODIFICACIÓN: Calcular y añadir est_liq_price individual >>>>>>>
+        est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
+            side=side,
+            avg_entry_price=entry_price, # Usar el precio de entrada de esta posición lógica
+            leverage=self._leverage
+        )
+        # <<<<<<< FIN MODIFICACIÓN >>>>>>>
+
+        new_position_data = {
+            'id': logical_position_id, 
+            'entry_timestamp': timestamp, 
+            'entry_price': entry_price, 
+            'margin_usdt': margin_used_final, 
+            'size_contracts': size_contracts_final_float, 
+            'leverage': self._leverage, 
+            'take_profit_price': tp_price,
+            'est_liq_price': est_liq_price_individual, # <<<<<<< AÑADIDO >>>>>>>
+            'api_order_id': None, 
+            'api_avg_fill_price': None, 
+            'api_filled_qty': None
+        }
         result['logical_position_id'] = logical_position_id
 
         execution_success = False; api_order_id = None
@@ -101,17 +124,17 @@ class PositionExecutor:
                 if not self._live_operations: raise RuntimeError("Live Operations no disponible")
                 target_account = getattr(self._config, 'ACCOUNT_LONGS' if side == 'long' else 'ACCOUNT_SHORTS', None); main_account = getattr(self._config, 'ACCOUNT_MAIN', 'main'); account_to_use = target_account if target_account and target_account in self._live_manager.get_initialized_accounts() else main_account
                 if account_to_use not in self._live_manager.get_initialized_accounts(): raise RuntimeError(f"Cuenta operativa '{account_to_use}' no inicializada.")
-                order_side = "Buy" if side == 'long' else "Sell"; pos_idx = 1 if side == 'long' else 2
-                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=order_side, quantity=size_contracts_str_api, reduce_only=False, position_idx=pos_idx, account_name=account_to_use)
+                order_side_api = "Buy" if side == 'long' else "Sell"; pos_idx = 1 if side == 'long' else 2
+                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=order_side_api, quantity=size_contracts_str_api, reduce_only=False, position_idx=pos_idx, account_name=account_to_use)
                 if api_response and api_response.get('retCode') == 0:
-                    execution_success = True; api_order_id = api_response.get('result', {}).get('orderId', 'N/A'); print(f"  -> ÉXITO API: Orden Market {order_side} aceptada. OrderID: {api_order_id}")
+                    execution_success = True; api_order_id = api_response.get('result', {}).get('orderId', 'N/A'); print(f"  -> ÉXITO API: Orden Market {order_side_api} aceptada. OrderID: {api_order_id}")
                 else:
-                    ret_code = api_response.get('retCode', -1) if api_response else -1; ret_msg = api_response.get('retMsg', 'N/A') if api_response else 'N/A'; result['message'] = f"Fallo API orden Market {order_side}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
+                    ret_code = api_response.get('retCode', -1) if api_response else -1; ret_msg = api_response.get('retMsg', 'N/A') if api_response else 'N/A'; result['message'] = f"Fallo API orden Market {order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
             else: # Backtest
                 print(f"  Ejecutando Apertura BACKTEST (Simulada)..."); execution_success = True; api_order_id = None; print(f"  -> ÉXITO Simulado.")
             if execution_success:
-                self._balance_manager.decrease_operational_margin(side, margin_used_final)
-                print(f"  Balance Manager: Margen {side.upper()} disminuido en {margin_used_final:.4f}.")
+                self._balance_manager.decrease_operational_margin(side, margin_used_final) # Esto ahora aumenta el "used_margin"
+                # El mensaje de BM ya es suficientemente descriptivo, no es necesario repetir aquí
         except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); execution_success = False
 
         add_ok = False; sync_ok = not self._is_live_mode; updated_pos_details = None
@@ -125,22 +148,41 @@ class PositionExecutor:
                 if self._is_live_mode and api_order_id and api_order_id != 'N/A':
                     print(f"\n  --- SYNC PRECIO/QTY POST-APERTURA ---"); print(f"    Esperando {self._post_order_delay}s..."); time.sleep(self._post_order_delay)
                     sync_ok = self._position_state.sync_new_logical_entry_price(side, logical_position_id, api_order_id)
-                    if sync_ok: print(f"    Sincronización de precio/tamaño OK para pos ...{logical_position_id[-6:]}.")
-                    else: print(f"WARN [Exec Open]: Falló sync post-apertura para pos ...{logical_position_id[-6:]}. Usando datos estimados!")
+                    if sync_ok: 
+                        print(f"    Sincronización de precio/tamaño OK para pos ...{logical_position_id[-6:]}.")
+                        # Si la sync fue OK, los datos en PositionState (y por ende en new_position_data si se re-obtuviera) estarían actualizados.
+                        # Recalcular LiqP con datos sincronizados si es posible
+                        updated_pos_after_sync = self._position_state.get_position_by_id(side, logical_position_id)
+                        if updated_pos_after_sync:
+                            new_entry_price_synced = updated_pos_after_sync.get('entry_price', entry_price)
+                            est_liq_price_individual_synced = self._position_calculations.calculate_liquidation_price(
+                                side=side,
+                                avg_entry_price=new_entry_price_synced,
+                                leverage=self._leverage
+                            )
+                            if est_liq_price_individual_synced is not None:
+                                self._position_state.update_logical_position_details(side, logical_position_id, {'est_liq_price': est_liq_price_individual_synced})
+                                print(f"    Precio Liq. Estimado Individual Actualizado para ...{logical_position_id[-6:]}: {est_liq_price_individual_synced:.{self._price_prec}f}")
+                    else: 
+                        print(f"WARN [Exec Open]: Falló sync post-apertura para pos ...{logical_position_id[-6:]}. Usando datos estimados!")
+                    
                     if self._print_updates:
-                        if sync_ok: updated_pos_details = self._position_state.get_position_by_id(side, logical_position_id) # Pasando 'side'
+                        if sync_ok: updated_pos_details = self._position_state.get_position_by_id(side, logical_position_id)
                         if updated_pos_details: print(f"      > Px Entrada Real: {updated_pos_details.get('entry_price', 0.0):.{self._price_prec}f}, Tamaño Real: {updated_pos_details.get('size_contracts', 0.0):.{qty_precision_used}f}")
                         else: print("      (WARN: No se pudieron leer detalles actualizados)")
                         print("\n  --- ESTADO POST-SYNC PRECIO/QTY ---"); self._position_state.display_logical_table(side); print("  " + "-"*60)
+                
                 print(f"  Actualizando estado físico agregado...")
                 open_positions_now = self._position_state.get_open_logical_positions(side)
                 aggregates = self._position_calculations.calculate_physical_aggregates(open_positions_now)
-                liq_price = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
+                # El LiqP para el estado físico agregado se calcula sobre el precio promedio de todas las posiciones lógicas abiertas
+                # Esto es diferente del est_liq_price individual de cada posición lógica.
+                liq_price_aggregate = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
                 ts_for_phys_update = timestamp
-                if self._is_live_mode and sync_ok and updated_pos_details:
+                if self._is_live_mode and sync_ok and updated_pos_details: # updated_pos_details se refiere a la última pos abierta
                     updated_ts = updated_pos_details.get('entry_timestamp')
                     if isinstance(updated_ts, datetime.datetime): ts_for_phys_update = updated_ts
-                self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price, ts_for_phys_update)
+                self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price_aggregate, ts_for_phys_update)
                 print(f"  -> Estado físico agregado {side.upper()} recalculado.")
             except Exception as state_err: result['message'] = f"Ejecución OK pero falló post-proceso: {state_err}"; print(f"ERROR SEVERE [Exec Open]: {result['message']}"); traceback.print_exc(); result['success'] = False; return result
 
@@ -202,14 +244,14 @@ class PositionExecutor:
                 if not self._live_operations: raise RuntimeError("Live Operations no disponible")
                 target_account = getattr(self._config, 'ACCOUNT_LONGS' if side == 'long' else 'ACCOUNT_SHORTS', None); main_account = getattr(self._config, 'ACCOUNT_MAIN', 'main'); account_to_use = target_account if target_account and target_account in self._live_manager.get_initialized_accounts() else main_account
                 if account_to_use not in self._live_manager.get_initialized_accounts(): raise RuntimeError(f"Cuenta operativa '{account_to_use}' no inicializada.")
-                close_order_side = "Sell" if side == 'long' else "Buy"; pos_idx = 1 if side == 'long' else 2
-                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=close_order_side, quantity=size_contracts_str_api, reduce_only=True, position_idx=pos_idx, account_name=account_to_use)
+                close_order_side_api = "Sell" if side == 'long' else "Buy"; pos_idx = 1 if side == 'long' else 2
+                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=close_order_side_api, quantity=size_contracts_str_api, reduce_only=True, position_idx=pos_idx, account_name=account_to_use)
                 if api_response and api_response.get('retCode') == 0:
-                    execution_success = True; api_order_id_close = api_response.get('result', {}).get('orderId', 'N/A'); print(f"  -> ÉXITO API: Orden Cierre Market {close_order_side} aceptada. OrderID: {api_order_id_close}")
+                    execution_success = True; api_order_id_close = api_response.get('result', {}).get('orderId', 'N/A'); print(f"  -> ÉXITO API: Orden Cierre Market {close_order_side_api} aceptada. OrderID: {api_order_id_close}")
                 else:
                     if api_response: ret_code = api_response.get('retCode', -1); ret_msg = api_response.get('retMsg', 'N/A')
                     else: ret_code = -1; ret_msg = 'No API Response'
-                    result['message'] = f"Fallo API orden Cierre Market {close_order_side}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
+                    result['message'] = f"Fallo API orden Cierre Market {close_order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
                     if ret_code == 110001: execution_success = True; print("  WARN [Exec Close]: Orden/Posición no encontrada (110001). Permitiendo limpieza lógica.")
             else: # Backtest
                 print(f"  Ejecutando Cierre BACKTEST (Simulado)..."); execution_success = True; api_order_id_close = None; print(f"  -> ÉXITO Simulado.")
@@ -233,7 +275,6 @@ class PositionExecutor:
                 else:
                     result['message'] = f"Ejecución OK pero falló remover pos lógica idx {position_index} (ID: ...{pos_id_for_log[-6:]})."; print(f"ERROR SEVERE [Exec Close]: {result['message']}"); result['success'] = False; return result
 
-                # <<< USAR NUEVAS CLAVES DE position_calculations >>>
                 calc_results = self._position_calculations.calculate_pnl_commission_reinvestment(side, entry_price_for_calc, exit_price, size_contracts_for_calc)
                 pnl_gross_usdt = calc_results['pnl_gross_usdt']
                 commission_usdt = calc_results['commission_usdt']
@@ -247,16 +288,12 @@ class PositionExecutor:
                 print(f"  Cálculos PNL: Neto={pnl_net_usdt:+.{self._pnl_prec}f}, Reinv Op.Margin={amount_reinvested_op_margin:.{self._pnl_prec}f}, Transf. Profit={amount_transferable_profit:.{self._pnl_prec}f}")
 
                 if remove_ok and removed_pos_data: 
-                    margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin # Margen inicial + PNL Neto reinvertido
-                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op)
-                    print(f"  Balance Manager: Margen {side.upper()} aumentado en {margin_to_return_to_op:.4f}.")
+                    margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin 
+                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op) # Esto ahora disminuye el "used_margin"
+                    # El print de BM ya es descriptivo
                 elif remove_ok and ret_code == 110001:
                      print("  Balance Manager: No se modifica margen operativo (posición no encontrada).")
                 
-                # El amount_transferable_to_profit se pasará a execute_transfer o simulate_profit_transfer
-                # desde PositionManager, que es quien orquesta la transferencia.
-                # Aquí, solo lo guardamos en el resultado para que PM lo use.
-
                 print(f"  Actualizando estado físico agregado post-remoción...")
                 open_positions_now = self._position_state.get_open_logical_positions(side);
                 if open_positions_now:
@@ -276,8 +313,8 @@ class PositionExecutor:
                     "size_contracts": size_contracts_for_calc, "margin_usdt": initial_margin_for_calc, 
                     "leverage": leverage_for_calc, "pnl_gross_usdt": pnl_gross_usdt, 
                     "commission_usdt": commission_usdt, "pnl_net_usdt": pnl_net_usdt, 
-                    "reinvest_usdt": amount_reinvested_op_margin, # Clave actualizada
-                    "transfer_usdt": amount_transferable_profit,  # Clave actualizada
+                    "reinvest_usdt": amount_reinvested_op_margin, 
+                    "transfer_usdt": amount_transferable_profit,  
                     "api_close_order_id": api_order_id_close, 
                     "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg
                 }
@@ -305,22 +342,12 @@ class PositionExecutor:
         return result
 
     def execute_transfer(self, amount: float, from_account_side: str) -> float:
-        """
-        Ejecuta la transferencia de profit usando la API (con reintentos) o simulación.
-        Devuelve el monto transferido (0.0 si falla).
-        NOTA: Esta función solo realiza la operación API/simulación. La actualización
-        de los balances lógicos en BalanceManager (deducir del margen operativo,
-        acreditar a profit_balance) debe ser manejada por el llamador (PositionManager)
-        después de una transferencia API exitosa, o dentro de simulate_profit_transfer 
-        de BalanceManager para Backtest (que ya está corregido).
-        """
         print(f"DEBUG [Exec Transfer]: Solicitando transferencia API/Sim de {amount:.4f} desde {from_account_side.upper()}")
         transferred_amount_api_or_sim = 0.0
         if amount <= 1e-9: print("  INFO [Exec Transfer]: Monto <= 0, omitida."); return 0.0
 
         try:
             if self._is_live_mode:
-                # ... (lógica de reintentos para API call se mantiene igual) ...
                 if not self._live_manager or not self._live_operations or not self._config:
                     print("ERROR [Exec Transfer Live]: live_manager/live_ops/config no disponibles."); return 0.0
                 from_acc_name = getattr(self._config, 'ACCOUNT_LONGS' if from_account_side == 'long' else 'ACCOUNT_SHORTS', None)
@@ -370,7 +397,6 @@ class PositionExecutor:
             else: # Backtest
                 print("  Ejecutando Transferencia BACKTEST (Simulada)...")
                 if not self._balance_manager: print("ERROR [Exec Transfer BT]: balance_manager no disponible."); return 0.0
-                # simulate_profit_transfer en BalanceManager ahora se encarga de ajustar sus propios balances lógicos
                 sim_success = self._balance_manager.simulate_profit_transfer(from_account_side, amount)
                 if sim_success: print(f"  -> ÉXITO Simulación Transfer: {amount:.4f} USDT reflejado en BalanceManager."); transferred_amount_api_or_sim = amount
                 else: print(f"  -> FALLO Simulación Transfer."); transferred_amount_api_or_sim = 0.0
@@ -382,7 +408,6 @@ class PositionExecutor:
 
 
     def sync_physical_state(self, side: str):
-        # (Esta función se mantiene igual)
         if not self._is_live_mode: print("WARN [Sync State]: Solo aplicable en modo Live."); return
         if not all([self._position_state, self._live_operations, self._config, self._utils, self._position_helpers, self._live_manager]): print("WARN [Sync State]: Faltan dependencias."); return
         print(f"  ... Sincronizando estado físico {side.upper()} con API ...")
@@ -411,4 +436,4 @@ class PositionExecutor:
             print(f"    -------------------------------------------------")
         except Exception as sync_err: print(f"    ERROR SYNC: Excepción durante sincronización {side.upper()}: {sync_err}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/position_executor.py (v1.6.1 - Adaptación a Reinversión Neta y Transferencia Lógica) ===============
+# =============== FIN ARCHIVO: core/strategy/position_executor.py (v1.6.2 - LiqP Individual en Apertura) ===============

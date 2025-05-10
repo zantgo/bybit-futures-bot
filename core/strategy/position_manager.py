@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/position_manager.py (Modificado según instrucciones) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_manager.py (Modificado según instrucciones + Chequeo WalletBalance) ===============
 """
 Fachada Pública y Contenedor de Estado para Position Manager.
 Orquesta el ciclo de vida de las posiciones delegando la ejecución
@@ -12,6 +12,7 @@ v8.7.x: Implementa lógica de tamaño base de posición dinámico y gestión de 
 v8.7.7 - Corregido v5: Elimina argumento inesperado 'is_manual_open'/'is_manual_close'.
 Modificado: Lógica de "Tamaño Dinámico por Slot" y advertencias al usuario.
             Integrada llamada a BM para actualizar márgenes operativos con cambio de slots.
+Modificado: can_open_new_position ahora usa walletBalance del USDT para chequeo de margen real.
 """
 import datetime
 import uuid
@@ -133,8 +134,7 @@ def initialize(
         _initial_base_position_size_usdt = base_position_size_usdt_param if base_position_size_usdt_param is not None and base_position_size_usdt_param > 0 else default_base_size_cfg
         _max_logical_positions = initial_max_logical_positions_param if initial_max_logical_positions_param is not None and initial_max_logical_positions_param >= 1 else default_slots_cfg
         
-        _current_dynamic_base_size_long = _initial_base_position_size_usdt
-        _current_dynamic_base_size_short = _initial_base_position_size_usdt
+        # _current_dynamic_base_size_long y _short se calculan DESPUÉS de BM init
 
         print(f"  Config PM: ModoOp={_trading_mode}, Lev={_leverage:.1f}x")
         print(f"  Config PM: Tamaño Base Inicial por Posición (Sesión): {_initial_base_position_size_usdt:.4f} USDT")
@@ -185,29 +185,27 @@ def initialize(
     except Exception as init_e_bm: print(f"ERROR CRITICO [PM Init Facade]: Fallo inicializando BM: {init_e_bm}"); traceback.print_exc(); return
 
     # Recalcular _current_dynamic_base_size_long y _current_dynamic_base_size_short
-    # DESPUÉS de balance_manager.initialize(...) y la configuración de _initial_base_position_size_usdt y _max_logical_positions
-    if _max_logical_positions > 0:
+    # DESPUÉS de balance_manager.initialize(...)
+    if _max_logical_positions > 0 and utils and balance_manager and hasattr(balance_manager, 'get_available_margin'):
         if _trading_mode == "LONG_ONLY" or _trading_mode == "LONG_SHORT":
-            if hasattr(balance_manager, 'get_available_margin'):
-                dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
-                _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, dynamic_long)
-            else: 
-                _current_dynamic_base_size_long = _initial_base_position_size_usdt
-        else: # SHORT_ONLY
-            _current_dynamic_base_size_long = 0.0
+            dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
+            _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, dynamic_long)
+        else: 
+            _current_dynamic_base_size_long = 0.0 
 
         if _trading_mode == "SHORT_ONLY" or _trading_mode == "LONG_SHORT":
-            if hasattr(balance_manager, 'get_available_margin'):
-                dynamic_short = utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0)
-                _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, dynamic_short)
-            else:
-                 _current_dynamic_base_size_short = _initial_base_position_size_usdt
-        else: # LONG_ONLY
+            dynamic_short = utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0)
+            _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, dynamic_short)
+        else: 
             _current_dynamic_base_size_short = 0.0
     else: 
         _current_dynamic_base_size_long = _initial_base_position_size_usdt if _trading_mode != "SHORT_ONLY" else 0.0
         _current_dynamic_base_size_short = _initial_base_position_size_usdt if _trading_mode != "LONG_ONLY" else 0.0
-    
+        if not (utils and balance_manager and hasattr(balance_manager, 'get_available_margin')):
+            print("WARN [PM Init]: No se pudo calcular dinámicamente el tamaño base (faltan utils/BM/get_available_margin), usando _initial_base_position_size_usdt.")
+        elif _max_logical_positions <= 0:
+            print("WARN [PM Init]: _max_logical_positions es <= 0, usando _initial_base_position_size_usdt para tamaño dinámico.")
+
     print(f"  Config PM: Tamaño Base Dinámico Inicial Long : {_current_dynamic_base_size_long:.4f} USDT")
     print(f"  Config PM: Tamaño Base Dinámico Inicial Short: {_current_dynamic_base_size_short:.4f} USDT")
 
@@ -271,37 +269,73 @@ def can_open_new_position(side: str) -> bool:
             return False
 
     ENABLE_PRE_OPEN_SYNC_CHECK = getattr(config, 'POSITION_PRE_OPEN_SYNC_CHECK', True)
+    # <<<<<<< INICIO MODIFICACIÓN CHEQUEO MARGEN REAL >>>>>>>
     if _is_live_mode and live_operations and ENABLE_PRE_OPEN_SYNC_CHECK: 
         symbol = getattr(config, 'TICKER_SYMBOL', None)
         if not symbol: print("WARN [PM Pre-Open Check Facade]: Falta TICKER_SYMBOL."); return False
         if not _live_manager or not hasattr(_live_manager, 'get_initialized_accounts'): print("WARN [PM Pre-Open Check Facade]: Live Manager no disponible."); return False
         if not _position_helpers or not hasattr(_position_helpers, 'extract_physical_state_from_api'): print("WARN [PM Pre-Open Check Facade]: Helpers no disponibles."); return False
-        target_account_name = getattr(config, 'ACCOUNT_LONGS', None) if side == 'long' else getattr(config, 'ACCOUNT_SHORTS', None)
-        main_acc_name = getattr(config, 'ACCOUNT_MAIN', 'main'); initialized_accounts = _live_manager.get_initialized_accounts()
-        account_to_check = target_account_name if target_account_name and target_account_name in initialized_accounts else main_acc_name
-        if account_to_check not in initialized_accounts: print(f"WARN [PM Pre-Open Check Facade]: Cuenta '{account_to_check}' no inicializada. Saltando sync.")
+        
+        target_account_name_cfg = getattr(config, 'ACCOUNT_LONGS', None) if side == 'long' else getattr(config, 'ACCOUNT_SHORTS', None)
+        main_acc_name_cfg = getattr(config, 'ACCOUNT_MAIN', 'main'); 
+        initialized_accounts = _live_manager.get_initialized_accounts()
+        account_to_check = target_account_name_cfg if target_account_name_cfg and target_account_name_cfg in initialized_accounts else main_acc_name_cfg
+        
+        if account_to_check not in initialized_accounts: 
+            print(f"WARN [PM Pre-Open Check Facade]: Cuenta operativa '{account_to_check}' no inicializada. Saltando chequeo sync real.")
         else:
             try:
-                if not hasattr(live_operations, 'get_unified_account_balance_info') or not hasattr(live_operations, 'get_active_position_details_api') or not utils or not hasattr(position_state, 'get_open_logical_positions'):
-                    print("ERROR [PM Pre-Open Check Facade]: Faltan métodos en dependencias."); return False
+                # Validar dependencias para chequeo real
+                if not all([
+                    hasattr(live_operations, 'get_unified_account_balance_info'),
+                    hasattr(live_operations, 'get_active_position_details_api'),
+                    utils, 
+                    hasattr(position_state, 'get_open_logical_positions') 
+                ]):
+                    print("ERROR [PM Pre-Open Check Facade]: Faltan métodos/módulos en dependencias para chequeo real."); return False
                 
-                margin_needed_for_sync_check = _current_dynamic_base_size_long if side == 'long' else _current_dynamic_base_size_short
-                print(f"DEBUG [PM Pre-Open Check]: Verificando margen REAL en '{account_to_check}' para abrir con {margin_needed_for_sync_check:.4f} USDT...")
-                balance_info = live_operations.get_unified_account_balance_info(account_to_check)
-                if balance_info:
-                    real_avail_margin = utils.safe_float_convert(balance_info.get('totalAvailableBalance'), 0.0)
-                    if real_avail_margin < margin_needed_for_sync_check - 1e-6: print(f"WARN [PM Pre-Open Check Facade]: Margen REAL ({real_avail_margin:.4f}) en '{account_to_check}' < nec. ({margin_needed_for_sync_check:.4f}). No abrir {side.upper()}."); return False
-                else: print(f"WARN [PM Pre-Open Check Facade]: No se pudo obtener balance real de '{account_to_check}'. No abrir {side.upper()}."); return False
+                # Chequeo de Margen REAL usando WalletBalance del USDT
+                margin_needed_real_check = _current_dynamic_base_size_long if side == 'long' else _current_dynamic_base_size_short
+                print(f"DEBUG [PM Pre-Open Check]: Verificando margen REAL (USDT WalletBalance) en '{account_to_check}' para abrir con {margin_needed_real_check:.4f} USDT...")
                 
+                balance_info_raw = live_operations.get_unified_account_balance_info(account_to_check)
+                real_usdt_wallet_balance = 0.0
+                
+                if balance_info_raw and isinstance(balance_info_raw.get('coin'), list):
+                    usdt_coin_data = next((c for c in balance_info_raw['coin'] if c.get('coin') == 'USDT'), None)
+                    if usdt_coin_data:
+                        real_usdt_wallet_balance = utils.safe_float_convert(usdt_coin_data.get('walletBalance'), 0.0)
+                        print(f"  DEBUG [PM Pre-Open Check]: USDT WalletBalance específico encontrado: {real_usdt_wallet_balance:.4f}")
+                    else: # Fallback al totalWalletBalance general si no hay desglose de USDT específico
+                        real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
+                        print(f"  DEBUG [PM Pre-Open Check]: Usando TotalWalletBalance (fallback): {real_usdt_wallet_balance:.4f}")
+                elif balance_info_raw: # Si 'coin' no es una lista o falta
+                     real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
+                     print(f"  DEBUG [PM Pre-Open Check]: Usando TotalWalletBalance (fallback, 'coin' no es lista/falta): {real_usdt_wallet_balance:.4f}")
+                else:
+                    print(f"WARN [PM Pre-Open Check Facade]: No se pudo obtener balance real de '{account_to_check}'. No abrir {side.upper()}."); return False
+
+                if real_usdt_wallet_balance < margin_needed_real_check - 1e-6: 
+                    print(f"WARN [PM Pre-Open Check Facade]: Margen REAL (USDT Wallet: {real_usdt_wallet_balance:.4f}) en '{account_to_check}' < nec. ({margin_needed_real_check:.4f}). No abrir {side.upper()}."); 
+                    return False
+                else:
+                    print(f"  DEBUG [PM Pre-Open Check]: Chequeo de USDT WalletBalance OK.")
+
+                # Chequeo de Discrepancia de Tamaño (sin cambios)
+                # open_positions ya se obtuvo al inicio de can_open_new_position
+                # No es necesario volver a llamarlo aquí si la variable sigue en scope y no se ha modificado.
+                # Si se redefinió open_positions más arriba, se debe obtener de nuevo:
+                open_positions_for_size_check = position_state.get_open_logical_positions(side)
+
                 print(f"DEBUG [PM Pre-Open Check]: Verificando discrepancia tamaño en '{account_to_check}'...")
                 physical_pos_raw = live_operations.get_active_position_details_api(symbol, account_to_check)
                 current_physical_state = _position_helpers.extract_physical_state_from_api(physical_pos_raw, symbol, side, utils)
                 current_physical_size = current_physical_state['total_size_contracts'] if current_physical_state else 0.0
-                open_positions_for_size_check = position_state.get_open_logical_positions(side)
                 current_logical_size = sum(utils.safe_float_convert(p.get('size_contracts'), 0.0) for p in open_positions_for_size_check)
                 if abs(current_physical_size - current_logical_size) > 1e-9: print(f"WARN [PM Pre-Open Check Facade]: Discrepancia FÍSICO {side.upper()} ({current_physical_size:.8f}) != LÓGICO ({current_logical_size:.8f}) en '{account_to_check}'. No abrir."); return False
                 else: print(f"DEBUG [PM Pre-Open Check]: Chequeo discrepancia tamaño OK.")
             except Exception as sync_err: print(f"ERROR [PM Pre-Open Check Facade]: Excepción sync {side.upper()} en '{account_to_check}': {sync_err}"); traceback.print_exc(); return False
+    # <<<<<<< FIN MODIFICACIÓN CHEQUEO MARGEN REAL >>>>>>>
     return True
 
 def open_logical_position(side: str, entry_price: float, timestamp: datetime.datetime):
@@ -314,7 +348,7 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
 
     if not can_open_new_position(side): return
 
-    try: # Chequeo de Distancia Mínima
+    try: 
         open_positions = position_state.get_open_logical_positions(side)
         if open_positions:
             last_pos = open_positions[-1]; last_entry_price = utils.safe_float_convert(last_pos.get('entry_price'), 0.0); last_pos_id_short = str(last_pos.get('id', 'N/A'))[-6:]
@@ -333,7 +367,7 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
 
     margin_to_use = _current_dynamic_base_size_long if side == 'long' else _current_dynamic_base_size_short
     
-    try: # Chequeo Margen Mínimo vs Cantidad Mínima
+    try: 
         if _cached_min_order_qty is None or _cached_min_order_qty <= 0: print("WARN [Open Facade]: min_order_qty no disponible. Saltando chequeo margen mín.")
         else:
             min_margin_needed_approx = utils.safe_division( _cached_min_order_qty * entry_price, _leverage, default=float('inf')) * 1.01
@@ -341,7 +375,7 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
             else: print(f"DEBUG [Open {side.upper()} Facade]: Margen base dinámico ({margin_to_use:.4f}) SUF. vs mín. ({min_margin_needed_approx:.4f}).")
     except Exception as e_min_margin_check: print(f"ERROR [Open Facade]: Verificando margen mín. para {side}: {e_min_margin_check}"); traceback.print_exc(); return
 
-    try: # Delegar Ejecución
+    try: 
         print(f"INFO [Open Facade]: Delegando apertura {side.upper()} a Executor (Margen: {margin_to_use:.4f})...")
         result = _executor.execute_open( side=side, entry_price=entry_price, timestamp=timestamp, margin_to_use=margin_to_use )
         if result and result.get('success'):
@@ -399,14 +433,12 @@ def close_logical_position(side: str, position_index: int, exit_price: float, ti
             else: _total_realized_pnl_short += pnl_net_usdt
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False): total_pnl_side = _total_realized_pnl_long if side == 'long' else _total_realized_pnl_short; print(f"  DEBUG [Close Facade]: PNL Neto Cierre: {pnl_net_usdt:+.4f}. Total {side.upper()}: {total_pnl_side:+.4f}")
             
-            # Recalcular el tamaño base dinámico para este lado
-            # Esto se hace DESPUÉS de que _executor.execute_close haya llamado a balance_manager.increase_operational_margin
             if balance_manager and hasattr(balance_manager, 'get_available_margin') and _max_logical_positions > 0 and utils:
                 new_dynamic_base = utils.safe_division(balance_manager.get_available_margin(side), _max_logical_positions, 0.0)
                 if side == 'long':
                     _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, new_dynamic_base)
                     print(f"  DEBUG [PM Close]: Nuevo tamaño base dinámico LONG: {_current_dynamic_base_size_long:.4f} USDT")
-                else: # short
+                else: 
                     _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, new_dynamic_base)
                     print(f"  DEBUG [PM Close]: Nuevo tamaño base dinámico SHORT: {_current_dynamic_base_size_short:.4f} USDT")
             else:
@@ -494,11 +526,9 @@ def get_position_summary() -> dict:
     elif not hasattr(position_state, 'get_used_margin'): summary_error = "Falta get_used_margin en PositionState"
     if summary_error: return {"error": summary_error}
     try:
-        current_balances = balance_manager.get_balances() # Esto ahora devuelve más detalles
+        current_balances = balance_manager.get_balances() 
         phys_long = position_state.get_physical_position_state('long'); phys_short = position_state.get_physical_position_state('short')
         open_longs = position_state.get_open_logical_positions('long'); open_shorts = position_state.get_open_logical_positions('short')
-        # 'get_used_margin' de position_state es el usado por las posiciones lógicas,
-        # mientras que 'used_X_margin' de balance_manager.get_balances() es el total usado en BM. Deberían ser consistentes.
         used_long_logical_ps = position_state.get_used_margin('long'); used_short_logical_ps = position_state.get_used_margin('short')
         
         long_summary_list = [_position_helpers.format_pos_for_summary(p, utils) for p in open_longs]
@@ -513,7 +543,6 @@ def get_position_summary() -> dict:
             "current_dynamic_base_size_long": _current_dynamic_base_size_long,
             "current_dynamic_base_size_short": _current_dynamic_base_size_short,
             
-            # Balances desde BalanceManager
             "bm_available_long_margin": current_balances.get("available_long_margin", 0.0),
             "bm_available_short_margin": current_balances.get("available_short_margin", 0.0),
             "bm_used_long_margin": current_balances.get("used_long_margin", 0.0),
@@ -603,13 +632,12 @@ def manual_close_with_api(side: str, position_index: int, exit_price: float, tim
             msg = f"Posición {side.upper()} (...{str(closed_pos_id)[-6:]}) cerrada manualmente. PNL Neto: {pnl_net_usdt:+.4f}."
             print(f"SUCCESS [Manual Close]: {msg}")
 
-            # Recalcular tamaño base dinámico post-cierre
             if balance_manager and hasattr(balance_manager, 'get_available_margin') and _max_logical_positions > 0 and utils:
                 new_dynamic_base = utils.safe_division(balance_manager.get_available_margin(side), _max_logical_positions, 0.0)
                 if side == 'long':
                     _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, new_dynamic_base)
                     print(f"  DEBUG [PM Manual Close]: Nuevo tamaño base dinámico LONG: {_current_dynamic_base_size_long:.4f} USDT")
-                else: # short
+                else: 
                     _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, new_dynamic_base)
                     print(f"  DEBUG [PM Manual Close]: Nuevo tamaño base dinámico SHORT: {_current_dynamic_base_size_short:.4f} USDT")
             else:
@@ -633,13 +661,11 @@ def add_max_logical_position_slot() -> Tuple[bool, str]:
     if not _initialized: return False, "Error: PM no inicializado."
     _max_logical_positions += 1
     
-    # Notificar a BalanceManager para que actualice sus márgenes operativos totales
     if balance_manager and hasattr(balance_manager, 'update_operational_margins_based_on_slots'):
         balance_manager.update_operational_margins_based_on_slots(_max_logical_positions)
     else:
         print("WARN [PM Add Slot]: BalanceManager no disponible o sin 'update_operational_margins_based_on_slots'. Márgenes operativos en BM no actualizados.")
 
-    # Recalcular _current_dynamic_base_size_long y _current_dynamic_base_size_short en PM
     if balance_manager and hasattr(balance_manager, 'get_available_margin') and _max_logical_positions > 0 and utils:
         if _trading_mode == "LONG_ONLY" or _trading_mode == "LONG_SHORT":
             dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
@@ -674,13 +700,11 @@ def remove_max_logical_position_slot() -> Tuple[bool, str]:
         
         _max_logical_positions -= 1
 
-        # Notificar a BalanceManager para que actualice sus márgenes operativos totales
         if balance_manager and hasattr(balance_manager, 'update_operational_margins_based_on_slots'):
             balance_manager.update_operational_margins_based_on_slots(_max_logical_positions)
         else:
             print("WARN [PM Remove Slot]: BalanceManager no disponible o sin 'update_operational_margins_based_on_slots'. Márgenes operativos en BM no actualizados.")
 
-        # Recalcular _current_dynamic_base_size_long y _current_dynamic_base_size_short en PM
         if balance_manager and hasattr(balance_manager, 'get_available_margin') and _max_logical_positions > 0 and utils:
             if _trading_mode == "LONG_ONLY" or _trading_mode == "LONG_SHORT":
                 dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)

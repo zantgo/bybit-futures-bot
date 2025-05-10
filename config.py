@@ -100,8 +100,8 @@ POSITION_PRE_OPEN_SYNC_CHECK = True         # Chequeo físico antes de abrir en 
 INTERACTIVE_MANUAL_MODE = True # True para habilitar el menú de intervención manual en modo Live
 
 # --- NUEVAS VARIABLES: Filtro de Distancia de Precio Mínima ---
-POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.5 #
-POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.5 #
+POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.05 #
+POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.05 #
 # --- FIN NUEVAS VARIABLES ---
 
 # --- Logical Position Settings (OBSOLETO) ---
