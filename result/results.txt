@@ -1,7 +1,7 @@
 ======================================================================
  Reporte de Ejecución - Bot v8.7.x
- Generado: 2025-05-10 14:59:30
- Modo: LIVE_INTERACTIVE
+ Generado: 2025-05-10 19:17:26
+ Modo: BACKTEST_INTERACTIVE
 ======================================================================
 
 ----------------------------------------------------------------------
@@ -10,10 +10,10 @@
   Símbolo: BTCUSDT
   Gestión de Posiciones: Activada
     Modo Trading: LONG_SHORT
-    Capital Inicial Asignado: 12.00 USDT (total asignado)
-    Apalancamiento: 50.0x
+    Capital Inicial Asignado: 200.00 USDT (total asignado)
+    Apalancamiento: 4.0x
     Max Pos Lógicas (Final): 2 (por lado)
-    TP % (L/S): 5.00% / 5.00%
+    TP % (L/S): 50.00% / 50.00%
     Comisión %: 0.100%
     Reinvertir PNL Operacional %: 1.00%
     Cooldown Señales: Activado
@@ -23,23 +23,33 @@
 ----------------------------------------------------------------------
  Resumen Trades Cerrados
 ----------------------------------------------------------------------
-  No se cerraron trades o no se pudo leer el log.
+  Total Trades Cerrados: 10 (Long: 3, Short: 7)
+  Trades Ganadores:    10 (100.00%) (Long: 3, Short: 7)
+  Trades Perdedores:   0
+  PNL Neto Total:      +9.3135 USDT (Long: +2.5854, Short: +6.7281)
+  Ganancia Promedio:   +0.9313 USDT
+  Pérdida Promedio:    +0.0000 USDT
+  Profit Factor:       inf
 
 ----------------------------------------------------------------------
  Estado Final
 ----------------------------------------------------------------------
-  Margen Operativo Total Final Long:  6.0000 USDT (Balance Manager)
-  Margen Operativo Total Final Short: 6.0000 USDT (Balance Manager)
-  Margen Operativo Disponible Long:   3.0000 USDT
-  Margen Operativo Disponible Short:  6.0000 USDT
-  Margen Total Usado Lógico (L/S):    3.0000 / 0.0000 USDT
-  Balance Cuenta Profit Final:        2.7600 USDT
-  PNL Neto Total Realizado:           +0.0000 USDT
-  Total Transferido a Profit:         0.0000 USDT (Real API)
-  Capital Inicial Total Operativo:    12.00 USDT (Balance Manager (get_initial_total_capital))
-  Capital Final Total (Equity Lóg.):  12.0000 USDT
-  Retorno Sobre Capital Inicial (%):  +0.00%
+  Margen Operativo Total Final Long:  100.0000 USDT (Balance Manager)
+  Margen Operativo Total Final Short: 100.0000 USDT (Balance Manager)
+  Margen Operativo Disponible Long:   0.0000 USDT
+  Margen Operativo Disponible Short:  0.0071 USDT
+  Margen Total Usado Lógico (L/S):    100.0000 / 99.9929 USDT
+  Balance Cuenta Profit Final:        9.2204 USDT
+  PNL Neto Total Realizado:           +9.3135 USDT
+  Total Transferido a Profit:         9.2204 USDT (Simulado)
+  Capital Inicial Total Operativo:    200.00 USDT (Balance Manager (get_initial_total_capital))
+  Capital Final Total (Equity Lóg.):  209.3135 USDT
+  Retorno Sobre Capital Inicial (%):  +4.66%
 
-  Posiciones Abiertas al Final: 1
-    Longs Abiertas (1):
-      - ID: ...df4568, Entry: 103195.4000, Size: 0.001, TP: 103246.9977
+  Posiciones Abiertas al Final: 4
+    Longs Abiertas (2):
+      - ID: ...00abda, Entry: 131.0700, Size: 1.525, TP: 131.7253
+      - ID: ...61799d, Entry: 130.3000, Size: 1.534, TP: 130.9515
+    Shorts Abiertas (2):
+      - ID: ...51ab31, Entry: 127.2100, Size: 1.572, TP: 126.5739
+      - ID: ...00d8c9, Entry: 128.0100, Size: 1.562, TP: 127.3699

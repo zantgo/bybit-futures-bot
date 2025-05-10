@@ -62,15 +62,15 @@ RAW_PRICE_TICK_INTERVAL = 1
 
 # --- Technical Analysis Configuration ---
 TA_WINDOW_SIZE = 300
-TA_EMA_WINDOW = 10 #
-TA_WEIGHTED_INC_WINDOW = 5 #
-TA_WEIGHTED_DEC_WINDOW = 5 #
+TA_EMA_WINDOW = 100 #
+TA_WEIGHTED_INC_WINDOW = 50 #
+TA_WEIGHTED_DEC_WINDOW = 50 #
 TA_CALCULATE_PROCESSED_DATA = True
 
 # --- Signal Generation Configuration ---
 STRATEGY_ENABLED = True
-STRATEGY_MARGIN_BUY = -0.003 #
-STRATEGY_MARGIN_SELL = 0.003 #
+STRATEGY_MARGIN_BUY = -0.3 #
+STRATEGY_MARGIN_SELL = 0.3 #
 STRATEGY_DECREMENT_THRESHOLD = 0.45 #
 STRATEGY_INCREMENT_THRESHOLD = 0.45 #
 
@@ -78,15 +78,13 @@ STRATEGY_INCREMENT_THRESHOLD = 0.45 #
 POSITION_MANAGEMENT_ENABLED = True
 POSITION_TRADING_MODE = "LONG_SHORT"        # Sobrescrito interactivamente
 # ANTERIOR: POSITION_CAPITAL_USDT = 100.0
-POSITION_BASE_SIZE_USDT = 3.0              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
-POSITION_MAX_LOGICAL_POSITIONS = 3          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
-POSITION_LEVERAGE = 50.0 #
-POSITION_TAKE_PROFIT_PCT_LONG = 0.3 #
-POSITION_TAKE_PROFIT_PCT_SHORT = 0.3 #
+POSITION_BASE_SIZE_USDT = 50              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
+POSITION_MAX_LOGICAL_POSITIONS = 2          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
+POSITION_LEVERAGE = 4.0 #
+POSITION_TAKE_PROFIT_PCT_LONG = 0.5 #
+POSITION_TAKE_PROFIT_PCT_SHORT = 0.5 #
 POSITION_COMMISSION_RATE = 0.001
-# <<<<<<< CAMBIO IMPORTANTE AQUÍ >>>>>>>
 POSITION_REINVEST_PROFIT_PCT = 1.0 # Para 1% reinversión en margen operacional y 99% transferible a profit. (Anteriormente 0.01)
-# <<<<<<< FIN CAMBIO IMPORTANTE >>>>>>>
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.1
 POSITION_LOG_CLOSED_POSITIONS = True
 POSITION_PRINT_POSITION_UPDATES = True
@@ -100,8 +98,8 @@ POSITION_PRE_OPEN_SYNC_CHECK = True         # Chequeo físico antes de abrir en 
 INTERACTIVE_MANUAL_MODE = True # True para habilitar el menú de intervención manual en modo Live
 
 # --- NUEVAS VARIABLES: Filtro de Distancia de Precio Mínima ---
-POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.05 #
-POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.05 #
+POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.5 #
+POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.5 #
 # --- FIN NUEVAS VARIABLES ---
 
 # --- Logical Position Settings (OBSOLETO) ---
