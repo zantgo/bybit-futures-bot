@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: live_runner.py (Modificado según instrucciones) ===============
+# =============== INICIO ARCHIVO: live_runner.py (CORREGIDO - Gestión TTY Listener) ===============
 """
 Contiene la lógica para ejecutar el modo Live del bot.
 Adapta la inicialización para usar tamaño base por posición y número inicial de slots.
@@ -9,6 +9,8 @@ v8.7.x - Final: Integra completamente la nueva lógica de capital/slots, menú s
                  y usa consistentemente los módulos pasados como parámetros.
 v8.7.2: Corrige error 'UndefinedVariable' _trading_mode en chequeo API críticas.
 Modificado: Lógica de "Tamaño Dinámico por Slot" y advertencias al usuario en menú.
+CORREGIDO:  Orquestación del hilo Key Listener para detener/restaurar TTY 
+            antes de llamar al menú de intervención manual (input()).
 """
 import time
 import traceback
@@ -57,37 +59,69 @@ _session_base_position_size_usdt: Optional[float] = None
 _session_initial_max_logical_positions: Optional[int] = None
 
 
-# --- Función del Hilo Listener de Teclas ---
+# --- Función del Hilo Listener de Teclas (Modificada para robustez) ---
 def key_listener_thread_func():
     global _key_pressed_event, _manual_intervention_char, _stop_key_listener_thread
     print(f"\n[Key Listener] Hilo iniciado. Presiona '{_manual_intervention_char}' para menú manual, Ctrl+C para salir del bot.")
+    
+    # --- Listener para Windows ---
     if os.name == 'nt':
         while not _stop_key_listener_thread.is_set():
             if msvcrt.kbhit():
                 try:
                     char_bytes = msvcrt.getch()
-                    try: char = char_bytes.decode().lower()
-                    except UnicodeDecodeError: continue 
+                    try: 
+                       char = char_bytes.decode().lower()
+                    except UnicodeDecodeError: 
+                       continue # Ignorar bytes que no decodifican
                     if char == _manual_intervention_char:
                         print(f"\n[Key Listener] Tecla '{_manual_intervention_char}' detectada!")
                         _key_pressed_event.set()
-                except Exception as e_kb: print(f"Error en listener (kbhit/getch): {e_kb}")
-            time.sleep(0.1)
+                except Exception as e_kb: 
+                   print(f"Error en listener (kbhit/getch): {e_kb}")
+            time.sleep(0.1) # Pequeña pausa para no consumir 100% CPU
+            
+    # --- Listener para Linux / macOS (TTY) ---
     else: 
-        old_settings = termios.tcgetattr(sys.stdin)
+        old_settings = None # Inicializar para que exista en el finally
         try:
-            tty.setcbreak(sys.stdin.fileno())
+            # Verificar que stdin sea realmente una TTY
+            if not sys.stdin.isatty():
+                 print("ERROR [Key Listener]: Stdin no es una TTY. Modo interactivo no funcionará.")
+                 return
+                 
+            old_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno()) # Poner en modo Cbreak
+            
+            # Bucle principal del listener
             while not _stop_key_listener_thread.is_set():
-                rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-                if rlist: 
+                # select.select monitoriza si hay datos para leer en stdin
+                rlist, _, _ = select.select([sys.stdin], [], [], 0.1) # Timeout 0.1s
+                if rlist: # Si hay algo para leer
                     try:
                         char = sys.stdin.read(1).lower()
                         if char == _manual_intervention_char:
                             print(f"\n[Key Listener] Tecla '{_manual_intervention_char}' detectada!")
                             _key_pressed_event.set()
-                    except Exception as e_sel: print(f"Error en listener (select/read): {e_sel}")
-        except Exception as e_tty_init: print(f"ERROR [Key Listener]: Configurando tty: {e_tty_init}.")
-        finally: termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                    except Exception as e_sel: 
+                        print(f"Error en listener (select/read): {e_sel}")
+                        
+        except Exception as e_tty_init: # Captura errores de tcgetattr o setcbreak
+            print(f"ERROR [Key Listener]: Configurando TTY o durante el bucle: {e_tty_init}.")
+            traceback.print_exc()
+        finally:
+            # --- Bloque CRÍTICO: Restaurar la configuración de la TTY ---
+            if old_settings: # Solo intentar restaurar si se obtuvieron settings
+                print("[Key Listener] Restaurando configuración original de la terminal...")
+                try:
+                   # TCSADRAIN: Espera a que toda la salida se transmita antes de cambiar
+                   termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                   print("[Key Listener] Configuración de terminal restaurada.")
+                except Exception as e_restore:
+                   print(f"ERROR GRAVE [Key Listener]: Falló la restauración de termios: {e_restore}")
+            # else:
+            #    print("[Key Listener] No hay 'old_settings' para restaurar (¿tcgetattr falló?).")
+                
     print("[Key Listener] Hilo terminado.")
 
 
@@ -108,7 +142,7 @@ def handle_manual_intervention_menu(
     pm_initialized = getattr(position_manager_module, '_initialized', False)
     if not pm_initialized:
         print("ERROR [Manual Menu]: Position Manager no está inicializado."); 
-        if _key_pressed_event: _key_pressed_event.clear(); 
+       # No limpiar aquí el evento, se limpia en el bucle principal
         return
 
     print("\n\n" + "="*30 + " INTERVENCIÓN MANUAL " + "="*30)
@@ -117,7 +151,7 @@ def handle_manual_intervention_menu(
     summary = position_manager_module.get_position_summary()
     if summary.get('error'):
         print(f"ERROR [Manual Menu]: No se pudo obtener resumen PM: {summary['error']}")
-        if _key_pressed_event: _key_pressed_event.clear(); 
+       # No limpiar aquí el evento
         return
         
     current_max_slots = summary.get('max_logical_positions')
@@ -131,6 +165,9 @@ def handle_manual_intervention_menu(
         print("WARN [Manual Menu]: No se pudo obtener el número actual de slots del resumen de PM.")
         current_max_slots = _session_initial_max_logical_positions if _session_initial_max_logical_positions is not None else getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 1)
 
+    # NOTA: input() dentro de esta función AHORA debería funcionar,
+    # porque este handle_manual_intervention_menu() solo se llama
+    # DESPUÉS de que el hilo listener haya terminado y restaurado la TTY.
     choice = menu_module.get_live_manual_intervention_menu(
         current_max_logical_positions=int(current_max_slots), 
         base_position_size_usdt=float(base_size_for_menu_display)    
@@ -138,16 +175,13 @@ def handle_manual_intervention_menu(
 
     if choice == "ADDSLOT":
         print("\n--- Aumentar Slots Máximos ---")
-        # actual_initial_base_size_session es el _session_base_position_size_usdt que se usó para iniciar PM/BM para la sesión
         actual_initial_base_size_session = _session_base_position_size_usdt if _session_base_position_size_usdt is not None else getattr(config_module, 'POSITION_BASE_SIZE_USDT', 10.0)
         
-        # Obtener los tamaños dinámicos actuales desde el summary de PM
         dynamic_long_from_summary = summary.get('current_dynamic_base_size_long', 0.0)
         dynamic_short_from_summary = summary.get('current_dynamic_base_size_short', 0.0)
 
         if isinstance(current_max_slots, int):
             new_potential_slots = current_max_slots + 1
-            # Capital necesario para los nuevos slots, BASADO EN EL TAMAÑO BASE DE SESIÓN
             capital_needed_per_side_new_slots = new_potential_slots * actual_initial_base_size_session
             
             trading_mode_pm = summary.get('trading_mode', getattr(config_module, 'POSITION_TRADING_MODE', 'LONG_SHORT'))
@@ -169,21 +203,27 @@ def handle_manual_intervention_menu(
 
             print(f"  Asegúrese de tener suficiente balance disponible. Esta acción NO transfiere fondos automáticamente.")
             print(f"  El tamaño real por posición se ajustará según el margen disponible y los slots.")
+            
             confirm = input("¿Desea continuar y aumentar los slots? (s/N): ").strip().lower()
+            
             if confirm == 's':
                 success, message = position_manager_module.add_max_logical_position_slot()
                 print(f"Resultado Aumentar Slots: {'Éxito' if success else 'Fallo'} - {message}")
-            else: print("Aumento de slots cancelado.")
+            else: 
+                print("Aumento de slots cancelado.")
         else:
             print("WARN: No se pudo determinar los slots actuales para la advertencia de capital.")
             
     elif choice == "REMOVESLOT":
         success, message = position_manager_module.remove_max_logical_position_slot()
         print(f"Resultado Disminuir Slots: {'Éxito' if success else 'Fallo'} - {message}")
+        
     elif choice == '0':
         print("Volviendo a la operación automática del bot...")
 
-    if _key_pressed_event: _key_pressed_event.clear()
+    # El evento se limpia en el bucle principal, NO aquí.
+    # if _key_pressed_event: _key_pressed_event.clear() 
+    
     print("="*30 + " FIN INTERVENCIÓN MANUAL " + "="*30 + "\n")
 
 
@@ -207,6 +247,7 @@ def run_live_pre_start(
     connection_ticker_module: Optional[Any] = None
     key_listener_hilo: Optional[threading.Thread] = None
 
+    # --- Verificaciones de Dependencias (SIN CAMBIOS) ---
     if not all([config_module, utils_module, menu_module, event_processor_module, ta_manager_module]):
         missing_core = [name for name, mod_val in [('config', config_module), ('utils', utils_module), ('menu', menu_module), ('EP', event_processor_module), ('TA', ta_manager_module)] if not mod_val]
         print(f"ERROR CRITICO [Live Runner]: Faltan módulos core: {missing_core}. Abortando."); return None
@@ -225,6 +266,7 @@ def run_live_pre_start(
     core_initialized: bool = False
     
     try:
+        # --- Bloque Inicialización Conexiones y Cuentas (SIN CAMBIOS) ---
         print("\nInicializando Conexiones y Verificando Configuración Bybit...")
         try: from live.connection import manager as live_manager
         except ImportError: raise RuntimeError("Módulo live.connection.manager no disponible.")
@@ -289,9 +331,11 @@ def run_live_pre_start(
         elif not live_operations_module: print("\nADVERTENCIA: Live Operations no disponible.")
         elif not symbol: print("\nADVERTENCIA: TICKER_SYMBOL no definido.")
 
+        # --- BUCLE PRINCIPAL DE MENÚ PRE-INICIO (SIN CAMBIOS, excepto opción 2) ---
         while True:
             live_choice = menu_module.get_live_main_menu_choice() if menu_module else input("...")
 
+            # --- Opción 1: Ver/Gestionar Cuentas (SIN CAMBIOS) ---
             if live_choice == '1':
                  if not menu_module: print("ERROR: Menu no disponible."); continue
                  while True: 
@@ -341,11 +385,13 @@ def run_live_pre_start(
                             else: print("Opción inválida."); time.sleep(1)
                     elif acc_choice is None: print("Opción de cuenta inválida."); time.sleep(1)
                  continue
-
-            elif live_choice == '2': # Iniciar el Bot
+           
+            # --- Opción 2: Iniciar el Bot (CON CAMBIOS) ---
+            elif live_choice == '2': 
                 print("\n--- Configuración para esta Sesión de Trading ---")
                 if not menu_module: print("ERROR CRITICO: Menu no disponible. Abortando."); continue
                 
+                # --- (Bloque Obtener Configuración Interactiva - SIN CAMBIOS) ---
                 selected_trading_mode_session = menu_module.get_trading_mode_interactively()
                 if selected_trading_mode_session == "CANCEL": print("Inicio del bot cancelado (Modo)."); continue
                 
@@ -363,6 +409,7 @@ def run_live_pre_start(
                 print("-" * 62);
                 print("Confirmando configuración..."); time.sleep(1)
 
+                # --- (Bloque Inicialización Componentes Core - SIN CAMBIOS) ---
                 if not core_initialized:
                     print("\nInicializando Componentes Core (TA, EP, PM, BM, PS)...")
                     try:
@@ -396,6 +443,7 @@ def run_live_pre_start(
                     except Exception as e_init_gen: print(f"ERROR CRITICO inesperado init: {e_init_gen}"); traceback.print_exc(); print("Abortando inicio."); continue
                 else: print("INFO: Componentes Core ya inicializados.")
 
+                # --- (Bloque Chequeo Discrepancias y Set Leverage - SIN CAMBIOS) ---
                 pm_init_status = getattr(position_manager_module, '_initialized', False) if position_manager_module else False
                 if management_enabled and position_manager_module and position_state_module and utils_module and pm_init_status: 
                     print("\nVerificando discrepancias Lógico vs Físico...");
@@ -431,35 +479,87 @@ def run_live_pre_start(
                             else: print("  Apalancamiento configurado.")
                         else: print(f"ERROR [Live Runner]: Ninguna cuenta operativa (main, longs, shorts) inicializada para config. apalancamiento.")
                     else: print("WARN [Live Runner]: Falta TICKER_SYMBOL, no se puede config. apalancamiento.")
-
+                
+                # --- BLOQUE DE INICIO DE TICKER Y BUCLE PRINCIPAL (CON CAMBIOS) ---
                 try:
+                    # Iniciar Ticker (sin cambios)
                     from live.connection import ticker as connection_ticker_module_local
                     connection_ticker_module = connection_ticker_module_local
                     print("Iniciando Ticker Live...");
-                    if not event_processor_module or not hasattr(event_processor_module, 'process_event'): raise RuntimeError("EP sin método process_event.")
+                    if not event_processor_module or not hasattr(event_processor_module, 'process_event'): 
+                        raise RuntimeError("EP sin método process_event.")
                     connection_ticker_module.start_ticker_thread(raw_event_callback=event_processor_module.process_event)
                     print("Ticker iniciado. El bot está operativo.")
                     
+                    # Iniciar Hilo Listener (si aplica)
+                    key_listener_active = False # <<< NUEVA BANDERA
                     if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False):
-                        _stop_key_listener_thread.clear(); _key_pressed_event.clear()
+                        _stop_key_listener_thread.clear() 
+                        _key_pressed_event.clear()
                         key_listener_hilo = threading.Thread(target=key_listener_thread_func, daemon=True)
                         key_listener_hilo.start()
-                    else: print(f"Modo intervención manual ('{_manual_intervention_char}') DESACTIVADO.")
+                        key_listener_active = True # <<< MARCAR COMO ACTIVO
+                    else: 
+                        print(f"Modo intervención manual ('{_manual_intervention_char}') DESACTIVADO.")
 
+                    # --- BUCLE PRINCIPAL DEL BOT ---
                     while True:
-                        if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False) and _key_pressed_event.is_set():
+                        
+                        # <<< INICIO BLOQUE MODIFICADO PARA MANEJAR TECLA MANUAL >>>
+                        if key_listener_active and _key_pressed_event.is_set():
+                            print("[Main Loop] Evento de tecla manual detectado. Preparando menú...")
+                             # 1. Señalar al hilo listener que se detenga
+                            _stop_key_listener_thread.set()
+                            
+                            # 2. Esperar a que el hilo listener termine (y restaure la TTY)
+                            if key_listener_hilo and key_listener_hilo.is_alive():
+                                print("[Main Loop] Esperando que el hilo listener termine antes del menú...")
+                                key_listener_hilo.join(timeout=1.5) # Esperar máx 1.5 segundos
+                                if key_listener_hilo.is_alive():
+                                    print("ADVERTENCIA: El hilo listener no terminó a tiempo. La terminal podría estar inestable.")
+                                else:
+                                    print("[Main Loop] Hilo listener terminado.")
+                             
+                            # 3. Llamar al Menú (Ahora, con la TTY restaurada)
                             handle_manual_intervention_menu(
                                 config_module=config_module, 
                                 utils_module=utils_module,   
                                 menu_module=menu_module,     
                                 position_manager_module=position_manager_module
                             )
-                        if connection_ticker_module and hasattr(connection_ticker_module, 'is_ticker_alive') and not connection_ticker_module.is_ticker_alive():
-                            print("ERROR: Hilo Ticker ha terminado. Saliendo..."); raise RuntimeError("Ticker thread died.")
-                        time.sleep(0.2) 
-                except KeyboardInterrupt: print("\nInterrupción por teclado (Ctrl+C)..."); raise
-                except Exception as ticker_err: print(f"ERROR CRITICO ticker: {ticker_err}"); traceback.print_exc(); raise
+                            
+                            _key_pressed_event.clear() # Limpiar evento después de procesarlo
 
+                            # 4. Reiniciar el listener de teclas si el modo interactivo sigue activo
+                            if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False):
+                                print("[Main Loop] Reiniciando listener de teclas después del menú manual...")
+                                _stop_key_listener_thread.clear() # Limpiar la señal de parada
+                                key_listener_hilo = threading.Thread(target=key_listener_thread_func, daemon=True)
+                                key_listener_hilo.start()
+                                # print("[Main Loop] Listener de teclas reiniciado.")
+                            else:
+                                 key_listener_active = False # Marcar como inactivo si se desactivó
+                                 print("[Main Loop] Modo intervención manual desactivado, no se reinicia listener.")
+                        # <<< FIN BLOQUE MODIFICADO >>>
+
+                        # Chequear si el Ticker sigue vivo (sin cambios)
+                        if connection_ticker_module and hasattr(connection_ticker_module, 'is_ticker_alive') and not connection_ticker_module.is_ticker_alive():
+                            print("ERROR: Hilo Ticker ha terminado. Saliendo..."); 
+                            raise RuntimeError("Ticker thread died.")
+                            
+                        time.sleep(0.2) # Pausa del bucle principal (sin cambios)
+                        
+                # --- Fin del Bucle Principal y Manejo de Excepciones ---
+                except KeyboardInterrupt: 
+                    print("\nInterrupción por teclado (Ctrl+C) en el bucle principal del bot..."); 
+                    raise # Re-lanzar para que el finally exterior se ejecute
+                except Exception as ticker_err: 
+                    print(f"ERROR CRITICO en bucle ticker/listener: {ticker_err}"); 
+                    traceback.print_exc(); 
+                    raise # Re-lanzar para que el finally exterior se ejecute
+                # --- FIN BLOQUE DE INICIO DE TICKER Y BUCLE PRINCIPAL ---
+
+            # --- Opción 3: Ejecutar Ciclo de Prueba (SIN CAMBIOS) ---
             elif live_choice == '3':
                  if not management_enabled: print("\nERROR: Prueba de ciclo requiere Gestión activa."); time.sleep(2); continue
                  if not core_initialized:
@@ -493,6 +593,7 @@ def run_live_pre_start(
                  run_full_test_cycle(config_module, utils_module, live_operations_module, position_manager_module, balance_manager_module, position_state_module, menu_module)
                  continue
 
+            # --- Opción 4: Ver Posiciones Lógicas (SIN CAMBIOS) ---
             elif live_choice == '4':
                  pm_init_status_display = getattr(position_manager_module, '_initialized', False) if position_manager_module else False
                  if position_manager_module and pm_init_status_display and hasattr(position_manager_module, 'display_logical_positions'):
@@ -501,19 +602,37 @@ def run_live_pre_start(
                  elif position_manager_module and not pm_init_status_display: print("INFO: PM no inicializado aún."); time.sleep(2.5)
                  else: print("ERROR: PM no disponible."); time.sleep(2)
                  continue
+                 
+            # --- Opción 0: Salir (SIN CAMBIOS) ---
+            elif live_choice == '0': 
+                print("Saliendo del Modo Live..."); 
+                return connection_ticker_module
+            else: 
+                print("Opción no válida."); 
+                time.sleep(1)
 
-            elif live_choice == '0': print("Saliendo del Modo Live..."); return connection_ticker_module
-            else: print("Opción no válida."); time.sleep(1)
-
-    except KeyboardInterrupt: print("\nDeteniendo Proceso Live (Ctrl+C en runner)...")
-    except ImportError as e: print(f"Error Fatal Importación Live Runner: {e.name}."); traceback.print_exc()
-    except RuntimeError as e: print(f"Error Fatal Config/Ejecución Live Runner: {e}"); traceback.print_exc()
-    except Exception as live_err: print(f"Error inesperado Live Runner: {live_err}"); traceback.print_exc()
+    # --- Bloque Principal try...except...finally (SIN CAMBIOS, excepto por el join() añadido) ---
+    except KeyboardInterrupt: 
+        print("\nDeteniendo Proceso Live (Ctrl+C en runner)...")
+    except ImportError as e: 
+        print(f"Error Fatal Importación Live Runner: {e.name}.")
+        traceback.print_exc()
+    except RuntimeError as e: 
+        print(f"Error Fatal Config/Ejecución Live Runner: {e}")
+        traceback.print_exc()
+    except Exception as live_err: 
+        print(f"Error inesperado Live Runner: {live_err}")
+        traceback.print_exc()
     finally:
+         # --- Asegurar que el listener se detiene SIEMPRE al salir ---
          _stop_key_listener_thread.set()
          if key_listener_hilo and key_listener_hilo.is_alive():
-             print("[Finally] Esperando que el hilo listener de teclas termine..."); key_listener_hilo.join(timeout=1.0)
-             if key_listener_hilo.is_alive(): print("ADVERTENCIA: El hilo listener de teclas no terminó limpiamente.")
+             print("[Finally] Esperando que el hilo listener de teclas termine..."); 
+             key_listener_hilo.join(timeout=1.0) # <<< AÑADIDO JOIN AQUÍ TAMBIÉN
+             if key_listener_hilo.is_alive(): 
+                print("ADVERTENCIA: El hilo listener de teclas no terminó limpiamente.")
+                
+         # --- Resto del Bloque Finally (SIN CAMBIOS) ---
          if bot_started and connection_ticker_module and hasattr(connection_ticker_module, 'stop_ticker_thread'):
               print("\nAsegurando detención Ticker en finally...");
               try: connection_ticker_module.stop_ticker_thread(); print("Ticker detenido.")
@@ -537,7 +656,7 @@ def run_live_pre_start(
          return connection_ticker_module
 
 
-# --- FUNCIÓN DE PRUEBA DE CICLO COMPLETO ---
+# --- FUNCIÓN DE PRUEBA DE CICLO COMPLETO (SIN CAMBIOS) ---
 def run_full_test_cycle(
     config_param: Any, 
     utils_param: Any,  
@@ -730,4 +849,4 @@ def run_full_test_cycle(
         print("IMPORTANTE: Revisa logs y estado FÍSICO en Bybit."); print("-----------------------------------------")
         input("Presiona Enter para volver al menú Live...")
 
-# =============== FIN ARCHIVO: live_runner.py (Modificado según instrucciones) =============
+# =============== FIN ARCHIVO: live_runner.py (CORREGIDO - Gestión TTY Listener) =============
