@@ -102,6 +102,12 @@ POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.5 #
 POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.5 #
 # --- FIN NUEVAS VARIABLES ---
 
+# --- AJUSTES DE DELAY PERSONALIZADOS ---
+POST_ORDER_CONFIRMATION_DELAY_SECONDS = 0.1  # Delay post-apertura antes de sync de precio/qty.
+POST_CLOSE_SYNC_DELAY_SECONDS = 0.1          # Delay post-cierre antes de sync de estado físico.
+# ----------------------------------------
+
+
 # --- Logical Position Settings (OBSOLETO) ---
 LOGICAL_POSITIONS_ENABLED = False           # DEPRECATED
 
