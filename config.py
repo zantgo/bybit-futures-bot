@@ -54,7 +54,7 @@ DEFAULT_RECV_WINDOW = 30000
 
 # --- Live Ticker / Backtest Feeder Settings ---
 TICKER_SYMBOL = "BTCUSDT"
-TICKER_INTERVAL_SECONDS = 60
+TICKER_INTERVAL_SECONDS = 10    # 60
 TICKER_SOURCE_ACCOUNT = ACCOUNT_PROFIT
 
 # --- Core Processing ---
@@ -69,44 +69,42 @@ TA_CALCULATE_PROCESSED_DATA = True
 
 # --- Signal Generation Configuration ---
 STRATEGY_ENABLED = True
-STRATEGY_MARGIN_BUY = -0.35 #
-STRATEGY_MARGIN_SELL = 0.35 #
+STRATEGY_MARGIN_BUY = -0.1         # -0.35
+STRATEGY_MARGIN_SELL = 0.1         # 0.35
 STRATEGY_DECREMENT_THRESHOLD = 0.45 #
 STRATEGY_INCREMENT_THRESHOLD = 0.45 #
 
 # --- Position Management Configuration ---
 POSITION_MANAGEMENT_ENABLED = True
 POSITION_TRADING_MODE = "LONG_SHORT"        # Sobrescrito interactivamente
-# ANTERIOR: POSITION_CAPITAL_USDT = 100.0
 POSITION_BASE_SIZE_USDT = 100              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
-POSITION_MAX_LOGICAL_POSITIONS = 1          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
-POSITION_LEVERAGE = 3.0 #
-POSITION_TAKE_PROFIT_PCT_LONG = 0.5 #
-POSITION_TAKE_PROFIT_PCT_SHORT = 0.5 #
+POSITION_MAX_LOGICAL_POSITIONS = 10          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
+POSITION_LEVERAGE = 4.0 #
+POSITION_TAKE_PROFIT_PCT_LONG = 0.3     # 0.5
+POSITION_TAKE_PROFIT_PCT_SHORT = 0.3    # 0.5
 POSITION_COMMISSION_RATE = 0.001
-POSITION_REINVEST_PROFIT_PCT = 1.0 # Para 1% reinversión en margen operacional y 99% transferible a profit. (Anteriormente 0.01)
-POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.1
+POSITION_REINVEST_PROFIT_PCT = 0.25 # Para 0.25% reinversión en margen operacional y el resto transferible a profit
+POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.01 #
 POSITION_LOG_CLOSED_POSITIONS = True
 POSITION_PRINT_POSITION_UPDATES = True
 POSITION_LOG_OPEN_SNAPSHOT = True
 POSITION_SIGNAL_COOLDOWN_ENABLED = True
-POSITION_SIGNAL_COOLDOWN_LONG = 3 #
-POSITION_SIGNAL_COOLDOWN_SHORT = 3 #
+POSITION_SIGNAL_COOLDOWN_LONG = 0 #
+POSITION_SIGNAL_COOLDOWN_SHORT = 0 #
 POSITION_PRE_OPEN_SYNC_CHECK = True         # Chequeo físico antes de abrir en Live
 
 # Nueva variable para el modo interactivo manual
 INTERACTIVE_MANUAL_MODE = True # True para habilitar el menú de intervención manual en modo Live
 
 # --- NUEVAS VARIABLES: Filtro de Distancia de Precio Mínima ---
-POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.5 #
-POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.5 #
+POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.25 # -0.5
+POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.25 # 0.5
 # --- FIN NUEVAS VARIABLES ---
 
 # --- AJUSTES DE DELAY PERSONALIZADOS ---
 POST_ORDER_CONFIRMATION_DELAY_SECONDS = 0.1  # Delay post-apertura antes de sync de precio/qty.
 POST_CLOSE_SYNC_DELAY_SECONDS = 0.1          # Delay post-cierre antes de sync de estado físico.
 # ----------------------------------------
-
 
 # --- Logical Position Settings (OBSOLETO) ---
 LOGICAL_POSITIONS_ENABLED = False           # DEPRECATED
