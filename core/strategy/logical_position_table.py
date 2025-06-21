@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 # --- Lógica de Reintentos ---
 MAX_RETRIES = 1 # Número de intentos (configurable si se desea)
-RETRY_DELAY = 1 # Segundos entre intentos (configurable si se desea)
+RETRY_DELAY = 0.01 # Segundos entre intentos (configurable si se desea)
 
 class LogicalPositionTable:
     """
