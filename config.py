@@ -61,10 +61,10 @@ TICKER_SOURCE_ACCOUNT = ACCOUNT_PROFIT
 RAW_PRICE_TICK_INTERVAL = 1
 
 # --- Technical Analysis Configuration ---
-TA_WINDOW_SIZE = 300
-TA_EMA_WINDOW = 100 #
-TA_WEIGHTED_INC_WINDOW = 50 #
-TA_WEIGHTED_DEC_WINDOW = 50 #
+TA_WINDOW_SIZE = 100 #300
+TA_EMA_WINDOW = 50 #100 #
+TA_WEIGHTED_INC_WINDOW = 25 #50 #
+TA_WEIGHTED_DEC_WINDOW = 25 #50 #
 TA_CALCULATE_PROCESSED_DATA = True
 
 # --- Signal Generation Configuration ---
@@ -77,21 +77,21 @@ STRATEGY_INCREMENT_THRESHOLD = 0.45 #
 # --- Position Management Configuration ---
 POSITION_MANAGEMENT_ENABLED = True
 POSITION_TRADING_MODE = "LONG_SHORT"        # Sobrescrito interactivamente
-POSITION_BASE_SIZE_USDT = 100              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
+POSITION_BASE_SIZE_USDT = 5              # Tamaño base de margen (en USDT) para CADA posición lógica individual. Usado como fallback/default si no se define interactivamente.
 POSITION_MAX_LOGICAL_POSITIONS = 10          # Número MÁXIMO INICIAL de posiciones lógicas (slots) por lado. Puede ser ajustado dinámicamente.
-POSITION_LEVERAGE = 4.0 #
+POSITION_LEVERAGE = 3.0 #
 POSITION_TAKE_PROFIT_PCT_LONG = 0.3     # 0.5
 POSITION_TAKE_PROFIT_PCT_SHORT = 0.3    # 0.5
 POSITION_COMMISSION_RATE = 0.001
-POSITION_REINVEST_PROFIT_PCT = 0.25 # Para 0.25% reinversión en margen operacional y el resto transferible a profit
-POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.01 #
+POSITION_REINVEST_PROFIT_PCT = 0.2 # Para 0.2% reinversión en margen operacional y el resto transferible a profit
+POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001 #
 POSITION_LOG_CLOSED_POSITIONS = True
 POSITION_PRINT_POSITION_UPDATES = True
 POSITION_LOG_OPEN_SNAPSHOT = True
 POSITION_SIGNAL_COOLDOWN_ENABLED = True
 POSITION_SIGNAL_COOLDOWN_LONG = 0 #
 POSITION_SIGNAL_COOLDOWN_SHORT = 0 #
-POSITION_PRE_OPEN_SYNC_CHECK = True         # Chequeo físico antes de abrir en Live
+POSITION_PRE_OPEN_SYNC_CHECK = False #True         # Chequeo físico antes de abrir en Live
 
 # Nueva variable para el modo interactivo manual
 INTERACTIVE_MANUAL_MODE = True # True para habilitar el menú de intervención manual en modo Live
