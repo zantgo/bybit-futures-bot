@@ -1,14 +1,12 @@
-# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v8.7.x - LiqP Promedio Ponderado) ===============
+# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v13 - Integración UT Bot y SL) ===============
 """
 Procesa un único evento de precio (tick).
 Calcula TA, genera señal, gestiona posiciones (live/backtest), y loguea/imprime.
 
-v8.7.x - LiqP Promedio: Modificado PRINT_TICK_LIVE_STATUS para calcular y mostrar
-                        el precio de liquidación promedio ponderado por tamaño para
-                        posiciones lógicas abiertas. Elimina LiqP individual de detalle.
-v8.7.x: Modificada la inicialización para aceptar y pasar base_position_size e initial_slots a PM.
-v8.7.8: Corrige firma de initialize para aceptar initial_real_state.
-v8.5.5: Acepta instance_capital y lo pasa a PM.initialize.
+v13:
+- Modificada la inicialización para aceptar una instancia del UTBotController y un
+  evento de Stop Loss, pasándolos a los módulos correspondientes.
+- En cada evento, pasa el tick de precio al UTBotController si está presente.
 """
 import datetime
 import traceback
@@ -16,6 +14,7 @@ import pandas as pd
 import numpy as np
 import json
 import sys
+import threading # Necesario para el tipo de stop_loss_event
 from typing import Optional, Dict, Any, List
 
 # --- Importaciones Core y Strategy ---
@@ -60,61 +59,55 @@ except Exception as e_imp:
 _previous_raw_event_price = np.nan
 _is_first_event = True
 _operation_mode = "unknown"
+_ut_bot_controller_instance: Optional[Any] = None
+
 
 # --- Inicialización ---
 def initialize(
     operation_mode: str,
     initial_real_state: Optional[Dict[str, Dict[str, Any]]] = None,
     base_position_size_usdt: Optional[float] = None,
-    initial_max_logical_positions: Optional[int] = None
+    initial_max_logical_positions: Optional[int] = None,
+    ut_bot_controller_instance: Optional[Any] = None,
+    stop_loss_event: Optional[threading.Event] = None
 ):
-    global _previous_raw_event_price, _is_first_event, _operation_mode
+    global _previous_raw_event_price, _is_first_event, _operation_mode, _ut_bot_controller_instance
     global position_manager
 
     if not config or not utils or not ta_manager or not signal_generator:
-        print("ERROR CRITICO [EP Init]: Faltan dependencias esenciales (config, utils, TA, SignalGen).")
         raise RuntimeError("Event Processor no pudo inicializarse por dependencias faltantes.")
 
     print("[Event Processor] Inicializando...")
-    _previous_raw_event_price = np.nan; _is_first_event = True
+    _previous_raw_event_price = np.nan
+    _is_first_event = True
     _operation_mode = operation_mode
+    _ut_bot_controller_instance = ut_bot_controller_instance
 
     if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False) and hasattr(signal_logger, 'initialize_logger'):
         try: signal_logger.initialize_logger()
         except Exception as e: print(f"ERROR [Event Proc]: Inicializando signal_logger: {e}")
-    elif getattr(config, 'LOG_SIGNAL_OUTPUT', False) and not signal_logger: print("WARN [Event Proc]: LOG_SIGNAL_OUTPUT=True pero signal_logger no disponible.")
 
     pm_enabled = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if pm_enabled:
         if position_manager and hasattr(position_manager, 'initialize'):
              try:
-                 debug_msg_pm_init = (
-                     f"DEBUG [EP Init]: Llamando a position_manager.initialize -> "
-                     f"mode='{operation_mode}', "
-                     f"initial_real_state={'Presente' if initial_real_state else 'None'}, "
-                     f"base_pos_size={base_position_size_usdt if base_position_size_usdt is not None else 'Default_PM'}, "
-                     f"initial_slots={initial_max_logical_positions if initial_max_logical_positions is not None else 'Default_PM'}"
-                 )
-                 print(debug_msg_pm_init)
-
                  position_manager.initialize(
                      operation_mode=operation_mode,
                      initial_real_state=initial_real_state,
                      base_position_size_usdt_param=base_position_size_usdt,
-                     initial_max_logical_positions_param=initial_max_logical_positions
+                     initial_max_logical_positions_param=initial_max_logical_positions,
+                     stop_loss_event=stop_loss_event # Pasar el evento de SL
                  )
                  print("  -> Position Manager inicializado vía Event Processor.")
              except Exception as e_pm_init:
                  print(f"ERROR CRÍTICO [Event Proc]: Falló la inicialización de position_manager: {e_pm_init}")
                  traceback.print_exc()
-                 print("  -> Desactivando gestión de posiciones debido a error de inicialización.")
                  setattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
-                 pm_enabled = False
-        elif not position_manager:
-             print("ERROR CRÍTICO [Event Proc]: POSITION_MANAGEMENT_ENABLED=True pero position_manager no importado."); setattr(config, 'POSITION_MANAGEMENT_ENABLED', False); pm_enabled = False
-        elif not hasattr(position_manager, 'initialize'):
-             print("ERROR CRÍTICO [Event Proc]: position_manager cargado pero sin método 'initialize'."); setattr(config, 'POSITION_MANAGEMENT_ENABLED', False); pm_enabled = False
-    else: print("INFO [Event Proc]: Gestión de posiciones desactivada. No se inicializará PM.")
+        else:
+             print("ERROR CRÍTICO [Event Proc]: POSITION_MANAGEMENT_ENABLED=True pero position_manager no está disponible o no tiene método 'initialize'.")
+             setattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
+    else:
+        print("INFO [Event Proc]: Gestión de posiciones desactivada. No se inicializará PM.")
 
     print("[Event Processor] Inicializado.")
 
@@ -122,18 +115,30 @@ def initialize(
 # --- Procesamiento Principal de Evento ---
 def process_event(intermediate_ticks_info: list, final_price_info: dict):
     global _previous_raw_event_price, _is_first_event
-    global position_manager
+    global position_manager, _ut_bot_controller_instance
 
-    if not ta_manager or not signal_generator or not utils or not config:
+    if not all([ta_manager, signal_generator, utils, config]):
         print("ERROR CRÍTICO [EP Process]: Faltan módulos esenciales. Imposible procesar evento."); return
 
-    if not final_price_info: print("WARN [EP Process]: Evento final vacío."); return
+    if not final_price_info:
+        print("WARN [EP Process]: Evento final vacío."); return
+        
     current_timestamp = final_price_info.get("timestamp")
     current_price = utils.safe_float_convert(final_price_info.get("price"), default=np.nan)
+    
     if not isinstance(current_timestamp, (datetime.datetime, pd.Timestamp)) or pd.isna(current_price) or current_price <= 0:
         print(f"WARN [EP Process]: Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}"); return
 
-    increment = 0; decrement = 0
+    # --- Pasar tick al controlador UT Bot si existe ---
+    if _ut_bot_controller_instance and hasattr(_ut_bot_controller_instance, 'add_tick'):
+        try:
+            _ut_bot_controller_instance.add_tick(current_price, current_timestamp)
+        except Exception as e_ut_tick:
+            print(f"ERROR [EP Process]: Falló al pasar tick a UTBotController: {e_ut_tick}")
+
+    # --- Lógica de bajo nivel (sin cambios) ---
+    increment = 0
+    decrement = 0
     if not _is_first_event and pd.notna(_previous_raw_event_price):
         if current_price > _previous_raw_event_price + 1e-9: increment = 1
         elif current_price < _previous_raw_event_price - 1e-9: decrement = 1
@@ -144,41 +149,55 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
 
     processed_data = None
     if getattr(config, 'TA_CALCULATE_PROCESSED_DATA', True):
-        try: processed_data = ta_manager.process_raw_price_event(raw_price_event.copy())
-        except Exception as e_ta: print(f"ERROR [TA Call]: {e_ta}"); traceback.print_exc()
+        try:
+            processed_data = ta_manager.process_raw_price_event(raw_price_event.copy())
+        except Exception as e_ta:
+            print(f"ERROR [TA Call]: {e_ta}"); traceback.print_exc()
 
-    signal_data = None; price_fmt_config = f".{config.PRICE_PRECISION}f" if hasattr(config, 'PRICE_PRECISION') else ".8f"; price_fmt = f"{current_price:{price_fmt_config}}"; ts_fmt = utils.format_datetime(current_timestamp); nan_fmt = "NaN"
-    base_signal_dict = {"timestamp": ts_fmt, "price_float": current_price, "price": price_fmt, "ema": nan_fmt, "inc_price_change_pct": nan_fmt, "dec_price_change_pct": nan_fmt, "weighted_increment": nan_fmt, "weighted_decrement": nan_fmt}
+    signal_data = None
+    nan_fmt = "NaN"
+    base_signal_dict = {
+        "timestamp": utils.format_datetime(current_timestamp), 
+        "price_float": current_price, 
+        "price": f"{current_price:.{getattr(config, 'PRICE_PRECISION', 4)}f}", 
+        "ema": nan_fmt, "inc_price_change_pct": nan_fmt, "dec_price_change_pct": nan_fmt, 
+        "weighted_increment": nan_fmt, "weighted_decrement": nan_fmt
+    }
+    
     try:
         if getattr(config, 'STRATEGY_ENABLED', True):
-            if processed_data: signal_data = signal_generator.generate_signal(processed_data.copy())
-            else: signal_data = {**base_signal_dict, "signal": "HOLD_NO_TA", "signal_reason": "No TA data"}
-        else: signal_data = {**base_signal_dict, "signal": "HOLD_STRATEGY_DISABLED", "signal_reason": "Strategy disabled"}
-    except Exception as e_signal: print(f"ERROR [Signal Gen Call]: {e_signal}"); traceback.print_exc(); signal_data = {**base_signal_dict, "signal": "HOLD_SIGNAL_ERROR", "signal_reason": f"Error: {e_signal}"}
+            if processed_data:
+                signal_data = signal_generator.generate_signal(processed_data.copy())
+            else:
+                signal_data = {**base_signal_dict, "signal": "HOLD_NO_TA", "signal_reason": "No TA data"}
+        else:
+            signal_data = {**base_signal_dict, "signal": "HOLD_STRATEGY_DISABLED", "signal_reason": "Strategy disabled"}
+    except Exception as e_signal:
+        print(f"ERROR [Signal Gen Call]: {e_signal}"); traceback.print_exc()
+        signal_data = {**base_signal_dict, "signal": "HOLD_SIGNAL_ERROR", "signal_reason": f"Error: {e_signal}"}
 
     pm_enabled_runtime = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
-    if pm_enabled_runtime:
-        if position_manager:
-            pm_initialized_runtime = getattr(position_manager, '_initialized', False)
-            if pm_initialized_runtime:
-                try:
-                    if hasattr(position_manager, 'check_and_close_positions'): position_manager.check_and_close_positions(current_price, current_timestamp)
-                    else: print("ERROR CRÍTICO [EP Process]: PM sin 'check_and_close_positions'.")
-                    if signal_data and hasattr(position_manager, 'open_logical_position'):
-                        signal = signal_data.get("signal")
-                        if signal == "BUY": position_manager.open_logical_position('long', current_price, current_timestamp)
-                        elif signal == "SELL": position_manager.open_logical_position('short', current_price, current_timestamp)
-                    elif signal_data and not hasattr(position_manager, 'open_logical_position'): print("ERROR CRÍTICO [EP Process]: PM sin 'open_logical_position'.")
-                except Exception as pm_err: print(f"ERROR [PM Call]: {pm_err}"); traceback.print_exc()
-            else: print("WARN [EP Process]: PM habilitado pero no inicializado.")
-        else: print("ERROR CRÍTICO [EP Process]: PM habilitado pero instancia es None.")
+    if pm_enabled_runtime and position_manager and getattr(position_manager, '_initialized', False):
+        try:
+            if hasattr(position_manager, 'check_and_close_positions'): position_manager.check_and_close_positions(current_price, current_timestamp)
+            else: print("ERROR CRÍTICO [EP Process]: PM sin 'check_and_close_positions'.")
+            if signal_data and hasattr(position_manager, 'open_logical_position'):
+                signal = signal_data.get("signal")
+                if signal == "BUY":
+                    position_manager.open_logical_position('long', current_price, current_timestamp)
+                elif signal == "SELL":
+                    position_manager.open_logical_position('short', current_price, current_timestamp)
+            elif signal_data and not hasattr(position_manager, 'open_logical_position'): print("ERROR CRÍTICO [EP Process]: PM sin 'open_logical_position'.")
+        except Exception as pm_err:
+            print(f"ERROR [PM Call]: {pm_err}"); traceback.print_exc()
 
     if signal_data:
         if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False):
             try:
                 if hasattr(signal_logger, 'log_signal_event'): signal_logger.log_signal_event(signal_data.copy());
                 else: print("WARN [EP Process]: signal_logger sin 'log_signal_event'.")
-            except Exception as e_log_write: print(f"ERROR [Signal Log Write]: {e_log_write}")
+            except Exception as e_log_write:
+                print(f"ERROR [Signal Log Write]: {e_log_write}")
         if getattr(config, 'PRINT_SIGNAL_OUTPUT', False):
             try: print(json.dumps(signal_data, indent=2));
             except Exception as e_print_signal: print(f"ERROR [Print Signal]: {e_print_signal}\nData: {signal_data}")
@@ -193,7 +212,7 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         except Exception as cd_err: print(f"ERROR incrementando cooldown: {cd_err}"); traceback.print_exc()
 
     pm_initialized_runtime_print = getattr(position_manager, '_initialized', False) if position_manager else False
-    if _operation_mode.startswith('live') and getattr(config, 'PRINT_TICK_LIVE_STATUS', False):
+    if _operation_mode.startswith(('live', 'automatic')) and getattr(config, 'PRINT_TICK_LIVE_STATUS', False):
         try:
             ts_str_fmt = utils.format_datetime(current_timestamp)
             current_price_fmt_str = f"{current_price:.{config.PRICE_PRECISION}f}" if hasattr(config, 'PRICE_PRECISION') else f"{current_price:.8f}"
@@ -307,4 +326,4 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             print("=" * len(hdr))
         except Exception as e_print: print(f"ERROR [Print Tick Status]: {e_print}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/event_processor.py (v8.7.x - LiqP Promedio Ponderado) ===============
+# =============== FIN ARCHIVO: core/strategy/event_processor.py (v13 - Integración UT Bot y SL) ===============

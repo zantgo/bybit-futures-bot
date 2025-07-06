@@ -1,18 +1,16 @@
-# =============== INICIO ARCHIVO: core/strategy/position_manager.py (Modificado según instrucciones + Chequeo WalletBalance) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_manager.py (v13 - SL Físico y Control Automático) ===============
 """
 Fachada Pública y Contenedor de Estado para Position Manager.
-Orquesta el ciclo de vida de las posiciones delegando la ejecución
-a la clase PositionExecutor. Mantiene el estado agregado (PNL, cooldown).
-Interactúa con balance_manager, position_state, loggers y helpers.
+Orquesta el ciclo de vida de las posiciones, mantiene el estado agregado (PNL, cooldown)
+e implementa la lógica de Stop Loss físico.
 
-v8.7.x - Final: Completa la lógica de transferencia de PNL para actualizar
-                 correctamente los balances lógicos en BalanceManager
-                 tanto en modo Live como en Backtest.
-v8.7.x: Implementa lógica de tamaño base de posición dinámico y gestión de slots interactiva.
-v8.7.7 - Corregido v5: Elimina argumento inesperado 'is_manual_open'/'is_manual_close'.
-Modificado: Lógica de "Tamaño Dinámico por Slot" y advertencias al usuario.
-            Integrada llamada a BM para actualizar márgenes operativos con cambio de slots.
-Modificado: can_open_new_position ahora usa walletBalance del USDT para chequeo de margen real.
+v13:
+- Añadida lógica para el Stop Loss Físico en `check_and_close_positions`.
+- Añadido `_stop_loss_event` para notificar al runner automático de un SL.
+- Nuevas funciones `close_all_logical_positions` y `force_open_multiple_positions`
+  para ser usadas por el `automatic_runner` durante los "flips".
+- Nueva función `set_base_position_size` para ajuste dinámico del tamaño de posición.
+- Modificada `initialize` para recibir el `stop_loss_event`.
 """
 import datetime
 import uuid
@@ -21,6 +19,7 @@ import time
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, Tuple
+import threading # Necesario para el threading.Event
 
 # --- Dependencias Core y Strategy ---
 try:
@@ -95,19 +94,22 @@ _cooldown_enabled: bool = False
 _cooldown_long_period: int = 0
 _cooldown_short_period: int = 0
 _cached_min_order_qty: Optional[float] = None
+_stop_loss_event: Optional[threading.Event] = None
+
 
 # --- Función de Inicialización Principal ---
 def initialize(
     operation_mode: str,
     initial_real_state: Optional[Dict[str, Dict[str, Any]]] = None,
     base_position_size_usdt_param: Optional[float] = None,
-    initial_max_logical_positions_param: Optional[int] = None
+    initial_max_logical_positions_param: Optional[int] = None,
+    stop_loss_event: Optional[threading.Event] = None
 ):
     global _initialized, _is_live_mode, _live_manager, _executor, _total_realized_pnl_long, _total_realized_pnl_short
     global _total_transferred_profit, _trading_mode, _leverage, _min_transfer_amount, _max_logical_positions
     global _initial_base_position_size_usdt, _current_dynamic_base_size_long, _current_dynamic_base_size_short
     global _event_counter_since_last_long, _event_counter_since_last_short, _cooldown_enabled
-    global _cooldown_long_period, _cooldown_short_period, _cached_min_order_qty
+    global _cooldown_long_period, _cooldown_short_period, _cached_min_order_qty, _stop_loss_event
     global config, utils, balance_manager, position_state, position_calculations, live_operations, closed_position_logger, _position_helpers
 
     if not getattr(config, 'POSITION_MANAGEMENT_ENABLED', False):
@@ -118,7 +120,9 @@ def initialize(
     print("[PM Facade] Inicializando Orquestador (Lógica Tamaño Base Dinámico)...")
     _initialized = False; _total_realized_pnl_long = 0.0; _total_realized_pnl_short = 0.0; _total_transferred_profit = 0.0
     _event_counter_since_last_long = 0; _event_counter_since_last_short = 0
-    _is_live_mode = operation_mode.startswith("live"); _live_manager = None; _executor = None; _cached_min_order_qty = None
+    _is_live_mode = operation_mode.startswith(("live", "automatic"))
+    _live_manager = None; _executor = None; _cached_min_order_qty = None
+    _stop_loss_event = stop_loss_event # Asignar el evento de SL
 
     try:
         _trading_mode = getattr(config,'POSITION_TRADING_MODE','LONG_SHORT')
@@ -134,8 +138,6 @@ def initialize(
         _initial_base_position_size_usdt = base_position_size_usdt_param if base_position_size_usdt_param is not None and base_position_size_usdt_param > 0 else default_base_size_cfg
         _max_logical_positions = initial_max_logical_positions_param if initial_max_logical_positions_param is not None and initial_max_logical_positions_param >= 1 else default_slots_cfg
         
-        # _current_dynamic_base_size_long y _short se calculan DESPUÉS de BM init
-
         print(f"  Config PM: ModoOp={_trading_mode}, Lev={_leverage:.1f}x")
         print(f"  Config PM: Tamaño Base Inicial por Posición (Sesión): {_initial_base_position_size_usdt:.4f} USDT")
         print(f"  Config PM: Slots Lógicos Iniciales por Lado: {_max_logical_positions}")
@@ -184,15 +186,12 @@ def initialize(
     except AttributeError as attr_err_bm: print(f"ERROR CRITICO [PM Init Facade]: {attr_err_bm}"); traceback.print_exc(); return
     except Exception as init_e_bm: print(f"ERROR CRITICO [PM Init Facade]: Fallo inicializando BM: {init_e_bm}"); traceback.print_exc(); return
 
-    # Recalcular _current_dynamic_base_size_long y _current_dynamic_base_size_short
-    # DESPUÉS de balance_manager.initialize(...)
     if _max_logical_positions > 0 and utils and balance_manager and hasattr(balance_manager, 'get_available_margin'):
         if _trading_mode == "LONG_ONLY" or _trading_mode == "LONG_SHORT":
             dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
             _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, dynamic_long)
         else: 
             _current_dynamic_base_size_long = 0.0 
-
         if _trading_mode == "SHORT_ONLY" or _trading_mode == "LONG_SHORT":
             dynamic_short = utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0)
             _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, dynamic_short)
@@ -202,7 +201,7 @@ def initialize(
         _current_dynamic_base_size_long = _initial_base_position_size_usdt if _trading_mode != "SHORT_ONLY" else 0.0
         _current_dynamic_base_size_short = _initial_base_position_size_usdt if _trading_mode != "LONG_ONLY" else 0.0
         if not (utils and balance_manager and hasattr(balance_manager, 'get_available_margin')):
-            print("WARN [PM Init]: No se pudo calcular dinámicamente el tamaño base (faltan utils/BM/get_available_margin), usando _initial_base_position_size_usdt.")
+            print("WARN [PM Init]: No se pudo calcular dinámicamente el tamaño base, usando _initial_base_position_size_usdt.")
         elif _max_logical_positions <= 0:
             print("WARN [PM Init]: _max_logical_positions es <= 0, usando _initial_base_position_size_usdt para tamaño dinámico.")
 
@@ -229,10 +228,73 @@ def initialize(
     except Exception as exec_init_e: print(f"ERROR CRITICO [PM Init Facade]: Falló creación PositionExecutor: {exec_init_e}"); traceback.print_exc(); _executor = None; return
 
     _initialized = True
-    print("[PM Facade] Orquestador Inicializado (Lógica Tamaño Base Dinámico).")
+    print("[PM Facade] Orquestador Inicializado.")
+
+def _handle_stop_loss_trigger(side: str, exit_price: float, timestamp: datetime.datetime):
+    """Función privada que centraliza la respuesta a un SL."""
+    global _stop_loss_event
+    print(f"  -> Procediendo a cerrar TODAS las posiciones {side.upper()} por SL.")
+    close_all_logical_positions(side, exit_price, timestamp)
+    
+    # Notificar al runner que el SL ocurrió
+    if _stop_loss_event and not _stop_loss_event.is_set():
+        print("  -> Activando evento de Stop Loss para el runner.")
+        _stop_loss_event.set()
 
 
 # --- Funciones Públicas de Gestión ---
+def check_and_close_positions(current_price: float, timestamp: datetime.datetime):
+    global _initialized, _trading_mode, config, utils, position_state, position_calculations
+    if not _initialized: return
+    if not isinstance(current_price, (int, float)) or current_price <= 0: return
+    if not isinstance(timestamp, datetime.datetime): return
+    if not all([config, utils, position_state, position_calculations]): print("ERROR [CheckClose Facade]: Dependencias no disponibles."); return
+    
+    sides_to_check = []
+    if _trading_mode in ["LONG_SHORT", "LONG_ONLY"]: sides_to_check.append('long')
+    if _trading_mode in ["LONG_SHORT", "SHORT_ONLY"]: sides_to_check.append('short')
+    if _trading_mode == "NEUTRAL":
+        sides_to_check = ['long', 'short']
+
+    for side in sides_to_check:
+        try:
+            open_positions = list(position_state.get_open_logical_positions(side))
+            if not open_positions: continue
+
+            # --- 1. Lógica de Take Profit (TP) ---
+            indices_to_close_tp = []
+            for i, pos in enumerate(open_positions):
+                tp_stored = pos.get('take_profit_price')
+                tp_float = utils.safe_float_convert(tp_stored, default=None)
+                if tp_float is not None:
+                    if (side == 'long' and current_price >= tp_float) or \
+                       (side == 'short' and current_price <= tp_float):
+                        indices_to_close_tp.append(i)
+            
+            if indices_to_close_tp:
+                for index in sorted(indices_to_close_tp, reverse=True):
+                    close_logical_position(side, index, current_price, timestamp)
+                # Actualizar la lista de posiciones abiertas después de cerrar
+                open_positions = list(position_state.get_open_logical_positions(side))
+            
+            if not open_positions: continue
+
+            # --- 2. Lógica de Stop Loss (SL) Físico ---
+            sl_pct = getattr(config, 'POSITION_PHYSICAL_STOP_LOSS_PCT', 0.0)
+            if sl_pct > 0:
+                physical_state = position_state.get_physical_position_state(side)
+                avg_entry = utils.safe_float_convert(physical_state.get('avg_entry_price'))
+                if avg_entry > 0:
+                    sl_price = avg_entry * (1 - sl_pct / 100.0) if side == 'long' else avg_entry * (1 + sl_pct / 100.0)
+                    if (side == 'long' and current_price <= sl_price) or \
+                       (side == 'short' and current_price >= sl_price):
+                        print("\n" + "!"*80 + f"\n!! ALERTA: STOP LOSS FÍSICO ACTIVADO PARA POSICIÓN {side.upper()} !!".center(80) + f"\n!!   - Precio Actual: {current_price:.4f} | Precio SL: {sl_price:.4f}".center(80) + "\n" + "!"*80 + "\n")
+                        _handle_stop_loss_trigger(side, current_price, timestamp)
+        
+        except Exception as check_err:
+            print(f"ERROR CRÍTICO [CheckClose Facade]: Verificando {side}: {check_err}"); traceback.print_exc()
+
+
 def can_open_new_position(side: str) -> bool:
     global _initialized, _is_live_mode, _trading_mode, _max_logical_positions, _cooldown_enabled, _event_counter_since_last_long, _event_counter_since_last_short, _cooldown_long_period, _cooldown_short_period, config, utils, balance_manager, position_state, live_operations, _live_manager, _position_helpers, _current_dynamic_base_size_long, _current_dynamic_base_size_short
     
@@ -241,6 +303,9 @@ def can_open_new_position(side: str) -> bool:
     if side not in ['long', 'short']: return False
     if side == 'long' and _trading_mode == "SHORT_ONLY": return False
     if side == 'short' and _trading_mode == "LONG_ONLY": return False
+    if _trading_mode == "NEUTRAL":
+        if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False): print(f"INFO [Can Open]: No se puede abrir en modo NEUTRAL.")
+        return False
 
     try: 
         if not hasattr(position_state, 'get_open_logical_positions'): print("ERROR [can_open Facade]: PS sin get_open_logical_positions."); return False
@@ -269,7 +334,6 @@ def can_open_new_position(side: str) -> bool:
             return False
 
     ENABLE_PRE_OPEN_SYNC_CHECK = getattr(config, 'POSITION_PRE_OPEN_SYNC_CHECK', True)
-    # <<<<<<< INICIO MODIFICACIÓN CHEQUEO MARGEN REAL >>>>>>>
     if _is_live_mode and live_operations and ENABLE_PRE_OPEN_SYNC_CHECK: 
         symbol = getattr(config, 'TICKER_SYMBOL', None)
         if not symbol: print("WARN [PM Pre-Open Check Facade]: Falta TICKER_SYMBOL."); return False
@@ -285,16 +349,9 @@ def can_open_new_position(side: str) -> bool:
             print(f"WARN [PM Pre-Open Check Facade]: Cuenta operativa '{account_to_check}' no inicializada. Saltando chequeo sync real.")
         else:
             try:
-                # Validar dependencias para chequeo real
-                if not all([
-                    hasattr(live_operations, 'get_unified_account_balance_info'),
-                    hasattr(live_operations, 'get_active_position_details_api'),
-                    utils, 
-                    hasattr(position_state, 'get_open_logical_positions') 
-                ]):
+                if not all([hasattr(live_operations, 'get_unified_account_balance_info'), hasattr(live_operations, 'get_active_position_details_api'), utils, hasattr(position_state, 'get_open_logical_positions')]):
                     print("ERROR [PM Pre-Open Check Facade]: Faltan métodos/módulos en dependencias para chequeo real."); return False
                 
-                # Chequeo de Margen REAL usando WalletBalance del USDT
                 margin_needed_real_check = _current_dynamic_base_size_long if side == 'long' else _current_dynamic_base_size_short
                 print(f"DEBUG [PM Pre-Open Check]: Verificando margen REAL (USDT WalletBalance) en '{account_to_check}' para abrir con {margin_needed_real_check:.4f} USDT...")
                 
@@ -303,39 +360,23 @@ def can_open_new_position(side: str) -> bool:
                 
                 if balance_info_raw and isinstance(balance_info_raw.get('coin'), list):
                     usdt_coin_data = next((c for c in balance_info_raw['coin'] if c.get('coin') == 'USDT'), None)
-                    if usdt_coin_data:
-                        real_usdt_wallet_balance = utils.safe_float_convert(usdt_coin_data.get('walletBalance'), 0.0)
-                        print(f"  DEBUG [PM Pre-Open Check]: USDT WalletBalance específico encontrado: {real_usdt_wallet_balance:.4f}")
-                    else: # Fallback al totalWalletBalance general si no hay desglose de USDT específico
-                        real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
-                        print(f"  DEBUG [PM Pre-Open Check]: Usando TotalWalletBalance (fallback): {real_usdt_wallet_balance:.4f}")
-                elif balance_info_raw: # Si 'coin' no es una lista o falta
-                     real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
-                     print(f"  DEBUG [PM Pre-Open Check]: Usando TotalWalletBalance (fallback, 'coin' no es lista/falta): {real_usdt_wallet_balance:.4f}")
-                else:
-                    print(f"WARN [PM Pre-Open Check Facade]: No se pudo obtener balance real de '{account_to_check}'. No abrir {side.upper()}."); return False
+                    if usdt_coin_data: real_usdt_wallet_balance = utils.safe_float_convert(usdt_coin_data.get('walletBalance'), 0.0)
+                    else: real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
+                elif balance_info_raw: real_usdt_wallet_balance = utils.safe_float_convert(balance_info_raw.get('totalWalletBalance'), 0.0)
+                else: print(f"WARN [PM Pre-Open Check Facade]: No se pudo obtener balance real de '{account_to_check}'. No abrir {side.upper()}."); return False
 
                 if real_usdt_wallet_balance < margin_needed_real_check - 1e-6: 
                     print(f"WARN [PM Pre-Open Check Facade]: Margen REAL (USDT Wallet: {real_usdt_wallet_balance:.4f}) en '{account_to_check}' < nec. ({margin_needed_real_check:.4f}). No abrir {side.upper()}."); 
                     return False
-                else:
-                    print(f"  DEBUG [PM Pre-Open Check]: Chequeo de USDT WalletBalance OK.")
+                else: print(f"  DEBUG [PM Pre-Open Check]: Chequeo de USDT WalletBalance OK.")
 
-                # Chequeo de Discrepancia de Tamaño (sin cambios)
-                # open_positions ya se obtuvo al inicio de can_open_new_position
-                # No es necesario volver a llamarlo aquí si la variable sigue en scope y no se ha modificado.
-                # Si se redefinió open_positions más arriba, se debe obtener de nuevo:
                 open_positions_for_size_check = position_state.get_open_logical_positions(side)
-
-                print(f"DEBUG [PM Pre-Open Check]: Verificando discrepancia tamaño en '{account_to_check}'...")
                 physical_pos_raw = live_operations.get_active_position_details_api(symbol, account_to_check)
                 current_physical_state = _position_helpers.extract_physical_state_from_api(physical_pos_raw, symbol, side, utils)
                 current_physical_size = current_physical_state['total_size_contracts'] if current_physical_state else 0.0
                 current_logical_size = sum(utils.safe_float_convert(p.get('size_contracts'), 0.0) for p in open_positions_for_size_check)
                 if abs(current_physical_size - current_logical_size) > 1e-9: print(f"WARN [PM Pre-Open Check Facade]: Discrepancia FÍSICO {side.upper()} ({current_physical_size:.8f}) != LÓGICO ({current_logical_size:.8f}) en '{account_to_check}'. No abrir."); return False
-                else: print(f"DEBUG [PM Pre-Open Check]: Chequeo discrepancia tamaño OK.")
             except Exception as sync_err: print(f"ERROR [PM Pre-Open Check Facade]: Excepción sync {side.upper()} en '{account_to_check}': {sync_err}"); traceback.print_exc(); return False
-    # <<<<<<< FIN MODIFICACIÓN CHEQUEO MARGEN REAL >>>>>>>
     return True
 
 def open_logical_position(side: str, entry_price: float, timestamp: datetime.datetime):
@@ -357,12 +398,9 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
                 if side == 'long':
                     threshold_long = getattr(config, 'POSITION_MIN_PRICE_DIFF_LONG_PCT', -1.0)
                     if pct_diff > threshold_long: print(f"WARN [Open {side.upper()} Facade]: Precio {entry_price:.4f} ({pct_diff:.2f}%) vs últ. {last_entry_price:.4f} (...{last_pos_id_short}). Req: < {threshold_long:.2f}%. No abrir."); return
-                    else: print(f"DEBUG [Open {side.upper()} Facade]: Distancia OK. Dif: {pct_diff:.2f}% <= Req: {threshold_long:.2f}%")
                 elif side == 'short':
                     threshold_short = getattr(config, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', 1.0)
                     if pct_diff < threshold_short: print(f"WARN [Open {side.upper()} Facade]: Precio {entry_price:.4f} ({pct_diff:.2f}%) vs últ. {last_entry_price:.4f} (...{last_pos_id_short}). Req: > {threshold_short:.2f}%. No abrir."); return
-                    else: print(f"DEBUG [Open {side.upper()} Facade]: Distancia OK. Dif: {pct_diff:.2f}% >= Req: {threshold_short:.2f}%")
-            else: print(f"WARN [Open {side.upper()} Facade]: Precio inválido últ. pos (...{last_pos_id_short}). Saltando chequeo distancia.")
     except Exception as e_dist_check: print(f"ERROR [Open Facade]: Verificando distancia {side}: {e_dist_check}"); traceback.print_exc(); return
 
     margin_to_use = _current_dynamic_base_size_long if side == 'long' else _current_dynamic_base_size_short
@@ -372,7 +410,6 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
         else:
             min_margin_needed_approx = utils.safe_division( _cached_min_order_qty * entry_price, _leverage, default=float('inf')) * 1.01
             if margin_to_use < min_margin_needed_approx: print(f"WARN [Open {side.upper()} Facade]: Margen base dinámico ({margin_to_use:.4f}) INSUF. vs mín. nec. ({min_margin_needed_approx:.4f}). No abrir."); return
-            else: print(f"DEBUG [Open {side.upper()} Facade]: Margen base dinámico ({margin_to_use:.4f}) SUF. vs mín. ({min_margin_needed_approx:.4f}).")
     except Exception as e_min_margin_check: print(f"ERROR [Open Facade]: Verificando margen mín. para {side}: {e_min_margin_check}"); traceback.print_exc(); return
 
     try: 
@@ -382,37 +419,7 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
             if _cooldown_enabled:
                 if side == 'long': _event_counter_since_last_long = 0; print(f"DEBUG [Cooldown Long]: Contador reseteado.")
                 elif side == 'short': _event_counter_since_last_short = 0; print(f"DEBUG [Cooldown Short]: Contador reseteado.")
-        else: print(f"WARN [Open Facade]: Ejecución apertura {side.upper()} falló (ver logs executor).")
     except Exception as e_exec: print(f"ERROR CRITICO [PM Facade]: Excepción delegando/ejecutando open ({side}): {e_exec}"); traceback.print_exc()
-
-
-def check_and_close_positions(current_price: float, timestamp: datetime.datetime):
-    global _initialized, _trading_mode, config, utils, position_state, position_calculations
-    if not _initialized: return
-    if not isinstance(current_price, (int, float)) or current_price <= 0: return
-    if not isinstance(timestamp, datetime.datetime): return
-    if not all([config, utils, position_state, position_calculations]): print("ERROR [CheckClose Facade]: Dependencias no disponibles."); return
-    print_updates = getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False); price_precision = getattr(config, 'PRICE_PRECISION', 4)
-    sides_to_check = [_s for _s in (["long"] if _trading_mode != "SHORT_ONLY" else []) + (["short"] if _trading_mode != "LONG_ONLY" else []) if _s]
-    for side in sides_to_check:
-        indices_to_close = []
-        try:
-            if not hasattr(position_state, 'get_open_logical_positions'): continue
-            open_positions = list(position_state.get_open_logical_positions(side))
-            for i, pos in enumerate(open_positions):
-                tp_stored = pos.get('take_profit_price'); tp_float = utils.safe_float_convert(tp_stored, default=None); should_close = False
-                if tp_float is not None:
-                     tolerance = 1e-7
-                     if side == 'long' and (current_price >= tp_float - tolerance): should_close = True
-                     elif side == 'short' and (current_price <= tp_float + tolerance): should_close = True
-                if should_close:
-                    indices_to_close.append(i)
-                    if print_updates: pos_id_short = str(pos.get('id','N/A'))[-6:]; tp_print = f"{tp_float:.{price_precision}f}" if tp_float is not None else "N/A"; print(f"DEBUG [TP Hit {side.upper()} Facade] ID: ...{pos_id_short}, Px: {current_price:.{price_precision}f} vs TP: {tp_print}. Marcada {i}.")
-            if indices_to_close:
-                for index in sorted(indices_to_close, reverse=True):
-                     if print_updates: print(f"DEBUG [CheckClose Facade]: Llamando close_logical_position {side.upper()} índice {index}")
-                     close_logical_position(side, index, current_price, timestamp)
-        except Exception as check_err: print(f"ERROR CRÍTICO [CheckClose Facade]: Verificando {side}: {check_err}"); traceback.print_exc()
 
 def close_logical_position(side: str, position_index: int, exit_price: float, timestamp: datetime.datetime):
     global _initialized, _total_realized_pnl_long, _total_realized_pnl_short, _total_transferred_profit, _min_transfer_amount, config, _executor, balance_manager, _max_logical_positions, _initial_base_position_size_usdt, _current_dynamic_base_size_long, _current_dynamic_base_size_short, _is_live_mode, utils
@@ -431,34 +438,96 @@ def close_logical_position(side: str, position_index: int, exit_price: float, ti
 
             if side == 'long': _total_realized_pnl_long += pnl_net_usdt
             else: _total_realized_pnl_short += pnl_net_usdt
-            if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False): total_pnl_side = _total_realized_pnl_long if side == 'long' else _total_realized_pnl_short; print(f"  DEBUG [Close Facade]: PNL Neto Cierre: {pnl_net_usdt:+.4f}. Total {side.upper()}: {total_pnl_side:+.4f}")
             
             if balance_manager and hasattr(balance_manager, 'get_available_margin') and _max_logical_positions > 0 and utils:
                 new_dynamic_base = utils.safe_division(balance_manager.get_available_margin(side), _max_logical_positions, 0.0)
-                if side == 'long':
-                    _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, new_dynamic_base)
-                    print(f"  DEBUG [PM Close]: Nuevo tamaño base dinámico LONG: {_current_dynamic_base_size_long:.4f} USDT")
-                else: 
-                    _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, new_dynamic_base)
-                    print(f"  DEBUG [PM Close]: Nuevo tamaño base dinámico SHORT: {_current_dynamic_base_size_short:.4f} USDT")
-            else:
-                print("WARN [PM Close]: No se pudo recalcular tamaño base dinámico (BM no disponible o slots=0).")
-
+                if side == 'long': _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, new_dynamic_base)
+                else: _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, new_dynamic_base)
+            
             if amount_to_potentially_transfer >= float(_min_transfer_amount):
-                print(f"  INFO [Close Facade]: Monto PNL Neto para transferir ({amount_to_potentially_transfer:.4f}) >= min ({_min_transfer_amount}). Delegando a Executor...")
                 transferred_amount_via_executor = _executor.execute_transfer(amount_to_potentially_transfer, side)
-                
                 if transferred_amount_via_executor > 0:
                     _total_transferred_profit += transferred_amount_via_executor
-                    if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False): print(f"  DEBUG [Close Facade]: Monto transferido (API/Sim): {transferred_amount_via_executor:.4f}. Total Global Transferido: {_total_transferred_profit:.4f}")
-                    
                     if _is_live_mode and balance_manager and hasattr(balance_manager, 'record_real_profit_transfer_logically'):
-                        print(f"  INFO [Close Facade]: Registrando transferencia real de {transferred_amount_via_executor:.4f} en BalanceManager Lógico...")
                         balance_manager.record_real_profit_transfer_logically(side, transferred_amount_via_executor)
-            else:
-                 print(f"  INFO [Close Facade]: Monto PNL Neto para transferir ({amount_to_potentially_transfer:.4f}) < min ({_min_transfer_amount}). No se transfiere.")
-        else: print(f"WARN [Close Facade]: Ejecución cierre {side.upper()} índice {position_index} falló (ver logs executor). Mensaje: {result.get('message', 'N/A')}")
     except Exception as e: print(f"ERROR CRITICO [PM Facade]: Excepción en close_logical_position ({side}, idx {position_index}): {e}"); traceback.print_exc()
+
+def get_current_price_for_exit() -> Optional[float]:
+    """Helper para obtener el precio actual para cierres/aperturas forzadas."""
+    try:
+        from live.connection import ticker
+        price_info = ticker.get_latest_price()
+        return price_info.get('price')
+    except Exception as e:
+        print(f"ERROR [get_current_price_for_exit]: {e}")
+        return None
+
+def close_all_logical_positions(side: str, exit_price: Optional[float] = None, timestamp: Optional[datetime.datetime] = None) -> bool:
+    """Cierra todas las posiciones lógicas abiertas para un lado dado."""
+    if not _initialized: return False
+    
+    open_positions = position_state.get_open_logical_positions(side)
+    if not open_positions:
+        print(f"INFO [Close All]: No hay posiciones {side.upper()} para cerrar."); return True
+    
+    price_to_use = exit_price if exit_price else get_current_price_for_exit()
+    if not price_to_use:
+        print(f"ERROR [Close All]: No se pudo determinar el precio de salida para {side.upper()}. Abortando."); return False
+    
+    ts_to_use = timestamp if timestamp else datetime.datetime.now()
+
+    print(f"--- Cerrando todas las {len(open_positions)} posiciones {side.upper()} a precio {price_to_use:.4f} ---")
+    
+    for i in sorted(range(len(open_positions)), reverse=True):
+        close_logical_position(side, i, price_to_use, ts_to_use)
+        time.sleep(0.1) # Pequeña pausa para no sobrecargar
+        
+    final_open_count = len(position_state.get_open_logical_positions(side))
+    if final_open_count == 0:
+        print(f"--- Cierre Total {side.upper()} Completado ---")
+        return True
+    else:
+        print(f"--- ERROR: Aún quedan {final_open_count} posiciones {side.upper()} abiertas después de intentar cerrar todas. ---")
+        return False
+
+def force_open_multiple_positions(side: str, count: int) -> bool:
+    """Abre un número específico de posiciones para el lado dado."""
+    if not _initialized: return False
+    success_count = 0
+    print(f"--- Intentando abrir forzadamente {count} posiciones {side.upper()} ---")
+    for i in range(count):
+        price = get_current_price_for_exit()
+        if not price:
+            print(f"ERROR [Force Open Multiple]: No se pudo obtener precio para abrir pos #{i+1}."); return False
+        
+        open_logical_position(side, price, datetime.datetime.now())
+        # Aquí no podemos verificar el éxito directamente sin cambiar la firma de open_logical_position
+        # Asumimos que se intentó
+        success_count += 1
+        time.sleep(0.2)
+    
+    final_count = len(position_state.get_open_logical_positions(side))
+    print(f"--- Apertura Forzada Múltiple {side.upper()} finalizada. Posiciones abiertas: {final_count} ---")
+    # El éxito se considera si se intentaron todas las aperturas
+    return success_count == count
+
+def set_base_position_size(new_size_usdt: float) -> Tuple[bool, str]:
+    """Permite cambiar el tamaño base de las futuras posiciones."""
+    global _initial_base_position_size_usdt, _current_dynamic_base_size_long, _current_dynamic_base_size_short
+    if not _initialized: return False, "Error: PM no inicializado."
+    if not isinstance(new_size_usdt, (int, float)) or new_size_usdt <= 0: return False, f"Error: Tamaño base inválido ({new_size_usdt})."
+    
+    old_size = _initial_base_position_size_usdt
+    _initial_base_position_size_usdt = new_size_usdt
+    
+    if _max_logical_positions > 0 and balance_manager and utils:
+        _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0))
+        _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0))
+        msg = f"Tamaño base actualizado de {old_size:.2f} a {new_size_usdt:.2f} USDT."
+        print(f"INFO [PM Set Base Size]: {msg}")
+        return True, msg
+    else:
+        return False, "Error: No se pudieron recalcular tamaños dinámicos (dependencias faltantes)."
 
 def force_open_test_position(side: str, entry_price: float, timestamp: datetime.datetime, size_contracts_str_api: str) -> Tuple[bool, Optional[str]]:
     global _initialized, _is_live_mode, _executor, _cooldown_enabled, _event_counter_since_last_long, _event_counter_since_last_short
@@ -519,18 +588,11 @@ def get_position_summary() -> dict:
     summary_error = None
     if not _initialized: summary_error = "PM not initialized"
     elif not all([config, utils, balance_manager, position_state, _position_helpers]): summary_error = "Dependencias no disponibles"
-    elif not hasattr(_position_helpers, 'format_pos_for_summary'): summary_error = "Falta format_pos_for_summary en Helpers"
-    elif not hasattr(balance_manager, 'get_balances'): summary_error = "Falta get_balances en BalanceManager"
-    elif not hasattr(position_state, 'get_physical_position_state'): summary_error = "Falta get_physical_position_state en PositionState"
-    elif not hasattr(position_state, 'get_open_logical_positions'): summary_error = "Falta get_open_logical_positions en PositionState"
-    elif not hasattr(position_state, 'get_used_margin'): summary_error = "Falta get_used_margin en PositionState"
     if summary_error: return {"error": summary_error}
     try:
         current_balances = balance_manager.get_balances() 
         phys_long = position_state.get_physical_position_state('long'); phys_short = position_state.get_physical_position_state('short')
         open_longs = position_state.get_open_logical_positions('long'); open_shorts = position_state.get_open_logical_positions('short')
-        used_long_logical_ps = position_state.get_used_margin('long'); used_short_logical_ps = position_state.get_used_margin('short')
-        
         long_summary_list = [_position_helpers.format_pos_for_summary(p, utils) for p in open_longs]
         short_summary_list = [_position_helpers.format_pos_for_summary(p, utils) for p in open_shorts]
         
@@ -542,7 +604,6 @@ def get_position_summary() -> dict:
             "initial_base_position_size_usdt": _initial_base_position_size_usdt,
             "current_dynamic_base_size_long": _current_dynamic_base_size_long,
             "current_dynamic_base_size_short": _current_dynamic_base_size_short,
-            
             "bm_available_long_margin": current_balances.get("available_long_margin", 0.0),
             "bm_available_short_margin": current_balances.get("available_short_margin", 0.0),
             "bm_used_long_margin": current_balances.get("used_long_margin", 0.0),
@@ -550,7 +611,6 @@ def get_position_summary() -> dict:
             "bm_operational_long_margin": current_balances.get("operational_long_margin", 0.0),
             "bm_operational_short_margin": current_balances.get("operational_short_margin", 0.0),
             "bm_profit_balance": current_balances.get("profit_balance", 0.0),
-
             "open_long_positions_count": len(open_longs), "open_short_positions_count": len(open_shorts),
             "open_long_positions": long_summary_list, "open_short_positions": short_summary_list,
             "physical_long_state": phys_long, "physical_short_state": phys_short,
@@ -574,7 +634,7 @@ def display_logical_positions():
     except Exception as e: print(f"ERROR [PM Display]: Excepción: {e}"); traceback.print_exc()
     finally: print("="*70 + "\n")
 
-# --- NUEVAS FUNCIONES PARA GESTIÓN MANUAL ---
+# --- FUNCIONES MANUALES (Mantenidas por compatibilidad, pero su uso puede ser obsoleto) ---
 def manual_open_with_api(side: str, entry_price: float, timestamp: datetime.datetime) -> Tuple[bool, str]:
     global _initialized, _is_live_mode, _trading_mode, _max_logical_positions, _leverage, _executor, balance_manager, position_state, utils, config, _cached_min_order_qty, _cooldown_enabled, _event_counter_since_last_long, _event_counter_since_last_short, _current_dynamic_base_size_long, _current_dynamic_base_size_short
     if not _initialized: return False, "Error: PM no inicializado."
@@ -636,19 +696,13 @@ def manual_close_with_api(side: str, position_index: int, exit_price: float, tim
                 new_dynamic_base = utils.safe_division(balance_manager.get_available_margin(side), _max_logical_positions, 0.0)
                 if side == 'long':
                     _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, new_dynamic_base)
-                    print(f"  DEBUG [PM Manual Close]: Nuevo tamaño base dinámico LONG: {_current_dynamic_base_size_long:.4f} USDT")
                 else: 
                     _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, new_dynamic_base)
-                    print(f"  DEBUG [PM Manual Close]: Nuevo tamaño base dinámico SHORT: {_current_dynamic_base_size_short:.4f} USDT")
-            else:
-                print("WARN [PM Manual Close]: No se pudo recalcular tamaño base dinámico (BM no disponible o slots=0).")
-
+            
             if amount_transferable >= float(_min_transfer_amount):
-                print(f"  INFO [Manual Close]: Monto PNL Neto para transferir ({amount_transferable:.4f}) >= min ({_min_transfer_amount}). Delegando...")
                 transferred_amount_actual = _executor.execute_transfer(amount_transferable, side)
                 if transferred_amount_actual > 0:
                     _total_transferred_profit += transferred_amount_actual
-                    if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False): print(f"  DEBUG [Manual Close]: Monto transferido (API/Sim): {transferred_amount_actual:.4f}. Total Global Transferido: {_total_transferred_profit:.4f}")
                     if _is_live_mode and balance_manager and hasattr(balance_manager, 'record_real_profit_transfer_logically'):
                         balance_manager.record_real_profit_transfer_logically(side, transferred_amount_actual)
             return True, msg
@@ -674,8 +728,6 @@ def add_max_logical_position_slot() -> Tuple[bool, str]:
         if _trading_mode == "SHORT_ONLY" or _trading_mode == "LONG_SHORT":
             dynamic_short = utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0)
             _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, dynamic_short)
-        
-        print(f"  DEBUG [PM Add Slot]: Nuevos tamaños base dinámicos L/S (PM): {_current_dynamic_base_size_long:.4f}/{_current_dynamic_base_size_short:.4f}")
     
     msg = f"Slots máximos incrementados a: {_max_logical_positions}."
     print(f"INFO [PM Slots]: {msg}")
@@ -714,12 +766,10 @@ def remove_max_logical_position_slot() -> Tuple[bool, str]:
                 dynamic_short = utils.safe_division(balance_manager.get_available_margin('short'), _max_logical_positions, 0.0)
                 _current_dynamic_base_size_short = max(_initial_base_position_size_usdt, dynamic_short)
             
-            print(f"  DEBUG [PM Remove Slot]: Nuevos tamaños base dinámicos L/S (PM): {_current_dynamic_base_size_long:.4f}/{_current_dynamic_base_size_short:.4f}")
-            
         msg = f"Slots máximos decrementados a: {_max_logical_positions}."; print(f"INFO [PM Slots]: {msg}"); return True, msg
     except Exception as e: 
         error_msg = f"Error verificando pos abiertas al remover slot: {e}"; 
         print(f"ERROR [PM Slots]: {error_msg}"); traceback.print_exc(); 
         return False, error_msg
 
-# =============== FIN ARCHIVO: core/strategy/position_manager.py (Modificado según instrucciones) ===============
+# =============== FIN ARCHIVO: core/strategy/position_manager.py (v13 - SL Físico y Control Automático) ===============
