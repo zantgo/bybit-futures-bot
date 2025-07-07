@@ -1,19 +1,13 @@
-# =============== INICIO ARCHIVO: automatic_runner.py (NUEVO) ===============
+# =============== INICIO ARCHIVO: automatic_runner.py (v13.1 - Robusto y Completo) ===============
 """
 Contiene la lógica para ejecutar el Modo Automático del bot.
 
-Este runner orquesta el bot de la siguiente manera:
-1.  Inicia y gestiona tres hilos principales:
-    - Hilo Ticker: Obtiene precios en tiempo real.
-    - Hilo UT Bot Controller: Genera señales de dirección de alto nivel.
-    - Hilo Key Listener: Permite la intervención manual del usuario.
-2.  Implementa una máquina de estados de alto nivel para controlar el régimen del bot:
-    - NEUTRAL: Estado de espera, no abre posiciones.
-    - ACTIVE_LONG: El bot de bajo nivel solo puede abrir posiciones largas.
-    - ACTIVE_SHORT: El bot de bajo nivel solo puede abrir posiciones cortas.
-3.  Reacciona a las señales del UT Bot para cambiar de régimen (ej. "flipping" de long a short).
-4.  Reacciona a los eventos de Stop Loss Físico, poniendo al bot en un estado de
-    enfriamiento (cooldown) antes de reanudar las operaciones.
+v13.1:
+- Se fuerza el estado inicial del bot a NEUTRAL antes de iniciar los hilos para
+  evitar operaciones prematuras.
+- Se implementa completamente la llamada a la función del menú de intervención manual.
+- Se añade robustez a la función `_handle_flip`, asegurando que se obtiene un
+  precio válido antes de cerrar posiciones y que los argumentos se pasan correctamente.
 """
 import time
 import traceback
@@ -22,11 +16,10 @@ import datetime
 import threading
 import sys
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
-# --- Dependencias del Proyecto (se pasan como argumentos) ---
-# Esto es solo para type hinting y claridad
-if False:
+# --- Type Hinting ---
+if TYPE_CHECKING:
     import config
     from core import utils, menu, live_operations
     from core.strategy import (
@@ -36,24 +29,23 @@ if False:
     from core.logging import open_position_snapshot_logger
     from live.connection import ticker as connection_ticker
 
-# --- Estado Global del Runner Automático ---
+# --- Estado Global del Runner ---
 _bot_state: str = "NEUTRAL"
 _ut_bot_signal: str = "HOLD"
 _stop_loss_event = threading.Event()
 _sl_cooldown_until: Optional[datetime.datetime] = None
-
-# --- Variables para el Listener de Teclado (igual que en live_runner) ---
 _key_pressed_event = threading.Event()
 _manual_intervention_char = 'm'
 _stop_key_listener_thread = threading.Event()
-# (El código de la función key_listener_thread_func se importará o se copiará aquí)
+_tick_visualization_status = {"low_level": True, "ut_bot": False}
+
+# --- Hilo Listener de Teclas ---
 if os.name == 'nt':
     import msvcrt
 else:
     import select, tty, termios
 
 def key_listener_thread_func():
-    # (Esta función es una copia de la de live_runner.py para mantener el módulo autocontenido)
     global _key_pressed_event, _manual_intervention_char, _stop_key_listener_thread
     print(f"\n[Key Listener] Hilo iniciado. Presiona '{_manual_intervention_char}' para menú, Ctrl+C para salir.")
     if os.name == 'nt':
@@ -61,9 +53,7 @@ def key_listener_thread_func():
             if msvcrt.kbhit():
                 try:
                     char = msvcrt.getch().decode().lower()
-                    if char == _manual_intervention_char:
-                        print(f"\n[Key Listener] Tecla '{_manual_intervention_char}' detectada!")
-                        _key_pressed_event.set()
+                    if char == _manual_intervention_char: _key_pressed_event.set()
                 except (UnicodeDecodeError, Exception): continue
             time.sleep(0.1)
     else:
@@ -75,270 +65,220 @@ def key_listener_thread_func():
             while not _stop_key_listener_thread.is_set():
                 if select.select([sys.stdin], [], [], 0.1)[0]:
                     char = sys.stdin.read(1).lower()
-                    if char == _manual_intervention_char:
-                        print(f"\n[Key Listener] Tecla '{_manual_intervention_char}' detectada!")
-                        _key_pressed_event.set()
+                    if char == _manual_intervention_char: _key_pressed_event.set()
         except Exception: pass
         finally:
-            if old_settings:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            if old_settings: termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     print("[Key Listener] Hilo terminado.")
 
 
 # --- Hilo del Controlador UT Bot ---
-def ut_bot_controller_thread_func(ut_controller, config_module):
-    """
-    Hilo que llama periódicamente al controlador UT Bot para generar una nueva señal.
-    """
+def ut_bot_controller_thread_func(ut_controller: Any, config_module: Any):
     global _ut_bot_signal
-    signal_interval = getattr(config_module, 'UT_BOT_SIGNAL_INTERVAL_SECONDS', 3600)
-    print(f"[UT Bot Thread] Hilo iniciado. Generando señal cada {signal_interval}s.")
-    while not _stop_key_listener_thread.is_set(): # Usa el mismo evento de parada general
+    while not _stop_key_listener_thread.is_set():
         try:
-            # get_latest_signal se encarga de la lógica de agregación y cálculo
             new_signal = ut_controller.get_latest_signal()
             if new_signal != "HOLD":
-                _ut_bot_signal = new_signal # Actualiza la señal global solo si es BUY o SELL
+                if _tick_visualization_status.get('ut_bot', False):
+                     print(f"\n>>>> SEÑAL UT BOT GENERADA: {new_signal} <<<<")
+                _ut_bot_signal = new_signal
         except Exception as e:
-            print(f"ERROR [UT Bot Thread]: {e}")
-            traceback.print_exc()
-        
-        # Espera hasta el próximo intervalo de señal.
-        # Esta espera determina la frecuencia con la que se generan las barras OHLC.
-        time.sleep(1) # Chequea cada segundo para no esperar todo el intervalo si se cierra el bot.
-                      # La lógica de agregación en get_latest_signal maneja el tiempo real.
+            print(f"ERROR [UT Bot Thread]: {e}"); traceback.print_exc()
+        time.sleep(1)
 
 
-# --- Lógica Principal del Runner Automático ---
-def run_automatic_mode(
-    final_summary: Dict[str, Any],
-    operation_mode: str,
-    # --- Módulos Pasados como Dependencias ---
+# --- Manejo del Menú de Intervención Manual ---
+def handle_manual_intervention_menu(
     config_module: Any,
-    utils_module: Any,
     menu_module: Any,
-    live_operations_module: Any,
-    position_manager_module: Any,
-    balance_manager_module: Any,
-    position_state_module: Any,
-    open_snapshot_logger_module: Any,
-    event_processor_module: Any,
-    ta_manager_module: Any,
-    ut_bot_controller_module: Any,
+    position_manager_module: Any
+):
+    global _tick_visualization_status
+    if not all([config_module, menu_module, position_manager_module]): return
+    if not getattr(position_manager_module, '_initialized', False): return
+
+    while True:
+        summary = position_manager_module.get_position_summary()
+        if 'error' in summary:
+            print(f"ERROR [Manual Menu]: No se pudo obtener resumen PM: {summary['error']}"); break
+        
+        summary['bot_state'] = _bot_state
+        choice = menu_module.get_automatic_mode_intervention_menu(
+            pm_summary=summary,
+            tick_visualization_status=_tick_visualization_status
+        )
+
+        if choice == '1':
+            menu_module.display_live_stats(summary)
+        elif choice == '2':
+            _tick_visualization_status['low_level'] = not _tick_visualization_status['low_level']
+            setattr(config_module, 'PRINT_TICK_LIVE_STATUS', _tick_visualization_status['low_level'])
+            print(f"INFO: Visualización de Ticks de Bajo Nivel {'ACTIVADA' if _tick_visualization_status['low_level'] else 'DESACTIVADA'}.")
+            time.sleep(1.5)
+        elif choice == '3':
+            _tick_visualization_status['ut_bot'] = not _tick_visualization_status['ut_bot']
+            print(f"INFO: Visualización de Señales de UT Bot {'ACTIVADA' if _tick_visualization_status['ut_bot'] else 'DESACTIVADA'}.")
+            time.sleep(1.5)
+        elif choice == '4':
+            success, message = position_manager_module.add_max_logical_position_slot()
+            print(f"Resultado: {message}"); time.sleep(2)
+        elif choice == '5':
+            success, message = position_manager_module.remove_max_logical_position_slot()
+            print(f"Resultado: {message}"); time.sleep(2)
+        elif choice == '6':
+            try:
+                current_size = summary.get('initial_base_position_size_usdt', 0.0)
+                new_size_str = input(f"Ingrese nuevo tamaño base (USDT) [Actual: {current_size:.2f}], 0 para cancelar: ").strip()
+                if new_size_str:
+                    new_size = float(new_size_str)
+                    if new_size > 0:
+                        success, message = position_manager_module.set_base_position_size(new_size)
+                        print(f"Resultado: {message}")
+                    else: print("Cambio cancelado.")
+            except (ValueError, TypeError): print("Error: Entrada inválida.")
+            time.sleep(2)
+        elif choice == '0':
+            print("Volviendo a la operación del bot..."); break
+        else:
+            print("Opción inválida."); time.sleep(1)
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+
+# --- Lógica Principal del Runner ---
+def run_automatic_mode(
+    final_summary: Dict[str, Any], operation_mode: str,
+    config_module: Any, utils_module: Any, menu_module: Any,
+    live_operations_module: Any, position_manager_module: Any,
+    balance_manager_module: Any, position_state_module: Any,
+    open_snapshot_logger_module: Any, event_processor_module: Any,
+    ta_manager_module: Any, ut_bot_controller_module: Any,
     connection_ticker_module: Any
 ):
-    """
-    Función principal para ejecutar y gestionar el modo automático.
-    """
     global _bot_state, _ut_bot_signal, _sl_cooldown_until
 
     print(f"\n--- INICIANDO MODO: {operation_mode.upper()} ---")
 
-    # --- 1. Inicialización de Componentes ---
     key_listener_hilo: Optional[threading.Thread] = None
     ut_bot_hilo: Optional[threading.Thread] = None
     bot_started = False
     
     try:
-        # Inicializar conexiones (ya debería estar hecho, pero es una buena práctica verificar)
-        try:
-            from live.connection import manager as live_manager
-            if not live_manager.get_initialized_accounts():
-                raise RuntimeError("No hay clientes API inicializados.")
-        except (ImportError, RuntimeError) as e:
-            print(f"ERROR CRITICO [Automatic Runner]: Fallo de conexión API: {e}")
-            return
+        from live.connection import manager as live_manager
+        if not live_manager.get_initialized_accounts():
+            raise RuntimeError("No hay clientes API inicializados.")
 
-        # Instanciar el controlador del UT Bot
         ut_controller = ut_bot_controller_module.UTBotController(config_module, utils_module)
 
-        # Inicializar todos los componentes del core
-        print("Inicializando Componentes Core (TA, EP, PM)...")
+        print("Inicializando Componentes Core...")
         ta_manager_module.initialize()
-        if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-            open_snapshot_logger_module.initialize_logger()
+        if open_snapshot_logger_module: open_snapshot_logger_module.initialize_logger()
         
-        # Pasar la instancia del UT Controller al Event Processor
         event_processor_module.initialize(
             operation_mode=operation_mode,
             ut_bot_controller_instance=ut_controller,
-            # Pasar el evento de SL al position_manager
             stop_loss_event=_stop_loss_event
         )
 
-        # Verificar que el Position Manager se inicializó correctamente
-        if getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
-             if not getattr(position_manager_module, '_initialized', False):
-                 raise RuntimeError("Position Manager no se inicializó correctamente vía Event Processor.")
+        if not getattr(position_manager_module, '_initialized', False):
+            raise RuntimeError("Position Manager no se inicializó correctamente.")
 
         print("Componentes Core inicializados.")
         bot_started = True
-
-        # --- 2. Iniciar Hilos ---
-        print("Iniciando hilos de operación (Ticker, UT Bot, Key Listener)...")
-        # Hilo Ticker de Precios
-        connection_ticker_module.start_ticker_thread(raw_event_callback=event_processor_module.process_event)
         
-        # Hilo del Controlador UT Bot
-        ut_bot_hilo = threading.Thread(
-            target=ut_bot_controller_thread_func,
-            args=(ut_controller, config_module),
-            daemon=True
-        )
-        ut_bot_hilo.start()
+        # *** CORRECCIÓN: Forzar estado NEUTRAL antes de iniciar hilos ***
+        print("INFO [Automatic Runner]: Estableciendo estado inicial a NEUTRAL.")
+        _bot_state = "NEUTRAL"
+        setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
 
-        # Hilo del Listener de Teclado
+        print("Iniciando hilos de operación (Ticker, UT Bot, Key Listener)...")
+        connection_ticker_module.start_ticker_thread(raw_event_callback=event_processor_module.process_event)
+        ut_bot_hilo = threading.Thread(target=ut_bot_controller_thread_func, args=(ut_controller, config_module), daemon=True)
+        ut_bot_hilo.start()
         if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False):
             key_listener_hilo = threading.Thread(target=key_listener_thread_func, daemon=True)
             key_listener_hilo.start()
 
         print("--- BOT OPERATIVO EN MODO AUTOMÁTICO ---")
         
-        # --- 3. Bucle Principal de la Máquina de Estados ---
         while True:
-            # --- Manejo de Intervención Manual ---
-            if _key_pressed_event.is_set():
+            if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False) and _key_pressed_event.is_set():
                 _stop_key_listener_thread.set()
-                if key_listener_hilo and key_listener_hilo.is_alive():
-                    key_listener_hilo.join(timeout=1.5)
-                
-                # Aquí iría la llamada al nuevo menú mejorado
-                # handle_manual_intervention_menu(...)
-                print("DEBUG: Menú de intervención manual sería llamado aquí.")
+                if key_listener_hilo: key_listener_hilo.join(timeout=1.5)
+                handle_manual_intervention_menu(config_module, menu_module, position_manager_module)
+                _key_pressed_event.clear(); _stop_key_listener_thread.clear()
+                key_listener_hilo = threading.Thread(target=key_listener_thread_func, daemon=True)
+                key_listener_hilo.start()
 
-                _key_pressed_event.clear()
-                _stop_key_listener_thread.clear()
-                if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False):
-                    key_listener_hilo = threading.Thread(target=key_listener_thread_func, daemon=True)
-                    key_listener_hilo.start()
-
-            # --- Manejo de Stop Loss ---
             if _stop_loss_event.is_set():
-                print(f"ALERTA [Automatic Runner]: Evento de Stop Loss detectado! Cambiando a NEUTRAL.")
+                print(f"ALERTA [Runner]: Evento de SL detectado! Cambiando a NEUTRAL.")
                 _bot_state = "NEUTRAL"
-                cooldown_seconds = getattr(config_module, 'AUTOMATIC_SL_COOLDOWN_SECONDS', 900)
-                _sl_cooldown_until = datetime.datetime.now() + datetime.timedelta(seconds=cooldown_seconds)
-                print(f"  - Bot en Cooldown por SL hasta: {_sl_cooldown_until.strftime('%Y-%m-%d %H:%M:%S')}")
-                setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL') # Modo especial para que PM no abra nada
-                _stop_loss_event.clear() # Resetear el evento
-                _ut_bot_signal = "HOLD" # Ignorar señales viejas
+                cooldown = getattr(config_module, 'AUTOMATIC_SL_COOLDOWN_SECONDS', 900)
+                _sl_cooldown_until = datetime.datetime.now() + datetime.timedelta(seconds=cooldown)
+                setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
+                _stop_loss_event.clear(); _ut_bot_signal = "HOLD"
 
-            # --- Chequeo de Cooldown ---
             if _sl_cooldown_until and datetime.datetime.now() < _sl_cooldown_until:
-                time.sleep(1)
-                continue # Saltar el resto del bucle si estamos en cooldown
+                time.sleep(1); continue
 
-            # --- Lógica de la Máquina de Estados ---
             current_signal = _ut_bot_signal
             if current_signal != "HOLD":
                 if _bot_state == "NEUTRAL":
                     if current_signal == "BUY":
                         print("INFO [State Machine]: NEUTRAL -> BUY Signal. Cambiando a ACTIVE_LONG.")
-                        _bot_state = "ACTIVE_LONG"
-                        setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                        _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
                     elif current_signal == "SELL":
                         print("INFO [State Machine]: NEUTRAL -> SELL Signal. Cambiando a ACTIVE_SHORT.")
-                        _bot_state = "ACTIVE_SHORT"
-                        setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
-
-                elif _bot_state == "ACTIVE_LONG":
-                    if current_signal == "SELL":
-                        print("INFO [State Machine]: ACTIVE_LONG -> SELL Signal. Ejecutando FLIP a SHORT.")
-                        _handle_flip(
-                            target_side='short',
-                            position_manager_module=position_manager_module,
-                            config_module=config_module,
-                            live_operations_module=live_operations_module
-                        )
-                        _bot_state = "ACTIVE_SHORT"
-                        setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
-
-                elif _bot_state == "ACTIVE_SHORT":
-                    if current_signal == "BUY":
-                        print("INFO [State Machine]: ACTIVE_SHORT -> BUY Signal. Ejecutando FLIP a LONG.")
-                        _handle_flip(
-                            target_side='long',
-                            position_manager_module=position_manager_module,
-                            config_module=config_module,
-                            live_operations_module=live_operations_module
-                        )
-                        _bot_state = "ACTIVE_LONG"
-                        setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
-
-                _ut_bot_signal = "HOLD" # Consumir la señal
-
-            time.sleep(0.5) # Pausa del bucle principal
+                        _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                elif _bot_state == "ACTIVE_LONG" and current_signal == "SELL":
+                    print("INFO [State Machine]: ACTIVE_LONG -> SELL Signal. Ejecutando FLIP a SHORT.")
+                    _handle_flip('short', position_manager_module, config_module)
+                    _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                elif _bot_state == "ACTIVE_SHORT" and current_signal == "BUY":
+                    print("INFO [State Machine]: ACTIVE_SHORT -> BUY Signal. Ejecutando FLIP a LONG.")
+                    _handle_flip('long', position_manager_module, config_module)
+                    _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                _ut_bot_signal = "HOLD"
+            time.sleep(0.5)
     
-    except (KeyboardInterrupt, SystemExit):
-        print("\nDeteniendo Proceso Automático...")
-    except Exception as e:
-        print(f"ERROR CRITICO en el Runner Automático: {e}")
-        traceback.print_exc()
+    except (KeyboardInterrupt, SystemExit): print("\nDeteniendo Proceso Automático...")
+    except Exception as e: print(f"ERROR CRITICO en Runner Automático: {e}"); traceback.print_exc()
     finally:
         print("\n--- Limpieza del Runner Automático ---")
         _stop_key_listener_thread.set()
-        
-        if key_listener_hilo and key_listener_hilo.is_alive():
-            key_listener_hilo.join(timeout=1.0)
-        if ut_bot_hilo and ut_bot_hilo.is_alive():
-            ut_bot_hilo.join(timeout=1.0)
-            
+        if ut_bot_hilo: ut_bot_hilo.join(timeout=1.0)
+        if key_listener_hilo: key_listener_hilo.join(timeout=1.0)
         if bot_started:
             connection_ticker_module.stop_ticker_thread()
-            print("Ticker detenido.")
-
-            if getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False) and position_manager_module:
+            if position_manager_module and getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
                 summary = position_manager_module.get_position_summary()
-                final_summary.clear()
-                final_summary.update(summary)
-                print("\n--- Resumen Final (Automatic Runner) ---")
-                print(json.dumps(summary, indent=2))
-                if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-                    open_snapshot_logger_module.log_open_positions_snapshot(summary)
+                final_summary.clear(); final_summary.update(summary)
+                print("\n--- Resumen Final (Automatic Runner) ---\n" + json.dumps(summary, indent=2))
+                if open_snapshot_logger_module: open_snapshot_logger_module.log_open_positions_snapshot(summary)
 
-
-def _handle_flip(target_side: str, position_manager_module: Any, config_module: Any, live_operations_module: Any):
-    """
-    Gestiona el "flip": cierra las posiciones del lado actual y opcionalmente
-    abre nuevas en el lado opuesto.
-    """
+def _handle_flip(target_side: str, position_manager_module: Any, config_module: Any):
     current_side = 'short' if target_side == 'long' else 'long'
     print(f"--- Ejecutando FLIP de {current_side.upper()} a {target_side.upper()} ---")
+    summary = position_manager_module.get_position_summary()
+    if 'error' in summary:
+        print(f"ERROR [Flip]: No se pudo obtener resumen PM: {summary['error']}"); return
 
-    # 1. Obtener el estado actual antes de cerrar
-    summary_before_flip = position_manager_module.get_position_summary()
-    if 'error' in summary_before_flip:
-        print(f"ERROR [Flip]: No se pudo obtener resumen PM: {summary_before_flip['error']}")
-        return
+    num_to_close = summary.get(f'open_{current_side}_positions_count', 0)
+    if num_to_close > 0:
+        current_price = position_manager_module.get_current_price_for_exit()
+        if not current_price:
+            print("ERROR [Flip]: No se pudo obtener precio actual para cierre. Abortando flip."); return
+        
+        print(f"Cerrando {num_to_close} posiciones {current_side.upper()}...")
+        success_closing = position_manager_module.close_all_logical_positions(current_side, current_price, datetime.datetime.now())
+        if not success_closing: print("ERROR [Flip]: No se pudieron cerrar todas las posiciones. Flip abortado."); return
+        time.sleep(getattr(config_module, 'POST_CLOSE_SYNC_DELAY_SECONDS', 1.0) * 2)
 
-    positions_to_close_key = f'open_{current_side}_positions'
-    positions_to_close = summary_before_flip.get(positions_to_close_key, [])
-    num_positions_to_close = len(positions_to_close)
-
-    if num_positions_to_close == 0:
-        print(f"INFO [Flip]: No hay posiciones {current_side.upper()} para cerrar. Procediendo a cambiar de modo.")
-        return
-
-    # 2. Cerrar todas las posiciones del lado actual
-    print(f"Cerrando {num_positions_to_close} posiciones {current_side.upper()}...")
-    success_closing = position_manager_module.close_all_logical_positions(current_side)
-
-    if not success_closing:
-        print("ERROR [Flip]: No se pudieron cerrar todas las posiciones. Flip abortado.")
-        return
-
-    # Esperar un poco para que el estado se actualice
-    time.sleep(getattr(config_module, 'POST_CLOSE_SYNC_DELAY_SECONDS', 1.0) * 2)
-
-    # 3. Abrir nuevas posiciones si está configurado
-    if getattr(config_module, 'AUTOMATIC_FLIP_OPENS_NEW_POSITIONS', True):
-        print(f"Abriendo {num_positions_to_close} posiciones en el lado {target_side.upper()}...")
-        success_opening = position_manager_module.force_open_multiple_positions(target_side, num_positions_to_close)
-        if not success_opening:
-            print("ERROR [Flip]: Falló la apertura de nuevas posiciones post-flip.")
+    if getattr(config_module, 'AUTOMATIC_FLIP_OPENS_NEW_POSITIONS', True) and num_to_close > 0:
+        print(f"Abriendo {num_to_close} posiciones en el lado {target_side.upper()}...")
+        success_opening = position_manager_module.force_open_multiple_positions(target_side, num_to_close)
+        if not success_opening: print("ERROR [Flip]: Falló la apertura de nuevas posiciones post-flip.")
     else:
-        print("INFO [Flip]: Cierre completado. No se abrirán nuevas posiciones automáticamente (config).")
-
+        print("INFO [Flip]: Cierre completado. Comportamiento de no-reapertura configurado.")
     print("--- FLIP completado ---")
 
-# =============== FIN ARCHIVO: automatic_runner.py (NUEVO) ===============
+# =============== FIN ARCHIVO: automatic_runner.py (v13.1 - Completo y Robusto) ===============

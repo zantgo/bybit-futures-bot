@@ -41,7 +41,7 @@ UNIVERSAL_TESTNET_MODE = False
 DEFAULT_RECV_WINDOW = 30000
 
 # --- Live Ticker / Backtest Feeder Settings ---
-TICKER_SYMBOL = "BTCUSDT"
+TICKER_SYMBOL = "FARTCOINUSDT"
 TICKER_INTERVAL_SECONDS = 1
 TICKER_SOURCE_ACCOUNT = ACCOUNT_PROFIT
 RAW_PRICE_TICK_INTERVAL = 1
@@ -65,25 +65,25 @@ POSITION_MANAGEMENT_ENABLED = True
 # 'LONG_SHORT', 'LONG_ONLY', 'SHORT_ONLY' son para modo interactivo.
 # 'NEUTRAL' es un estado de espera. El modo automático gestionará este valor dinámicamente.
 POSITION_TRADING_MODE = "LONG_SHORT"
-POSITION_BASE_SIZE_USDT = 5.0
-POSITION_MAX_LOGICAL_POSITIONS = 10
-POSITION_LEVERAGE = 3.0
+POSITION_BASE_SIZE_USDT = 1.0
+POSITION_MAX_LOGICAL_POSITIONS = 20
+POSITION_LEVERAGE = 10.0
 POSITION_TAKE_PROFIT_PCT_LONG = 0.3
 POSITION_TAKE_PROFIT_PCT_SHORT = 0.3
 POSITION_COMMISSION_RATE = 0.001
-POSITION_REINVEST_PROFIT_PCT = 0.2
+POSITION_REINVEST_PROFIT_PCT = 10.0
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 
 # --- Stop Loss Físico (NUEVO) ---
 # Porcentaje de pérdida sobre el margen inicial AGREGADO de la posición física
 # que activará el cierre de todas las posiciones de ese lado.
-POSITION_PHYSICAL_STOP_LOSS_PCT = 5.0 # 5% de Stop Loss
+POSITION_PHYSICAL_STOP_LOSS_PCT = 10.0 # 5% de Stop Loss (parece ser calculado desde la posicion obtenida al peor precio)
 
 # --- Filtros, Delays y Cooldown ---
-POSITION_SIGNAL_COOLDOWN_ENABLED = True
+POSITION_SIGNAL_COOLDOWN_ENABLED = False #True
 POSITION_SIGNAL_COOLDOWN_LONG = 0
 POSITION_SIGNAL_COOLDOWN_SHORT = 0
-POSITION_PRE_OPEN_SYNC_CHECK = False
+POSITION_PRE_OPEN_SYNC_CHECK = True #False
 POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.25
 POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.25
 POST_ORDER_CONFIRMATION_DELAY_SECONDS = 0.1
@@ -105,13 +105,13 @@ UT_BOT_KEY_VALUE = 1.0  # a.k.a. "Sensitivity"
 UT_BOT_ATR_PERIOD = 10  # Periodo del ATR
 
 # Define el comportamiento al recibir una señal de "flip" (cambio de dirección).
-# True: Cierra posiciones actuales y abre el mismo número en la dirección opuesta.
+# True: Cierra posiciones actuales y abre el mismo número en la dirección opuesta (más riesgoso).
 # False: Solo cierra las posiciones actuales y espera que el bot de bajo nivel abra nuevas.
-AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = True
+AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = False #True
 
 # Período de enfriamiento en segundos después de que salte un Stop Loss,
 # antes de que el bot vuelva a aceptar señales del UT Bot.
-AUTOMATIC_SL_COOLDOWN_SECONDS = 900 # 15 minutos
+AUTOMATIC_SL_COOLDOWN_SECONDS = 1 #
 
 # --- Printing / Logging Configuration ---
 POSITION_LOG_CLOSED_POSITIONS = True

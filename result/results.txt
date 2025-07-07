@@ -1,55 +1,38 @@
-======================================================================
- Reporte de Ejecución - Bot v8.7.x
- Generado: 2025-05-10 19:17:26
- Modo: BACKTEST_INTERACTIVE
-======================================================================
+================================================================================
+                         Reporte de Ejecución - Bot v13                         
+                         Generado: 2025-07-07 21:59:15                          
+                                Modo: AUTOMATIC                                 
+================================================================================
 
-----------------------------------------------------------------------
- Configuración Clave Utilizada
-----------------------------------------------------------------------
-  Símbolo: BTCUSDT
+--- Configuración de la Sesión ------------------------------------------------
+  Símbolo: FARTCOINUSDT
   Gestión de Posiciones: Activada
-    Modo Trading: LONG_SHORT
-    Capital Inicial Asignado: 200.00 USDT (total asignado)
-    Apalancamiento: 4.0x
-    Max Pos Lógicas (Final): 2 (por lado)
-    TP % (L/S): 50.00% / 50.00%
-    Comisión %: 0.100%
-    Reinvertir PNL Operacional %: 1.00%
-    Cooldown Señales: Activado
-      -> Periodo Espera Long:  3 eventos
-      -> Periodo Espera Short: 3 eventos
+  Modo Trading (final): NEUTRAL
+  Capital Inicial Asignado: 40.00 USDT
+  Apalancamiento: 10.0x
+  Max Pos Lógicas (Final): 20 (por lado)
+  TP % (L/S): 30.00% / 30.00%
+  Comisión %: 0.100%
+  Reinvertir PNL Operacional %: 10.00%
 
-----------------------------------------------------------------------
- Resumen Trades Cerrados
-----------------------------------------------------------------------
-  Total Trades Cerrados: 10 (Long: 3, Short: 7)
-  Trades Ganadores:    10 (100.00%) (Long: 3, Short: 7)
-  Trades Perdedores:   0
-  PNL Neto Total:      +9.3135 USDT (Long: +2.5854, Short: +6.7281)
-  Ganancia Promedio:   +0.9313 USDT
-  Pérdida Promedio:    +0.0000 USDT
-  Profit Factor:       inf
+  --- Parámetros del Modo Automático ---
+    Intervalo Señal UT Bot: 3600 seg
+    UT Bot Key Value:       1.0
+    UT Bot ATR Period:      10
+    Flip Abre Posiciones:   False
+    Cooldown Post-SL:       1 seg
+    Stop Loss Físico:       10.0%
 
-----------------------------------------------------------------------
- Estado Final
-----------------------------------------------------------------------
-  Margen Operativo Total Final Long:  100.0000 USDT (Balance Manager)
-  Margen Operativo Total Final Short: 100.0000 USDT (Balance Manager)
-  Margen Operativo Disponible Long:   0.0000 USDT
-  Margen Operativo Disponible Short:  0.0071 USDT
-  Margen Total Usado Lógico (L/S):    100.0000 / 99.9929 USDT
-  Balance Cuenta Profit Final:        9.2204 USDT
-  PNL Neto Total Realizado:           +9.3135 USDT
-  Total Transferido a Profit:         9.2204 USDT (Simulado)
-  Capital Inicial Total Operativo:    200.00 USDT (Balance Manager (get_initial_total_capital))
-  Capital Final Total (Equity Lóg.):  209.3135 USDT
-  Retorno Sobre Capital Inicial (%):  +4.66%
+--- Resumen Trades Cerrados ---------------------------------------------------
+  No se cerraron trades durante esta sesión o no se pudo leer el log.
 
-  Posiciones Abiertas al Final: 4
-    Longs Abiertas (2):
-      - ID: ...00abda, Entry: 131.0700, Size: 1.525, TP: 131.7253
-      - ID: ...61799d, Entry: 130.3000, Size: 1.534, TP: 130.9515
-    Shorts Abiertas (2):
-      - ID: ...51ab31, Entry: 127.2100, Size: 1.572, TP: 126.5739
-      - ID: ...00d8c9, Entry: 128.0100, Size: 1.562, TP: 127.3699
+--- Estado Final --------------------------------------------------------------
+  Capital Inicial Total Operativo:    40.00 USDT
+  Capital Final Total (Equity Lóg.):  40.0000 USDT
+  Retorno Sobre Capital Inicial (%):  +0.00%
+
+  Balance Operativo Final Long:         20.0000 USDT
+  Balance Operativo Final Short:        20.0000 USDT
+  Balance Cuenta Profit Final:          0.0000 USDT
+
+  Posiciones Abiertas al Final: 0

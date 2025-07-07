@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: main.py (v13 - Integración Modo Automático) ===============
+# =============== INICIO ARCHIVO: main.py (v13 - CORRECCIÓN FINAL Y DEFINITIVA) ===============
 """
 Punto de entrada principal (v13).
 Selección de modo (Live/Backtest/Automático), configuración inicial base, y orquesta la ejecución.
@@ -25,17 +25,6 @@ try:
 except NameError:
     project_root = os.path.abspath(os.path.join(os.getcwd()))
     print(f"WARN [main]: __file__ no definido, usando CWD como base para PROJECT_ROOT: {project_root}")
-
-# --- Verificación de Dependencias (Añadir pandas-ta) ---
-print("Verificando dependencias (dotenv, pybit, pandas, numpy, matplotlib, pandas-ta)...")
-try:
-    import pybit, pandas, numpy, matplotlib
-    import pandas_ta as ta
-    print("Dependencias encontradas.")
-except ImportError as e:
-    print(f"\nError: Falta dependencia '{e.name}'.")
-    print("Instala las dependencias con: pip install -r requirements.txt")
-    sys.exit(1)
 
 # --- Módulos Core y de Soporte (se inicializan como None) ---
 utils = None
@@ -119,6 +108,26 @@ def main_loop():
     if not configure_runtime_settings():
          print("\nERROR: No se pudo configurar el entorno base. Abortando."); sys.exit(1)
 
+    # ### INICIO DE LA CORRECCIÓN DEFINITIVA ###
+    # La inicialización de la API se hace UNA SOLA VEZ aquí, antes de cualquier selección de modo.
+    print("\n[main] Inicializando clientes API de Bybit (una sola vez)...")
+    try:
+        from live.connection import manager as live_manager
+        live_manager.initialize_all_clients()
+        
+        # Después de la inicialización, verificamos si realmente se cargó algo.
+        # El propio `manager` ya imprime los errores, aquí solo confirmamos el resultado.
+        if not live_manager.get_initialized_accounts():
+             print("[main] ADVERTENCIA: La inicialización de la API finalizó, pero no se cargó ningún cliente.")
+             print("[main] Los modos Live y Automático probablemente fallarán. Verifica tu archivo .env")
+        else:
+             print(f"[main] Clientes API inicializados con éxito: {live_manager.get_initialized_accounts()}")
+    except Exception as e_api:
+        print(f"[main] ERROR CRITICO durante la inicialización de la API: {e_api}")
+        traceback.print_exc()
+        sys.exit(1)
+    # ### FIN DE LA CORRECCIÓN DEFINITIVA ###
+
     # --- FLUJO DE EJECUCIÓN ---
     # Si el modo automático está activado en config, se ejecuta directamente.
     if getattr(config, 'AUTOMATIC_MODE_ENABLED', False):
@@ -126,7 +135,6 @@ def main_loop():
         print(f"\n--- MODO AUTOMÁTICO DETECTADO EN CONFIG.PY ---")
         print("Iniciando directamente el runner automático...")
         
-        # Verificar dependencias para el modo automático
         if not all([automatic_runner, ut_bot_controller, connection_ticker]):
             print("ERROR CRITICO: Faltan dependencias para el Modo Automático (automatic_runner, ut_bot_controller, connection_ticker).")
             sys.exit(1)
@@ -163,6 +171,8 @@ def main_loop():
             operation_mode = "live_interactive"
             print(f"\n--- Iniciando Preparación Modo: {operation_mode.upper()} ---")
             try:
+                # El live_runner tiene su propia llamada a initialize_all_clients, pero gracias al flag
+                # _initialized, solo imprimirá una advertencia y no hará nada, lo cual es seguro.
                 active_ticker_module = live_runner.run_live_pre_start(
                     final_summary=final_summary, operation_mode=operation_mode,
                     config_module=config, utils_module=utils, menu_module=menu,
@@ -204,6 +214,9 @@ def main_loop():
         elif choice == '3': # Modo Automático (seleccionado desde el menú)
             operation_mode = "automatic"
             print(f"\n--- Iniciando Preparación Modo: {operation_mode.upper()} ---")
+            
+            # Ya no se necesita el bloque de inicialización aquí, porque se hizo al principio.
+            
             if not all([automatic_runner, ut_bot_controller, connection_ticker]):
                 print("ERROR CRITICO: Faltan dependencias para el Modo Automático.")
                 time.sleep(2); continue
@@ -342,4 +355,4 @@ if __name__ == "__main__":
 
         print("\nPrograma terminado.")
 
-# =============== FIN ARCHIVO: main.py (v13 - Integración Modo Automático) ===============
+# =============== FIN ARCHIVO: main.py (v13 - CORRECCIÓN FINAL Y DEFINITIVA) ===============

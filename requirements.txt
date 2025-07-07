@@ -4,7 +4,7 @@
 python-dotenv>=0.19.0     # Para cargar variables de entorno desde el archivo .env (API Keys, UIDs)
 pybit>=5.4.0              # Cliente oficial de Bybit API v5 (para operaciones Live)
 pandas>=1.4.0             # Para manipulación de DataFrames (datos históricos, TA, tablas lógicas)
-numpy>=1.21.0             # Para cálculos numéricos (usado extensivamente en TA y cálculos de posición)
+numpy>=1.26.4             # Para cálculos numéricos (usado extensivamente en TA y cálculos de posición)
 
 # --- Technical Analysis Libraries ---
 # Necesario para el nuevo UTBotController (cálculo de ATR) y futuras estrategias.
