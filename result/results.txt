@@ -1,6 +1,6 @@
 ================================================================================
                          Reporte de Ejecución - Bot v13                         
-                         Generado: 2025-07-07 21:59:15                          
+                         Generado: 2025-07-08 02:22:47                          
                                 Modo: AUTOMATIC                                 
 ================================================================================
 
@@ -16,7 +16,7 @@
   Reinvertir PNL Operacional %: 10.00%
 
   --- Parámetros del Modo Automático ---
-    Intervalo Señal UT Bot: 3600 seg
+    Intervalo Señal UT Bot: 1800 seg
     UT Bot Key Value:       1.0
     UT Bot ATR Period:      10
     Flip Abre Posiciones:   False
