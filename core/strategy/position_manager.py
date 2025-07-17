@@ -1,16 +1,13 @@
-# =============== INICIO ARCHIVO: core/strategy/position_manager.py (v13.1 - Lectura de Modo en Tiempo Real) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_manager.py (v13.4 - Lógica Corregida Final) ===============
 """
 Fachada Pública y Contenedor de Estado para Position Manager.
-Orquesta el ciclo de vida de las posiciones, mantiene el estado agregado (PNL, cooldown)
-e implementa la lógica de Stop Loss físico.
 
-v13.1:
-- CORREGIDO: `can_open_new_position` y `check_and_close_positions` ahora leen
-  `config.POSITION_TRADING_MODE` en tiempo real, en lugar de usar una variable
-  local desactualizada, solucionando el problema de apertura en ambos lados
-  en modo automático.
-- Añadida lógica para el Stop Loss Físico.
-- Añadidas funciones de control para el modo automático.
+v13.4:
+- CORREGIDO: Ajustada la detección de `_is_live_mode` en `initialize` para que
+  'automatic_backtest' no se considere modo en vivo, evitando llamadas API.
+- Añadida la función `handle_low_level_signal` para centralizar la lógica de
+  apertura basada en señales de bajo nivel.
+- Eliminada la lógica de ROI de este módulo, que ahora es gestionada por los runners.
 """
 import datetime
 import uuid
@@ -25,7 +22,7 @@ import threading # Necesario para el threading.Event
 try:
     import config
     from core import utils
-    from . import balance_manager # Asegúrate que balance_manager tiene update_operational_margins_based_on_slots
+    from . import balance_manager
     from . import position_state
     from . import position_calculations
     try:
@@ -79,15 +76,12 @@ _executor: Optional[PositionExecutor] = None
 _total_realized_pnl_long: float = 0.0
 _total_realized_pnl_short: float = 0.0
 _total_transferred_profit: float = 0.0
-# _trading_mode: str = "N/A"  <- CORRECCIÓN: Esta variable se elimina para forzar la lectura en tiempo real desde config.
 _leverage: float = 1.0
 _min_transfer_amount: float = 0.1
-
 _max_logical_positions: int = 1
-_initial_base_position_size_usdt: float = 0.0 # Tamaño base de sesión, usado como piso
+_initial_base_position_size_usdt: float = 0.0
 _current_dynamic_base_size_long: float = 0.0
 _current_dynamic_base_size_short: float = 0.0
-
 _event_counter_since_last_long: int = 0
 _event_counter_since_last_short: int = 0
 _cooldown_enabled: bool = False
@@ -120,41 +114,40 @@ def initialize(
     print("[PM Facade] Inicializando Orquestador...")
     _initialized = False; _total_realized_pnl_long = 0.0; _total_realized_pnl_short = 0.0; _total_transferred_profit = 0.0
     _event_counter_since_last_long = 0; _event_counter_since_last_short = 0
-    _is_live_mode = operation_mode.startswith(("live", "automatic"))
+    
+    # <<< CORRECCIÓN CLAVE >>>
+    # El backtest automático NO es un modo en vivo. Solo los modos que interactúan
+    # con la API en tiempo real se consideran 'live'.
+    _is_live_mode = operation_mode in ["live_interactive", "automatic"]
+    
     _live_manager = None; _executor = None; _cached_min_order_qty = None
     _stop_loss_event = stop_loss_event
 
     try:
-        # CORRECCIÓN: _trading_mode ya no se cachea aquí. Se leerá de config.py en tiempo real.
         _leverage = max(1.0,float(getattr(config,'POSITION_LEVERAGE',1.0)))
         _min_transfer_amount = float(getattr(config,'POSITION_MIN_TRANSFER_AMOUNT_USDT',0.1))
         _cooldown_enabled = bool(getattr(config, 'POSITION_SIGNAL_COOLDOWN_ENABLED', False))
         _cooldown_long_period = int(getattr(config, 'POSITION_SIGNAL_COOLDOWN_LONG', 0)) if _cooldown_enabled else 0
         _cooldown_short_period = int(getattr(config, 'POSITION_SIGNAL_COOLDOWN_SHORT', 0)) if _cooldown_enabled else 0
-
         default_base_size_cfg = utils.safe_float_convert(getattr(config, 'POSITION_BASE_SIZE_USDT', 10.0), 10.0)
         default_slots_cfg = int(getattr(config, 'POSITION_MAX_LOGICAL_POSITIONS', 1))
-        
         _initial_base_position_size_usdt = base_position_size_usdt_param if base_position_size_usdt_param is not None and base_position_size_usdt_param > 0 else default_base_size_cfg
         _max_logical_positions = initial_max_logical_positions_param if initial_max_logical_positions_param is not None and initial_max_logical_positions_param >= 1 else default_slots_cfg
-        
         print(f"  Config PM: ModoOp (inicial)='{config.POSITION_TRADING_MODE}', Lev={_leverage:.1f}x")
         print(f"  Config PM: Tamaño Base Inicial por Posición (Sesión): {_initial_base_position_size_usdt:.4f} USDT")
         print(f"  Config PM: Slots Lógicos Iniciales por Lado: {_max_logical_positions}")
         print(f"  Config PM: Cooldown Señales: {'Activado (L:'+str(_cooldown_long_period)+', S:'+str(_cooldown_short_period)+')' if _cooldown_enabled else 'Desactivado'}")
-
         if hasattr(_position_helpers, 'set_config_dependency'): _position_helpers.set_config_dependency(config)
         if hasattr(_position_helpers, 'set_utils_dependency'): _position_helpers.set_utils_dependency(utils)
         if hasattr(_position_helpers, 'set_live_operations_dependency'): _position_helpers.set_live_operations_dependency(live_operations if _is_live_mode else None)
     except Exception as e_cfg: print(f"ERROR CRITICO [PM Init Facade]: Cacheando config: {e_cfg}. Abortando."); traceback.print_exc(); return
-
     if _is_live_mode: 
         try:
             from live.connection import manager as live_conn_manager; _live_manager = live_conn_manager
             if not hasattr(_live_manager, 'get_initialized_accounts') or not _live_manager.get_initialized_accounts(): print("WARN [PM Init Facade]: Live Manager sin cuentas inicializadas.")
             else:
                  accounts_needed = [getattr(config,'ACCOUNT_PROFIT', None)]; loaded_uids = getattr(config,'LOADED_UIDS',{});
-                 trading_mode_init = config.POSITION_TRADING_MODE # Leer modo actual
+                 trading_mode_init = config.POSITION_TRADING_MODE
                  if trading_mode_init != 'SHORT_ONLY': accounts_needed.append(getattr(config,'ACCOUNT_LONGS', None))
                  if trading_mode_init != 'LONG_ONLY': accounts_needed.append(getattr(config,'ACCOUNT_SHORTS', None))
                  accounts_needed = [acc for acc in accounts_needed if acc]; missing_uids = [acc for acc in accounts_needed if acc not in loaded_uids]
@@ -163,7 +156,6 @@ def initialize(
             if not live_operations: print("ERROR CRITICO [PM Init Facade]: Live Operations no cargado (esencial para Live PM)."); return
         except ImportError: print("ERROR CRITICO [PM Init Facade]: No se pudo importar live.connection.manager."); _live_manager = None; _is_live_mode = False; return
         except Exception as e_live: print(f"ERROR [PM Init Facade]: Configurando Live Manager: {e_live}"); _live_manager = None; _is_live_mode = False; return
-
     try: 
         min_qty_fallback = float(getattr(config, 'DEFAULT_MIN_ORDER_QTY', 0.001))
         symbol_cfg = getattr(config, 'TICKER_SYMBOL', None)
@@ -173,7 +165,6 @@ def initialize(
             else: _cached_min_order_qty = min_qty_fallback; print(f"  WARN [PM Init]: No minOrderQty de API. Usando default: {_cached_min_order_qty}")
         else: _cached_min_order_qty = min_qty_fallback; print(f"  Min Order Qty (Config): {_cached_min_order_qty}")
     except Exception as e_qty: print(f"ERROR [PM Init Facade]: Cacheando min_order_qty: {e_qty}"); _cached_min_order_qty = 0.001
-
     try: 
         if not hasattr(balance_manager, 'initialize'): raise AttributeError("BalanceManager sin 'initialize'.")
         print(f"  Inicializando Balance Manager (Modo: {operation_mode})...")
@@ -181,7 +172,6 @@ def initialize(
         print("  -> Balance Manager inicializado.")
     except AttributeError as attr_err_bm: print(f"ERROR CRITICO [PM Init Facade]: {attr_err_bm}"); traceback.print_exc(); return
     except Exception as init_e_bm: print(f"ERROR CRITICO [PM Init Facade]: Fallo inicializando BM: {init_e_bm}"); traceback.print_exc(); return
-
     trading_mode_init_bm = config.POSITION_TRADING_MODE
     if _max_logical_positions > 0 and utils and balance_manager and hasattr(balance_manager, 'get_available_margin'):
         if trading_mode_init_bm in ["LONG_ONLY", "LONG_SHORT", "NEUTRAL"]:
@@ -195,30 +185,43 @@ def initialize(
     else: 
         _current_dynamic_base_size_long = _initial_base_position_size_usdt if trading_mode_init_bm != "SHORT_ONLY" else 0.0
         _current_dynamic_base_size_short = _initial_base_position_size_usdt if trading_mode_init_bm != "LONG_ONLY" else 0.0
-
     print(f"  Config PM: Tamaño Base Dinámico Inicial Long : {_current_dynamic_base_size_long:.4f} USDT")
     print(f"  Config PM: Tamaño Base Dinámico Inicial Short: {_current_dynamic_base_size_short:.4f} USDT")
-
     try: 
         if not hasattr(position_state, 'initialize_state'): raise AttributeError("PositionState sin 'initialize_state'.")
         position_state.initialize_state(is_live_mode=_is_live_mode, config_dependency=config, utils_dependency=utils, live_ops_dependency=live_operations)
         print("  -> Position State inicializado.")
     except AttributeError as attr_err_ps: print(f"ERROR CRITICO [PM Init Facade]: {attr_err_ps}."); traceback.print_exc(); return
     except Exception as init_e_ps: print(f"ERROR CRITICO [PM Init Facade]: Fallo inicializando PS: {init_e_ps}"); traceback.print_exc(); return
-
     if closed_position_logger: 
         try:
              if hasattr(closed_position_logger, 'initialize_logger'): closed_position_logger.initialize_logger(); print("  -> Logger Pos Cerradas inicializado.")
         except Exception as e_log_init: print(f"ERROR inicializando Logger Cerradas: {e_log_init}")
-
     try: 
         print("  Creando instancia de PositionExecutor...")
         _executor = PositionExecutor(_is_live_mode, config, utils, balance_manager, position_state, position_calculations, live_operations, closed_position_logger, _position_helpers, _live_manager)
         print("  -> Instancia de PositionExecutor creada.")
     except Exception as exec_init_e: print(f"ERROR CRITICO [PM Init Facade]: Falló creación PositionExecutor: {exec_init_e}"); traceback.print_exc(); _executor = None; return
-
     _initialized = True
     print("[PM Facade] Orquestador Inicializado.")
+
+
+# <<< INICIO NUEVA FUNCIÓN >>>
+def handle_low_level_signal(signal: str, entry_price: float, timestamp: datetime.datetime):
+    """
+    Recibe una señal de la estrategia de bajo nivel y decide si abrir una posición.
+    
+    Esta función es el nuevo punto de entrada para las aperturas, reemplazando la lógica
+    que estaba directamente en el event_processor.
+    """
+    if not _initialized:
+        return
+
+    if signal == "BUY":
+        open_logical_position('long', entry_price, timestamp)
+    elif signal == "SELL":
+        open_logical_position('short', entry_price, timestamp)
+# <<< FIN NUEVA FUNCIÓN >>>
 
 
 # --- Funciones Públicas de Gestión ---
@@ -229,7 +232,6 @@ def check_and_close_positions(current_price: float, timestamp: datetime.datetime
     if not isinstance(timestamp, datetime.datetime): return
     if not all([config, utils, position_state, position_calculations]): print("ERROR [CheckClose Facade]: Dependencias no disponibles."); return
     
-    # *** CORRECCIÓN: Leer el modo de trading directamente desde config en cada tick ***
     trading_mode = config.POSITION_TRADING_MODE
 
     sides_to_check = []
@@ -242,7 +244,6 @@ def check_and_close_positions(current_price: float, timestamp: datetime.datetime
             open_positions = list(position_state.get_open_logical_positions(side))
             if not open_positions: continue
 
-            # --- 1. Lógica de Take Profit (TP) ---
             indices_to_close_tp = []
             for i, pos in enumerate(open_positions):
                 tp_stored = pos.get('take_profit_price')
@@ -259,7 +260,6 @@ def check_and_close_positions(current_price: float, timestamp: datetime.datetime
             
             if not open_positions: continue
 
-            # --- 2. Lógica de Stop Loss (SL) Físico ---
             sl_pct = getattr(config, 'POSITION_PHYSICAL_STOP_LOSS_PCT', 0.0)
             if sl_pct > 0:
                 physical_state = position_state.get_physical_position_state(side)
@@ -275,7 +275,6 @@ def check_and_close_positions(current_price: float, timestamp: datetime.datetime
             print(f"ERROR CRÍTICO [CheckClose Facade]: Verificando {side}: {check_err}"); traceback.print_exc()
 
 def _handle_stop_loss_trigger(side: str, exit_price: float, timestamp: datetime.datetime):
-    """Función privada que centraliza la respuesta a un SL."""
     global _stop_loss_event
     print(f"  -> Procediendo a cerrar TODAS las posiciones {side.upper()} por SL.")
     close_all_logical_positions(side, exit_price, timestamp)
@@ -290,7 +289,6 @@ def can_open_new_position(side: str) -> bool:
     if not _initialized: return False
     if not all([config, utils, balance_manager, position_state]): print("WARN [can_open Facade]: Faltan dependencias."); return False
     
-    # *** CORRECCIÓN: Leer el modo de trading directamente desde config ***
     trading_mode = config.POSITION_TRADING_MODE
 
     if side not in ['long', 'short']: return False
@@ -501,7 +499,6 @@ def get_position_summary() -> dict:
     global _initialized, _is_live_mode, _leverage, _max_logical_positions, _total_realized_pnl_long, _total_realized_pnl_short, _total_transferred_profit, config, utils, balance_manager, position_state, _position_helpers, _initial_base_position_size_usdt, _current_dynamic_base_size_long, _current_dynamic_base_size_short
     if not _initialized: return {"error": "PM no inicializado"}
     
-    # *** CORRECCIÓN: Leer el modo de trading siempre desde config ***
     trading_mode = config.POSITION_TRADING_MODE
     
     try:
@@ -549,7 +546,6 @@ def display_logical_positions():
 def manual_open_with_api(side: str, entry_price: float, timestamp: datetime.datetime) -> Tuple[bool, str]:
     if not _initialized or not _executor: return False, "Error: PM no inicializado."
     
-    # *** CORRECCIÓN: Leer el modo de trading directamente desde config ***
     trading_mode = config.POSITION_TRADING_MODE
     
     if side not in ['long', 'short']: return False, f"Error: Lado '{side}' inválido."
@@ -568,7 +564,6 @@ def manual_open_with_api(side: str, entry_price: float, timestamp: datetime.date
 def manual_close_with_api(side: str, position_index: int, exit_price: float, timestamp: datetime.datetime) -> Tuple[bool, str]:
     if not _initialized or not _executor: return False, "Error: PM no inicializado."
     result = _executor.execute_close(side=side, position_index=position_index, exit_price=exit_price, timestamp=timestamp)
-    # ... (la lógica post-cierre ya está en close_logical_position, que llama a execute_close)
     return result.get('success', False), result.get('message', 'Error desconocido.')
 
 def add_max_logical_position_slot() -> Tuple[bool, str]:
@@ -578,7 +573,7 @@ def add_max_logical_position_slot() -> Tuple[bool, str]:
     if balance_manager: balance_manager.update_operational_margins_based_on_slots(_max_logical_positions)
     
     if balance_manager and utils:
-        trading_mode = config.POSITION_TRADING_MODE # Leer modo actual
+        trading_mode = config.POSITION_TRADING_MODE
         if trading_mode in ["LONG_ONLY", "LONG_SHORT", "NEUTRAL"]:
             dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
             _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, dynamic_long)
@@ -602,7 +597,7 @@ def remove_max_logical_position_slot() -> Tuple[bool, str]:
     if balance_manager: balance_manager.update_operational_margins_based_on_slots(_max_logical_positions)
     
     if balance_manager and utils:
-        trading_mode = config.POSITION_TRADING_MODE # Leer modo actual
+        trading_mode = config.POSITION_TRADING_MODE
         if trading_mode in ["LONG_ONLY", "LONG_SHORT", "NEUTRAL"]:
             dynamic_long = utils.safe_division(balance_manager.get_available_margin('long'), _max_logical_positions, 0.0)
             _current_dynamic_base_size_long = max(_initial_base_position_size_usdt, dynamic_long)
@@ -612,4 +607,4 @@ def remove_max_logical_position_slot() -> Tuple[bool, str]:
             
     return True, f"Slots máximos decrementados a: {_max_logical_positions}."
 
-# =============== FIN ARCHIVO: core/strategy/position_manager.py (v13.1 - Lectura de Modo en Tiempo Real) ===============
+# =============== FIN ARCHIVO: core/strategy/position_manager.py (v13.4 - Lógica Corregida Final) ===============

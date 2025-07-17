@@ -1,13 +1,17 @@
-# =============== INICIO ARCHIVO: automatic_runner.py (v13.1 - Robusto y Completo) ===============
+# =============== INICIO ARCHIVO: automatic_runner.py (v13.3 - Lógica de Reactivación por ROI) ===============
 """
 Contiene la lógica para ejecutar el Modo Automático del bot.
 
+v13.3:
+- Modificada la máquina de estados para que, al alcanzar el ROI, pase a un estado
+  NEUTRAL sin cerrar posiciones.
+- El bot puede reactivar la tendencia (LONG_ONLY o SHORT_ONLY) desde el estado
+  NEUTRAL si recibe una nueva señal del UT Bot en esa dirección.
+- La lógica de "flip" (cambio de tendencia) se mantiene separada y robusta.
+v13.2:
+- Añade la llamada a `position_manager.reset_profit_target_mode()` durante un "flip".
 v13.1:
-- Se fuerza el estado inicial del bot a NEUTRAL antes de iniciar los hilos para
-  evitar operaciones prematuras.
-- Se implementa completamente la llamada a la función del menú de intervención manual.
-- Se añade robustez a la función `_handle_flip`, asegurando que se obtiene un
-  precio válido antes de cerrar posiciones y que los argumentos se pasan correctamente.
+- Se fuerza el estado inicial del bot a NEUTRAL antes de iniciar los hilos.
 """
 import time
 import traceback
@@ -96,18 +100,15 @@ def handle_manual_intervention_menu(
     global _tick_visualization_status
     if not all([config_module, menu_module, position_manager_module]): return
     if not getattr(position_manager_module, '_initialized', False): return
-
     while True:
         summary = position_manager_module.get_position_summary()
         if 'error' in summary:
             print(f"ERROR [Manual Menu]: No se pudo obtener resumen PM: {summary['error']}"); break
-        
         summary['bot_state'] = _bot_state
         choice = menu_module.get_automatic_mode_intervention_menu(
             pm_summary=summary,
             tick_visualization_status=_tick_visualization_status
         )
-
         if choice == '1':
             menu_module.display_live_stats(summary)
         elif choice == '2':
@@ -157,7 +158,6 @@ def run_automatic_mode(
     global _bot_state, _ut_bot_signal, _sl_cooldown_until
 
     print(f"\n--- INICIANDO MODO: {operation_mode.upper()} ---")
-
     key_listener_hilo: Optional[threading.Thread] = None
     ut_bot_hilo: Optional[threading.Thread] = None
     bot_started = False
@@ -185,7 +185,6 @@ def run_automatic_mode(
         print("Componentes Core inicializados.")
         bot_started = True
         
-        # *** CORRECCIÓN: Forzar estado NEUTRAL antes de iniciar hilos ***
         print("INFO [Automatic Runner]: Estableciendo estado inicial a NEUTRAL.")
         _bot_state = "NEUTRAL"
         setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
@@ -200,7 +199,9 @@ def run_automatic_mode(
 
         print("--- BOT OPERATIVO EN MODO AUTOMÁTICO ---")
         
+        # --- BUCLE PRINCIPAL DE LA MÁQUINA DE ESTADOS ---
         while True:
+            # 1. Gestionar intervención manual y SL (alta prioridad)
             if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False) and _key_pressed_event.is_set():
                 _stop_key_listener_thread.set()
                 if key_listener_hilo: key_listener_hilo.join(timeout=1.5)
@@ -219,25 +220,42 @@ def run_automatic_mode(
 
             if _sl_cooldown_until and datetime.datetime.now() < _sl_cooldown_until:
                 time.sleep(1); continue
+            
+            # 2. Si estamos en tendencia, chequear si se alcanzó el ROI para pasar a NEUTRAL
+            if _bot_state in ["ACTIVE_LONG", "ACTIVE_SHORT"]:
+                _check_roi_and_switch_to_neutral(config_module, position_manager_module, utils_module)
 
+            # 3. Procesar señal del UT Bot según el estado actual
             current_signal = _ut_bot_signal
             if current_signal != "HOLD":
+                # --- Lógica para el estado NEUTRAL ---
                 if _bot_state == "NEUTRAL":
                     if current_signal == "BUY":
-                        print("INFO [State Machine]: NEUTRAL -> BUY Signal. Cambiando a ACTIVE_LONG.")
-                        _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                        print("INFO [State Machine]: NEUTRAL -> BUY Signal. Reactivando/Iniciando tendencia LONG.")
+                        _bot_state = "ACTIVE_LONG"
+                        setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
                     elif current_signal == "SELL":
-                        print("INFO [State Machine]: NEUTRAL -> SELL Signal. Cambiando a ACTIVE_SHORT.")
-                        _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                        print("INFO [State Machine]: NEUTRAL -> SELL Signal. Reactivando/Iniciando tendencia SHORT.")
+                        _bot_state = "ACTIVE_SHORT"
+                        setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                
+                # --- Lógica para FLIP de LONG a SHORT ---
                 elif _bot_state == "ACTIVE_LONG" and current_signal == "SELL":
                     print("INFO [State Machine]: ACTIVE_LONG -> SELL Signal. Ejecutando FLIP a SHORT.")
                     _handle_flip('short', position_manager_module, config_module)
-                    _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                    _bot_state = "ACTIVE_SHORT"
+                    setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                
+                # --- Lógica para FLIP de SHORT a LONG ---
                 elif _bot_state == "ACTIVE_SHORT" and current_signal == "BUY":
                     print("INFO [State Machine]: ACTIVE_SHORT -> BUY Signal. Ejecutando FLIP a LONG.")
                     _handle_flip('long', position_manager_module, config_module)
-                    _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                    _bot_state = "ACTIVE_LONG"
+                    setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                
+                # Una vez procesada la señal, se resetea para esperar la siguiente
                 _ut_bot_signal = "HOLD"
+                
             time.sleep(0.5)
     
     except (KeyboardInterrupt, SystemExit): print("\nDeteniendo Proceso Automático...")
@@ -255,9 +273,45 @@ def run_automatic_mode(
                 print("\n--- Resumen Final (Automatic Runner) ---\n" + json.dumps(summary, indent=2))
                 if open_snapshot_logger_module: open_snapshot_logger_module.log_open_positions_snapshot(summary)
 
+# --- Funciones de Apoyo para la Máquina de Estados ---
+
+def _check_roi_and_switch_to_neutral(config_module: Any, position_manager_module: Any, utils_module: Any):
+    """
+    Función auxiliar para comprobar el ROI y cambiar el estado del bot a NEUTRAL.
+    """
+    global _bot_state
+    
+    if not getattr(config_module, 'AUTOMATIC_ROI_PROFIT_TAKING_ENABLED', False):
+        return
+
+    try:
+        summary = position_manager_module.get_position_summary()
+        if 'error' in summary: return
+
+        initial_capital = summary.get('initial_total_capital', 0.0)
+        if initial_capital < 1e-6: return
+
+        total_pnl = summary.get('total_realized_pnl_long', 0.0) + summary.get('total_realized_pnl_short', 0.0)
+        current_roi_pct = utils_module.safe_division(total_pnl, initial_capital) * 100
+        target_roi_pct = getattr(config_module, 'AUTOMATIC_ROI_PROFIT_TARGET_PCT', 0.1)
+
+        if current_roi_pct >= target_roi_pct:
+            print("\n" + "#"*80)
+            print(f"### OBJETIVO DE ROI ALCANZADO ({current_roi_pct:.3f}% >= {target_roi_pct:.3f}%) ###".center(80))
+            print(f"### Cambiando estado de '{_bot_state}' a 'NEUTRAL'. No se abrirán nuevas posiciones. ###".center(80))
+            print("### Esperando nueva señal del UT Bot para reactivar. ###".center(80))
+            print("#"*80 + "\n")
+            
+            _bot_state = "NEUTRAL"
+            setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
+            
+    except Exception as e:
+        print(f"ERROR [Runner Check ROI]: {e}")
+
 def _handle_flip(target_side: str, position_manager_module: Any, config_module: Any):
     current_side = 'short' if target_side == 'long' else 'long'
     print(f"--- Ejecutando FLIP de {current_side.upper()} a {target_side.upper()} ---")
+    
     summary = position_manager_module.get_position_summary()
     if 'error' in summary:
         print(f"ERROR [Flip]: No se pudo obtener resumen PM: {summary['error']}"); return
@@ -270,7 +324,9 @@ def _handle_flip(target_side: str, position_manager_module: Any, config_module: 
         
         print(f"Cerrando {num_to_close} posiciones {current_side.upper()}...")
         success_closing = position_manager_module.close_all_logical_positions(current_side, current_price, datetime.datetime.now())
-        if not success_closing: print("ERROR [Flip]: No se pudieron cerrar todas las posiciones. Flip abortado."); return
+        if not success_closing: 
+            print("ERROR [Flip]: No se pudieron cerrar todas las posiciones. Flip abortado."); 
+            return # Importante: no continuar si el cierre falla
         time.sleep(getattr(config_module, 'POST_CLOSE_SYNC_DELAY_SECONDS', 1.0) * 2)
 
     if getattr(config_module, 'AUTOMATIC_FLIP_OPENS_NEW_POSITIONS', True) and num_to_close > 0:
@@ -279,6 +335,5 @@ def _handle_flip(target_side: str, position_manager_module: Any, config_module: 
         if not success_opening: print("ERROR [Flip]: Falló la apertura de nuevas posiciones post-flip.")
     else:
         print("INFO [Flip]: Cierre completado. Comportamiento de no-reapertura configurado.")
+        
     print("--- FLIP completado ---")
-
-# =============== FIN ARCHIVO: automatic_runner.py (v13.1 - Completo y Robusto) ===============

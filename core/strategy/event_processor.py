@@ -1,11 +1,16 @@
-# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v13 - Integración UT Bot y SL) ===============
+# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v13.2 - Lógica de Apertura Delegada) ===============
 """
 Procesa un único evento de precio (tick).
-Calcula TA, genera señal, gestiona posiciones (live/backtest), y loguea/imprime.
+Calcula TA, genera señal, y ahora delega TODA la gestión de posiciones al position_manager.
 
+v13.2 (Lógica Corregida):
+- Se elimina la lógica de apertura de posiciones de este módulo.
+- Ahora, la señal de bajo nivel generada se pasa directamente al position_manager,
+  que tomará la decisión final de abrir una posición si las condiciones de alto
+  y bajo nivel se cumplen.
 v13:
 - Modificada la inicialización para aceptar una instancia del UTBotController y un
-  evento de Stop Loss, pasándolos a los módulos correspondientes.
+  evento de Stop Loss.
 - En cada evento, pasa el tick de precio al UTBotController si está presente.
 """
 import datetime
@@ -176,20 +181,31 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         print(f"ERROR [Signal Gen Call]: {e_signal}"); traceback.print_exc()
         signal_data = {**base_signal_dict, "signal": "HOLD_SIGNAL_ERROR", "signal_reason": f"Error: {e_signal}"}
 
+    # <<< INICIO DE LA CORRECCIÓN >>>
+    # La lógica de Position Manager se centraliza aquí.
     pm_enabled_runtime = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if pm_enabled_runtime and position_manager and getattr(position_manager, '_initialized', False):
         try:
-            if hasattr(position_manager, 'check_and_close_positions'): position_manager.check_and_close_positions(current_price, current_timestamp)
-            else: print("ERROR CRÍTICO [EP Process]: PM sin 'check_and_close_positions'.")
-            if signal_data and hasattr(position_manager, 'open_logical_position'):
-                signal = signal_data.get("signal")
-                if signal == "BUY":
-                    position_manager.open_logical_position('long', current_price, current_timestamp)
-                elif signal == "SELL":
-                    position_manager.open_logical_position('short', current_price, current_timestamp)
-            elif signal_data and not hasattr(position_manager, 'open_logical_position'): print("ERROR CRÍTICO [EP Process]: PM sin 'open_logical_position'.")
+            # 1. Siempre chequear cierres (TP/SL). Esto no cambia.
+            if hasattr(position_manager, 'check_and_close_positions'): 
+                position_manager.check_and_close_positions(current_price, current_timestamp)
+            else: 
+                print("ERROR CRÍTICO [EP Process]: PM sin 'check_and_close_positions'.")
+            
+            # 2. Pasar la señal de BAJO NIVEL al position_manager para que ÉL decida si abrir.
+            #    Esto reemplaza la lógica de apertura que estaba aquí antes.
+            if signal_data and hasattr(position_manager, 'handle_low_level_signal'):
+                position_manager.handle_low_level_signal(
+                    signal=signal_data.get("signal"),
+                    entry_price=current_price,
+                    timestamp=current_timestamp
+                )
+            elif signal_data:
+                print("ERROR CRÍTICO [EP Process]: PM sin 'handle_low_level_signal'.")
+
         except Exception as pm_err:
-            print(f"ERROR [PM Call]: {pm_err}"); traceback.print_exc()
+            print(f"ERROR [PM Call from EP]: {pm_err}"); traceback.print_exc()
+    # <<< FIN DE LA CORRECCIÓN >>>
 
     if signal_data:
         if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False):
@@ -326,4 +342,4 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             print("=" * len(hdr))
         except Exception as e_print: print(f"ERROR [Print Tick Status]: {e_print}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/event_processor.py (v13 - Integración UT Bot y SL) ===============
+# =============== FIN ARCHIVO: core/strategy/event_processor.py (v13.2 - Lógica de Apertura Delegada) ===============

@@ -1,6 +1,6 @@
-# =============== INICIO ARCHIVO: config.py (v13 - Modo Automático y SL Físico) ===============
+# =============== INICIO ARCHIVO: config.py (v13.1 - Con ROI Profit Taking) ===============
 """
-Configuración Esencial (v13 - Modo Automático, SL Físico, Menú Mejorado).
+Configuración Esencial (v13.1 - Con ROI Profit Taking).
 Parámetros para TA, Feeder, Logger, Plotter, conexiones Live y Gestión de Posiciones.
 ASUME QUE ESTE ARCHIVO ESTÁ EN LA RAÍZ DEL PROYECTO.
 """
@@ -66,7 +66,7 @@ POSITION_MANAGEMENT_ENABLED = True
 # 'NEUTRAL' es un estado de espera. El modo automático gestionará este valor dinámicamente.
 POSITION_TRADING_MODE = "LONG_SHORT"
 POSITION_BASE_SIZE_USDT = 1.0
-POSITION_MAX_LOGICAL_POSITIONS = 20
+POSITION_MAX_LOGICAL_POSITIONS = 10
 POSITION_LEVERAGE = 10.0
 POSITION_TAKE_PROFIT_PCT_LONG = 0.3
 POSITION_TAKE_PROFIT_PCT_SHORT = 0.3
@@ -92,26 +92,25 @@ POST_CLOSE_SYNC_DELAY_SECONDS = 0.1
 # --- Modos de Operación y Control ---
 INTERACTIVE_MANUAL_MODE = True # Habilita el menú de intervención con 'm'
 
-# --- AUTOMATIC MODE & UT BOT CONFIGURATION (NUEVO) ---
-# True para ejecutar este modo desde main.py. Anula los menús de selección de modo.
+# --- AUTOMATIC MODE & UT BOT CONFIGURATION ---
 AUTOMATIC_MODE_ENABLED = False
-
-# Intervalo en segundos para que el UT Bot genere una nueva señal de alto nivel.
-# Cada 3600 ticks de 1 segundo = 1 hora.
-UT_BOT_SIGNAL_INTERVAL_SECONDS = 3600
-
-# Parámetros específicos para la lógica del indicador UT Bot Alerts.
-UT_BOT_KEY_VALUE = 1.0  # a.k.a. "Sensitivity"
-UT_BOT_ATR_PERIOD = 10  # Periodo del ATR
-
-# Define el comportamiento al recibir una señal de "flip" (cambio de dirección).
-# True: Cierra posiciones actuales y abre el mismo número en la dirección opuesta (más riesgoso).
-# False: Solo cierra las posiciones actuales y espera que el bot de bajo nivel abra nuevas.
+UT_BOT_SIGNAL_INTERVAL_SECONDS = 1800
+UT_BOT_KEY_VALUE = 1.0
+UT_BOT_ATR_PERIOD = 10
 AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = False #True
+AUTOMATIC_SL_COOLDOWN_SECONDS = 1
 
-# Período de enfriamiento en segundos después de que salte un Stop Loss,
-# antes de que el bot vuelva a aceptar señales del UT Bot.
-AUTOMATIC_SL_COOLDOWN_SECONDS = 1 #
+# <<< INICIO NUEVAS OPCIONES >>>
+# --- Lógica de Toma de Ganancias por ROI de Tendencia (Modo Automático) ---
+# Si está activado, cuando el bot está en un modo de tendencia (LONG_ONLY o SHORT_ONLY)
+# y el ROI total alcanza el objetivo, dejará de abrir nuevas posiciones en esa
+# dirección y esperará a la siguiente señal de "flip".
+AUTOMATIC_ROI_PROFIT_TAKING_ENABLED = True
+
+# El porcentaje de ROI (basado en el PNL total realizado vs. el capital inicial total)
+# que activará el bloqueo de nuevas posiciones.
+AUTOMATIC_ROI_PROFIT_TARGET_PCT = 0.1 # 0.1%
+# <<< FIN NUEVAS OPCIONES >>>
 
 # --- Printing / Logging Configuration ---
 POSITION_LOG_CLOSED_POSITIONS = True
@@ -189,7 +188,7 @@ def _load_and_validate_uids():
 # --- Función de Impresión de Configuración (se mantiene para depuración) ---
 def print_initial_config(operation_mode="unknown"):
     """Imprime un resumen de la configuración cargada."""
-    print("-" * 70); print(f"Configuración Base Cargada (config.py v13)");
+    print("-" * 70); print(f"Configuración Base Cargada (config.py v13.1)");
     print(f"  Modo Testnet API        : {UNIVERSAL_TESTNET_MODE}")
     print(f"  Ticker Símbolo          : {TICKER_SYMBOL}")
     print("-" * 70)
@@ -197,6 +196,7 @@ def print_initial_config(operation_mode="unknown"):
     print(f"  Gestión Posiciones Base : {'Activada' if pos_enabled else 'Desactivada'}")
     if pos_enabled:
         print(f"    Modo Automático por Defecto: {'Activado' if AUTOMATIC_MODE_ENABLED else 'Desactivado'}")
+        print(f"    Toma Ganancias por ROI   : {'Activado' if AUTOMATIC_ROI_PROFIT_TAKING_ENABLED else 'Desactivado'} (Objetivo: {AUTOMATIC_ROI_PROFIT_TARGET_PCT}%)")
         print(f"    Stop Loss Físico (%)  : {POSITION_PHYSICAL_STOP_LOSS_PCT}%")
         print(f"    Apalancamiento        : {POSITION_LEVERAGE:.1f}x")
         print(f"    TP % (L/S)            : {POSITION_TAKE_PROFIT_PCT_LONG * 100:.2f}% / {POSITION_TAKE_PROFIT_PCT_SHORT * 100:.2f}%")
@@ -204,5 +204,3 @@ def print_initial_config(operation_mode="unknown"):
 
 # Carga UIDs al importar el módulo
 _load_and_validate_uids()
-
-# =============== FIN ARCHIVO: config.py (v13 - Modo Automático y SL Físico) ===============

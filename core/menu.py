@@ -1,15 +1,13 @@
-# =============== INICIO ARCHIVO: core/menu.py (v13 - Menús Mejorados y Control Automático) ===============
+# =============== INICIO ARCHIVO: core/menu.py (v13.1 - Con Backtest Automático) ===============
 """
 Módulo para gestionar los menús interactivos de la aplicación.
 
+v13.1:
+- Añadida la opción "Modo Automático (Backtest)" al menú principal.
 v13:
 - Añade la opción "Modo Automático" al menú principal.
-- Introduce `get_automatic_mode_intervention_menu`, un menú de texto mejorado para
-  el control en tiempo real.
-- Permite ajustar dinámicamente slots y tamaño base de posición.
-- Añade opción para ver estadísticas en vivo y controlar la visualización de ticks.
+- Introduce `get_automatic_mode_intervention_menu`.
 """
-
 import datetime
 import time
 import os
@@ -41,16 +39,19 @@ def print_header(title: str, width: int = 80):
 
 def get_main_menu_choice() -> str:
     """Muestra el menú principal, ahora con la opción de Modo Automático."""
-    print_header("Bybit Futures Bot v13 - Menú Principal")
+    print_header("Bybit Futures Bot v13.1 - Menú Principal")
     print("Seleccione el modo de operación:\n")
     print("  1. Modo Live Interactivo (Control Manual y Estrategia Bajo Nivel)")
-    print("  2. Modo Backtesting (Simulación con datos históricos)")
-    print("  3. Modo Automático (Dirigido por Estrategia de Alto Nivel - UT Bot)")
+    print("  2. Modo Backtesting (Simulación con Estrategia de Bajo Nivel)")
+    print("  3. Modo Automático (Live, Dirigido por Estrategia de Alto Nivel)")
+    print("  4. Modo Automático (Backtest, Simulación de Estrategia de Alto Nivel)")
     print("-" * 80)
     print("  0. Salir")
     print("=" * 80)
     choice = input("Seleccione una opción: ").strip()
     return choice
+
+# (El resto del archivo no necesita cambios)
 
 def get_trading_mode_interactively() -> str:
     """Pregunta por el modo de trading (para modo Live Interactivo y Backtest)."""
@@ -106,15 +107,10 @@ def get_position_setup_interactively() -> Tuple[Optional[float], Optional[int]]:
 
     return base_size_usdt, initial_slots
 
-# --- MENÚ DE INTERVENCIÓN MANUAL MEJORADO ---
-
 def get_automatic_mode_intervention_menu(
     pm_summary: Dict[str, Any],
     tick_visualization_status: Dict[str, bool]
 ) -> str:
-    """
-    Muestra un menú de intervención manual mejorado, con formato de ventana de texto.
-    """
     os.system('cls' if os.name == 'nt' else 'clear')
     width = 80
     print_header("BOT EN VIVO - MENÚ DE INTERVENCIÓN MANUAL", width)
@@ -148,7 +144,6 @@ def get_automatic_mode_intervention_menu(
     return choice
 
 def display_live_stats(pm_summary: Dict[str, Any]):
-    """Muestra un reporte de estadísticas similar al de backtest, pero en vivo."""
     os.system('cls' if os.name == 'nt' else 'clear')
     width = 80
     print_header("Estadísticas en Vivo", width)
@@ -183,7 +178,6 @@ def display_live_stats(pm_summary: Dict[str, Any]):
     
     input("\nPresione Enter para volver al menú de intervención...")
 
-# --- FUNCIONES DE MENÚ LIVE INTERACTIVO (SIN CAMBIOS) ---
 def display_live_pre_start_overview(account_states: Dict[str, Dict], symbol: Optional[str]):
     print_header(f"Resumen Estado Real Pre-Inicio")
     if not account_states:
@@ -276,7 +270,6 @@ def get_account_selection_menu_choice(accounts: List[str]) -> Tuple[Optional[str
 
 def display_account_management_status(account_name: str, unified_balance: Optional[dict], funding_balance: Optional[dict], positions: Optional[List[dict]]):
     print_header(f"Live - Gestión Cuenta: {account_name}")
-    # (El cuerpo de esta función no necesita cambios, se mantiene intacto)
     # ...
 
 def get_account_management_menu_choice(account_name: str, has_long: bool, has_short: bool) -> str:
@@ -311,10 +304,7 @@ def get_post_backtest_menu_choice() -> str:
     print("-" * 70); print("  0. Salir"); print("=" * 70)
     return input("Seleccione una opción: ").strip()
 
-# --- Funciones de Menú Legado (se mantienen por si se necesitan en otros runners) ---
 def get_live_manual_intervention_menu(*args, **kwargs):
-    # Esta función está obsoleta y se reemplaza por get_automatic_mode_intervention_menu
-    # Se mantiene para evitar errores si algún runner antiguo la llama por error.
     print_header("Menú de Intervención Manual (OBSOLETO)")
     print("Esta función ha sido reemplazada. Presione 0 para continuar.")
     print("-" * 70); print("  0. Volver")

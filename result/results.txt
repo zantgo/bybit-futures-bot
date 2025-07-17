@@ -1,16 +1,16 @@
 ================================================================================
                          Reporte de Ejecución - Bot v13                         
-                         Generado: 2025-07-08 02:22:47                          
-                                Modo: AUTOMATIC                                 
+                         Generado: 2025-07-16 23:15:31                          
+                            Modo: AUTOMATIC_BACKTEST                            
 ================================================================================
 
 --- Configuración de la Sesión ------------------------------------------------
   Símbolo: FARTCOINUSDT
   Gestión de Posiciones: Activada
   Modo Trading (final): NEUTRAL
-  Capital Inicial Asignado: 40.00 USDT
+  Capital Inicial Asignado: 20.00 USDT
   Apalancamiento: 10.0x
-  Max Pos Lógicas (Final): 20 (por lado)
+  Max Pos Lógicas (Final): 10 (por lado)
   TP % (L/S): 30.00% / 30.00%
   Comisión %: 0.100%
   Reinvertir PNL Operacional %: 10.00%
@@ -24,15 +24,21 @@
     Stop Loss Físico:       10.0%
 
 --- Resumen Trades Cerrados ---------------------------------------------------
-  No se cerraron trades durante esta sesión o no se pudo leer el log.
+  Total Trades Cerrados: 12 (Long: 5, Short: 7)
+  Trades Ganadores:      12 (100.00%) (Long: 5, Short: 7)
+  Trades Perdedores:     0
+  PNL Neto Total:        +0.2582 USDT (Long: +0.1006, Short: +0.1576)
+  Ganancia Promedio:     +0.0215 USDT
+  Pérdida Promedio:      +0.0000 USDT
+  Profit Factor:         inf
 
 --- Estado Final --------------------------------------------------------------
-  Capital Inicial Total Operativo:    40.00 USDT
-  Capital Final Total (Equity Lóg.):  40.0000 USDT
-  Retorno Sobre Capital Inicial (%):  +0.00%
+  Capital Inicial Total Operativo:    20.00 USDT
+  Capital Final Total (Equity Lóg.):  20.2582 USDT
+  Retorno Sobre Capital Inicial (%):  +1.29%
 
-  Balance Operativo Final Long:         20.0000 USDT
-  Balance Operativo Final Short:        20.0000 USDT
-  Balance Cuenta Profit Final:          0.0000 USDT
+  Balance Operativo Final Long:         10.0000 USDT
+  Balance Operativo Final Short:        10.0000 USDT
+  Balance Cuenta Profit Final:          0.2324 USDT
 
   Posiciones Abiertas al Final: 0
