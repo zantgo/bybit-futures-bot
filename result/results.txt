@@ -1,6 +1,6 @@
 ================================================================================
                          Reporte de Ejecución - Bot v13                         
-                         Generado: 2025-07-16 23:15:31                          
+                         Generado: 2025-07-17 00:23:33                          
                             Modo: AUTOMATIC_BACKTEST                            
 ================================================================================
 
@@ -24,21 +24,15 @@
     Stop Loss Físico:       10.0%
 
 --- Resumen Trades Cerrados ---------------------------------------------------
-  Total Trades Cerrados: 12 (Long: 5, Short: 7)
-  Trades Ganadores:      12 (100.00%) (Long: 5, Short: 7)
-  Trades Perdedores:     0
-  PNL Neto Total:        +0.2582 USDT (Long: +0.1006, Short: +0.1576)
-  Ganancia Promedio:     +0.0215 USDT
-  Pérdida Promedio:      +0.0000 USDT
-  Profit Factor:         inf
+  No se cerraron trades durante esta sesión o no se pudo leer el log.
 
 --- Estado Final --------------------------------------------------------------
   Capital Inicial Total Operativo:    20.00 USDT
-  Capital Final Total (Equity Lóg.):  20.2582 USDT
-  Retorno Sobre Capital Inicial (%):  +1.29%
+  Capital Final Total (Equity Lóg.):  20.0000 USDT
+  Retorno Sobre Capital Inicial (%):  +0.00%
 
   Balance Operativo Final Long:         10.0000 USDT
   Balance Operativo Final Short:        10.0000 USDT
-  Balance Cuenta Profit Final:          0.2324 USDT
+  Balance Cuenta Profit Final:          0.0000 USDT
 
   Posiciones Abiertas al Final: 0

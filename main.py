@@ -1,12 +1,13 @@
-# =============== INICIO ARCHIVO: main.py (v13.1 - Con Backtest Automático) ===============
+# =============== INICIO ARCHIVO: main.py (v13.3 - Llamadas a Runner Corregidas Completamente) ===============
 """
-Punto de entrada principal (v13.1).
-Selección de modo, configuración inicial y orquestación de la ejecución.
+Punto de entrada principal.
 
+v13.3:
+- CORREGIDO: Añadidos todos los módulos de dependencia que faltaban en las llamadas a
+  `automatic_runner.run_automatic_mode` y `automatic_backtest_runner.run_automatic_backtest_mode`
+  para solucionar los `NameError` y `TypeError`.
 v13.1:
 - Añadido el "Modo Automático (Backtest)" como opción en el menú principal.
-v13:
-- Añade el modo "Automático" como un flujo de ejecución principal.
 """
 import sys
 import os
@@ -22,8 +23,9 @@ try:
     project_root = os.path.dirname(os.path.abspath(__file__))
 except NameError:
     project_root = os.path.abspath(os.path.join(os.getcwd()))
+    print(f"WARN [main]: __file__ no definido, usando CWD como base para PROJECT_ROOT: {project_root}")
 
-# --- Módulos Core y de Soporte ---
+# --- Módulos Core y de Soporte (se inicializan como None) ---
 utils = None
 menu = None
 ta_manager = None
@@ -40,25 +42,32 @@ plotter = None
 data_feeder = None
 
 try:
-    from core import utils, menu, live_operations
-    from core.strategy import (
-        ta_manager, event_processor, position_manager,
-        balance_manager, position_state, ut_bot_controller
-    )
-    from core.logging import open_position_snapshot_logger, signal_logger, closed_position_logger
+    from core import utils
+    from core import menu
+    from core.strategy import ta_manager
+    from core.strategy import event_processor
+    from core.strategy import position_manager
+    from core.strategy import balance_manager
+    from core.strategy import position_state
+    from core.strategy import ut_bot_controller
+    from core.logging import open_position_snapshot_logger
     from core.reporting import results_reporter
-    from core.visualization import plotter
+    from core import live_operations
     from live.connection import ticker as connection_ticker
     from backtest.connection import data_feeder
+    from core.visualization import plotter
+
 except ImportError as e:
     print(f"ERROR IMPORTACIÓN CORE INICIAL: {e.name}"); traceback.print_exc(); sys.exit(1)
+except Exception as e:
+    print(f"ERROR FATAL Config/Import Inicial: {e}"); traceback.print_exc(); sys.exit(1)
+
 
 # --- Importar los Runners ---
 try:
     import live_runner
     import backtest_runner
     import automatic_runner
-    # Importar el nuevo runner de backtest automático
     import automatic_backtest_runner
 except ImportError as e:
     print(f"ERROR CRITICO: No se pudieron importar los runners ({e.name})."); traceback.print_exc(); sys.exit(1)
@@ -99,11 +108,17 @@ def main_loop():
             automatic_runner.run_automatic_mode(
                 final_summary=final_summary, operation_mode=operation_mode,
                 config_module=config, utils_module=utils, menu_module=menu,
-                live_operations_module=live_operations, position_manager_module=position_manager,
-                balance_manager_module=balance_manager, position_state_module=position_state,
-                open_snapshot_logger_module=open_snapshot_logger, event_processor_module=event_processor,
-                ta_manager_module=ta_manager, ut_bot_controller_module=ut_bot_controller,
-                connection_ticker_module=connection_ticker
+                live_operations_module=live_operations,
+                position_manager_module=position_manager,
+                balance_manager_module=balance_manager,
+                position_state_module=position_state,
+                open_snapshot_logger_module=open_snapshot_logger,
+                event_processor_module=event_processor,
+                ta_manager_module=ta_manager,
+                ut_bot_controller_module=ut_bot_controller,
+                connection_ticker_module=connection_ticker,
+                plotter_module=plotter,
+                results_reporter_module=results_reporter
             )
         except Exception as e: print(f"ERROR CRITICO en Modo Automático: {e}"); traceback.print_exc()
         return
@@ -111,9 +126,8 @@ def main_loop():
     while True:
         choice = menu.get_main_menu_choice()
 
-        if choice == '1': # Modo Live Interactivo
+        if choice == '1':
             operation_mode = "live_interactive"
-            # ... (código sin cambios)
             try:
                 active_ticker_module = live_runner.run_live_pre_start(
                     final_summary=final_summary, operation_mode=operation_mode,
@@ -129,9 +143,8 @@ def main_loop():
             except Exception as e: print(f"ERROR CRITICO en Live Runner: {e}"); traceback.print_exc()
             break
 
-        elif choice == '2': # Modo Backtest (Estrategia bajo nivel)
+        elif choice == '2':
             operation_mode = "backtest_interactive"
-            # ... (código sin cambios)
             try:
                 backtest_runner.run_backtest_mode(
                     final_summary=final_summary, operation_mode=operation_mode,
@@ -146,31 +159,31 @@ def main_loop():
                 )
             except Exception as e: print(f"ERROR CRITICO en Backtest Runner: {e}"); traceback.print_exc()
             break
-        
-        elif choice == '3': # Modo Automático (Live)
+
+        elif choice == '3':
             operation_mode = "automatic"
-            # ... (código sin cambios)
             try:
                 automatic_runner.run_automatic_mode(
                     final_summary=final_summary, operation_mode=operation_mode,
                     config_module=config, utils_module=utils, menu_module=menu,
-                    live_operations_module=live_operations, position_manager_module=position_manager,
-                    balance_manager_module=balance_manager, position_state_module=position_state,
-                    open_snapshot_logger_module=open_snapshot_logger, event_processor_module=event_processor,
-                    ta_manager_module=ta_manager, ut_bot_controller_module=ut_bot_controller,
-                    connection_ticker_module=connection_ticker
+                    live_operations_module=live_operations,
+                    position_manager_module=position_manager,
+                    balance_manager_module=balance_manager,
+                    position_state_module=position_state,
+                    open_snapshot_logger_module=open_snapshot_logger,
+                    event_processor_module=event_processor,
+                    ta_manager_module=ta_manager,
+                    ut_bot_controller_module=ut_bot_controller,
+                    connection_ticker_module=connection_ticker,
+                    plotter_module=plotter,
+                    results_reporter_module=results_reporter
                 )
             except Exception as e: print(f"ERROR CRITICO en Modo Automático: {e}"); traceback.print_exc()
             break
 
-        elif choice == '4': # <<< NUEVA OPCIÓN >>> Modo Automático (Backtest)
+        elif choice == '4':
             operation_mode = "automatic_backtest"
-            print(f"\n--- Iniciando Preparación Modo: {operation_mode.upper()} ---")
             try:
-                if not automatic_backtest_runner:
-                    print("ERROR: El runner de backtest automático no está disponible.")
-                    break
-                
                 automatic_backtest_runner.run_automatic_backtest_mode(
                     final_summary=final_summary, operation_mode=operation_mode,
                     config_module=config, utils_module=utils, menu_module=menu,
@@ -185,9 +198,8 @@ def main_loop():
                     data_feeder_module=data_feeder,
                     plotter_module=plotter
                 )
-                print("\nBacktest Automático completado.")
-            except Exception as e_auto_bt:
-                 print(f"ERROR CRITICO durante ejecución de Backtest Automático: {e_auto_bt}")
+            except Exception as e:
+                 print(f"ERROR CRITICO durante ejecución de Backtest Automático: {e}")
                  traceback.print_exc()
             break
 
@@ -195,8 +207,6 @@ def main_loop():
             operation_mode = "exit"; break
         else:
             print("Opción no válida."); time.sleep(1)
-
-# (El resto del archivo main.py no necesita cambios)
 
 def configure_runtime_settings() -> bool:
     global config
@@ -225,7 +235,7 @@ if __name__ == "__main__":
         if active_ticker_module and hasattr(active_ticker_module, 'stop_ticker_thread'):
             try: active_ticker_module.stop_ticker_thread()
             except Exception: pass
-        
+
         pm_enabled_final = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False) if config else False
         if position_manager and pm_enabled_final and results_reporter and final_summary and 'error' not in final_summary:
              print("Generando/Sobrescribiendo reporte final...")
@@ -234,3 +244,5 @@ if __name__ == "__main__":
              except Exception as report_err:
                  print(f"  ERROR generando reporte final: {report_err}")
         print("\nPrograma terminado.")
+
+# =============== FIN ARCHIVO: main.py (v13.3 - Llamadas a Runner Corregidas Completamente) ===============

@@ -141,7 +141,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 BACKTEST_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 BACKTEST_CSV_FILE = "data.csv"
 BACKTEST_CSV_TIMESTAMP_COL = "timestamp"
-BACKTEST_CSV_PRICE_COL = "close"
+BACKTEST_CSV_PRICE_COL = "price" #"close"
 
 RESULT_DIR = os.path.join(PROJECT_ROOT, "result")
 PLOT_OUTPUT_FILENAME = f"plot_{TICKER_SYMBOL}.png"
