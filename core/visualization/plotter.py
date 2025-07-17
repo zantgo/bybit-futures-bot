@@ -1,28 +1,27 @@
-# =============== INICIO ARCHIVO: core/visualization/plotter.py (v6.3 - Con Sombreado de Tendencia) ===============
+# =============== INICIO ARCHIVO: core/visualization/plotter.py (v6.4 - Escalable con Sombreado de Tendencia) ===============
 """
 Genera un gráfico a partir de datos históricos y logs.
-v6.3:
+v6.4:
+- Añadida lógica de downsampling (remuestreo) para manejar grandes volúmenes de datos.
+- Si el número de puntos de datos históricos supera un umbral (MAX_POINTS_TO_PLOT),
+  el gráfico se genera a partir de barras OHLC en lugar de dibujar cada tick,
+  evitando problemas de memoria y rendimiento.
+- Integrado el sombreado de fondo para visualizar la tendencia (LONG/SHORT/NEUTRAL).
 - Aumentado el tamaño del gráfico para mejor legibilidad.
-- Añadida la función `axvspan` para sombrear el fondo del gráfico según la
-  tendencia (LONG_ONLY, SHORT_ONLY) registrada en un nuevo log de estados.
-v6.2.2:
-- Grafica precio, EMA, señales BUY/SELL, y marcadores de apertura/cierre.
-- AJUSTADO para manejar mejor escalas de precios con alta precisión decimal y formato Y explícito.
 """
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.ticker import ScalarFormatter, FormatStrFormatter # Importar FormatStrFormatter
+from matplotlib.ticker import ScalarFormatter, FormatStrFormatter
 import json
 import os
 import traceback
 import sys
-from typing import Optional # Asegurar que está importado
+from typing import Optional
 
 # Importar módulos core necesarios de forma segura
 try:
-    # Asumiendo que este módulo está en core/visualization/
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
@@ -30,10 +29,11 @@ try:
     from core import utils
 except ImportError:
     print("ERROR CRITICO [Plotter Import]: No se pudo importar config o utils.")
-    # Crear dummies para permitir que el script se cargue parcialmente
     config = type('obj', (object,), {'TA_EMA_WINDOW': 20, 'TICKER_SYMBOL': 'N/A'})()
     utils = type('obj', (object,), {'safe_float_convert': float})()
 
+# --- Constantes ---
+MAX_POINTS_TO_PLOT = 1000000 # Umbral para activar el remuestreo
 
 # --- Función para cargar Log de Señales ---
 def load_signal_log(log_filepath: str) -> pd.DataFrame:
@@ -141,11 +141,10 @@ def load_state_changes_log(log_filepath: str) -> list:
     try:
         with open(log_filepath, 'r', encoding='utf-8') as f:
             state_changes = json.load(f)
-        
-        # Convertir timestamps a objetos datetime
+
         for change in state_changes:
             change['timestamp'] = pd.to_datetime(change['timestamp'])
-        
+
         print(f"  Log de Estados procesado: {len(state_changes)} cambios de estado encontrados.")
         return state_changes
     except FileNotFoundError:
@@ -166,8 +165,9 @@ def plot_signals_and_price(
 ):
     """
     Genera gráfico combinando precio, EMA, señales, posiciones y sombreado de tendencia.
+    Aplica downsampling si el número de datos es muy grande.
     """
-    print("\n--- Iniciando Generación de Gráfico (v6.3 - Con Sombreado de Tendencia) ---")
+    print("\n--- Iniciando Generación de Gráfico (v6.4 - Escalable) ---")
 
     # 1. Validar y Preparar Datos Históricos
     if historical_data_df is None or historical_data_df.empty:
@@ -193,12 +193,31 @@ def plot_signals_and_price(
     else:
         historical_data_df.sort_index(inplace=True)
 
+    # Lógica de Downsampling
+    plot_df = historical_data_df
+    resample_rule = None
+    if len(historical_data_df) > MAX_POINTS_TO_PLOT:
+        duration_hours = (historical_data_df.index[-1] - historical_data_df.index[0]).total_seconds() / 3600
+        if duration_hours > 72: resample_rule = '30Min'
+        elif duration_hours > 24: resample_rule = '15Min'
+        elif duration_hours > 6: resample_rule = '5Min'
+        elif duration_hours > 1: resample_rule = '1Min'
+        else: resample_rule = '15S'
+
+        print(f"[Plotter Info] Demasiados puntos ({len(historical_data_df)}). Remuestreando a '{resample_rule}'.")
+
+        ohlc_dict = {'price': 'ohlc'}
+        plot_df = historical_data_df.resample(resample_rule).apply(ohlc_dict)
+        plot_df.columns = plot_df.columns.droplevel(0)
+        plot_df.dropna(inplace=True)
+        print(f"  Datos reducidos a {len(plot_df)} puntos (barras OHLC).")
+
     # 2. Cargar Logs
     df_signals = load_signal_log(signal_log_filepath)
     df_closed_positions = pd.DataFrame()
     if closed_positions_log_filepath and os.path.exists(closed_positions_log_filepath):
          df_closed_positions = load_closed_positions_log(closed_positions_log_filepath)
-    
+
     state_changes = []
     if state_changes_log_filepath and os.path.exists(state_changes_log_filepath):
         state_changes = load_state_changes_log(state_changes_log_filepath)
@@ -206,19 +225,19 @@ def plot_signals_and_price(
     # 3. Calcular EMA
     ema_window = getattr(config, 'TA_EMA_WINDOW', 20)
     print(f"[Plotter Info] Calculando EMA({ema_window})...")
+    price_series_for_ema = plot_df['close'] if 'close' in plot_df.columns else plot_df['price']
     try:
-        if len(historical_data_df) >= ema_window:
-            historical_data_df['EMA'] = historical_data_df['price'].ewm(span=ema_window, adjust=False, min_periods=ema_window).mean()
+        if len(price_series_for_ema) >= ema_window:
+            plot_df['EMA'] = price_series_for_ema.ewm(span=ema_window, adjust=False, min_periods=ema_window).mean()
         else:
-             print(f"  Advertencia: Datos insuficientes ({len(historical_data_df)} filas) para calcular EMA({ema_window}).")
-             historical_data_df['EMA'] = np.nan
+             plot_df['EMA'] = np.nan
     except Exception as e:
         print(f"[Plotter Error] Cálculo EMA falló: {e}");
-        historical_data_df['EMA'] = np.nan
+        plot_df['EMA'] = np.nan
 
-    # 4. Crear Gráfico (tamaño modificado)
+    # 4. Crear Gráfico
     plt.style.use('seaborn-v0_8-darkgrid')
-    fig, ax = plt.subplots(figsize=(25, 12)) # Tamaño aumentado
+    fig, ax = plt.subplots(figsize=(25, 12))
 
     # 5. Plotear Sombreado de Fondo
     if state_changes:
@@ -227,55 +246,44 @@ def plot_signals_and_price(
             start_time = state_changes[i]['timestamp']
             mode = state_changes[i]['mode']
             end_time = state_changes[i+1]['timestamp'] if i + 1 < len(state_changes) else historical_data_df.index[-1]
-            
-            color = 'none'
-            if mode == 'LONG_ONLY':
-                color = 'green'
-            elif mode == 'SHORT_ONLY':
-                color = 'red'
-            
+            color = {'LONG_ONLY': 'green', 'SHORT_ONLY': 'red'}.get(mode, 'none')
             if color != 'none':
                 ax.axvspan(start_time, end_time, color=color, alpha=0.1, zorder=0)
 
-    # 6. Plotear Datos
-    ax.plot(historical_data_df.index, historical_data_df['price'], label='Precio Histórico', color='grey', lw=1.0, alpha=0.8, zorder=1)
-    if 'EMA' in historical_data_df and historical_data_df['EMA'].notna().any():
-        ax.plot(historical_data_df.index, historical_data_df['EMA'], label=f'EMA ({ema_window})', color='darkorange', ls='--', lw=1.5, alpha=0.9, zorder=2)
+    # 6. Plotear Datos de Precio y EMA
+    if resample_rule:
+        ax.plot(plot_df.index, plot_df['close'], label='Precio (Cierre Agregado)', color='grey', lw=1.2, alpha=0.9, zorder=1)
+        ax.fill_between(plot_df.index, plot_df['low'], plot_df['high'], color='grey', alpha=0.2, label=f'Rango H-L ({resample_rule})')
+    else:
+        ax.plot(plot_df.index, plot_df['price'], label='Precio Histórico', color='grey', lw=1.0, alpha=0.8, zorder=1)
 
+    if 'EMA' in plot_df and plot_df['EMA'].notna().any():
+        ax.plot(plot_df.index, plot_df['EMA'], label=f'EMA ({ema_window})', color='darkorange', ls='--', lw=1.5, alpha=0.9, zorder=2)
+
+    # Plotear marcadores
     if not df_closed_positions.empty:
-        print("[Plotter Info] Graficando marcadores de apertura/cierre de posiciones...")
         closed_longs = df_closed_positions[df_closed_positions['side'] == 'long']
         closed_shorts = df_closed_positions[df_closed_positions['side'] == 'short']
         if not closed_longs.empty:
             ax.scatter(closed_longs['entry_timestamp_dt'], closed_longs['entry_price'], label='Open Long', marker='o', color='blue', s=80, alpha=0.7, zorder=3)
-            ax.scatter(closed_longs['exit_timestamp_dt'], closed_longs['exit_price'], label='Close Long (TP)', marker='x', color='blue', s=100, lw=2, alpha=0.9, zorder=4)
-            print(f"  - Graficados {len(closed_longs)} marcadores Open/Close Long.")
+            ax.scatter(closed_longs['exit_timestamp_dt'], closed_longs['exit_price'], label='Close Long', marker='x', color='blue', s=100, lw=2, alpha=0.9, zorder=4)
         if not closed_shorts.empty:
             ax.scatter(closed_shorts['entry_timestamp_dt'], closed_shorts['entry_price'], label='Open Short', marker='o', color='purple', s=80, alpha=0.7, zorder=3)
-            ax.scatter(closed_shorts['exit_timestamp_dt'], closed_shorts['exit_price'], label='Close Short (TP)', marker='x', color='purple', s=100, lw=2, alpha=0.9, zorder=4)
-            print(f"  - Graficados {len(closed_shorts)} marcadores Open/Close Short.")
-    else:
-        print("[Plotter Info] No hay datos de posiciones cerradas para graficar.")
+            ax.scatter(closed_shorts['exit_timestamp_dt'], closed_shorts['exit_price'], label='Close Short', marker='x', color='purple', s=100, lw=2, alpha=0.9, zorder=4)
 
     if not df_signals.empty:
         buy_markers = df_signals[df_signals['signal'] == 'BUY']
         sell_markers = df_signals[df_signals['signal'] == 'SELL']
         if not buy_markers.empty:
             ax.scatter(buy_markers.index, buy_markers['price_float'], label='BUY Signal', marker='^', color='lime', s=120, ec='black', lw=0.5, zorder=5)
-            print(f"[Plotter Info] Graficando {len(buy_markers)} marcador(es) de señal BUY.")
         if not sell_markers.empty:
             ax.scatter(sell_markers.index, sell_markers['price_float'], label='SELL Signal', marker='v', color='red', s=120, ec='black', lw=0.5, zorder=5)
-            print(f"[Plotter Info] Graficando {len(sell_markers)} marcador(es) de señal SELL.")
-    else:
-        print("[Plotter Info] No hay datos de señales BUY/SELL para graficar.")
 
     # 7. AJUSTAR LÍMITES Y FORMATO DEL EJE Y
-    print("[Plotter Info] Ajustando escala y formato del eje Y...")
     all_y_values_list = []
-    if 'price' in historical_data_df and historical_data_df['price'].notna().any():
-        all_y_values_list.append(historical_data_df['price'].dropna())
-    if 'EMA' in historical_data_df and historical_data_df['EMA'].notna().any():
-        all_y_values_list.append(historical_data_df['EMA'].dropna())
+    price_data_for_lim = plot_df['close'] if resample_rule else plot_df['price']
+    if price_data_for_lim.notna().any(): all_y_values_list.append(price_data_for_lim.dropna())
+    if 'EMA' in plot_df and plot_df['EMA'].notna().any(): all_y_values_list.append(plot_df['EMA'].dropna())
     if not df_signals.empty and 'price_float' in df_signals and df_signals['price_float'].notna().any():
          all_y_values_list.append(df_signals['price_float'].dropna())
     if not df_closed_positions.empty:
@@ -287,33 +295,28 @@ def plot_signals_and_price(
     if all_y_values_list:
         all_y_data = pd.concat(all_y_values_list)
         if not all_y_data.empty:
-            ymin = all_y_data.min()
-            ymax = all_y_data.max()
-            data_range = ymax - ymin
-            padding = data_range * 0.05 if data_range > 1e-9 else abs(ymin * 0.01)
+            ymin, ymax = all_y_data.min(), all_y_data.max()
+            padding = (ymax - ymin) * 0.05 if (ymax - ymin) > 1e-9 else abs(ymin * 0.01)
             padding = max(padding, 1e-8)
             final_ymin = ymin - padding
             final_ymax = ymax + padding
-            if ymin >= 0:
-                final_ymin = max(0, final_ymin)
+            if ymin >= 0: final_ymin = max(0, final_ymin)
             ax.set_ylim(final_ymin, final_ymax)
-            print(f"[Plotter Info] Límites eje Y calculados: ({final_ymin:.8f}, {final_ymax:.8f})")
-        else:
-             print("[Plotter Warn] No se encontraron datos Y válidos para calcular límites.")
-    else:
-        print("[Plotter Warn] No hay datos para determinar límites del eje Y.")
 
     ax.yaxis.set_major_formatter(FormatStrFormatter('%.8f'))
     plt.setp(ax.get_yticklabels(), rotation=30, ha="right")
 
     # 8. Configuración Final y Guardado
     symbol_plot = getattr(config, 'TICKER_SYMBOL', 'N/A')
-    ax.set_title(f'Historial {symbol_plot}, EMA({ema_window}), Señales y Posiciones (v6.3)', fontsize=18)
-    ax.set_xlabel('Timestamp', fontsize=12)
-    ax.set_ylabel('Precio (USDT)', fontsize=12)
-    ax.legend(fontsize=10, loc='best') # Aumentado tamaño de leyenda
-    ax.grid(True, linestyle=':', alpha=0.6)
-    
+    title = f'Historial {symbol_plot}, EMA({ema_window}), Señales y Posiciones (v6.4'
+    if resample_rule:
+        title += f' - Agregado a {resample_rule})'
+    else:
+        title += ')'
+    ax.set_title(title, fontsize=18)
+    ax.set_xlabel('Timestamp', fontsize=12); ax.set_ylabel('Precio (USDT)', fontsize=12)
+    ax.legend(fontsize=10, loc='best'); ax.grid(True, linestyle=':', alpha=0.6)
+
     try:
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
         plt.xticks(rotation=30, ha='right')
