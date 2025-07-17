@@ -1,10 +1,11 @@
-# =============== INICIO ARCHIVO: core/live_operations.py (Corregido v6) ===============
+# =============== INICIO ARCHIVO: core/live_operations.py (Corregido y Mejorado) ===============
 """
 Módulo para interactuar con la API de Bybit para ejecutar operaciones en vivo,
 como colocar órdenes de mercado, establecer apalancamiento, y obtener información.
 v7.7 - Obtiene precisión/mínimos de cantidad desde la API (instruments-info).
 v8.5 - Añadida función get_order_execution_history.
 v8.5.1 - Corregidos errores Pylance (InvalidOperation, typo variable).
+v8.5.2 (Corrección actual) - Refactorizada _get_qty_precision_from_step para robustez con Decimal.
 """
 import sys
 import os
@@ -12,7 +13,6 @@ import traceback
 from typing import Optional, Union, Dict, Any, List
 import time
 import datetime
-# <<< CORRECCIÓN: Importar InvalidOperation >>>
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 
 # Importar módulos necesarios de forma segura
@@ -49,23 +49,38 @@ _INSTRUMENT_INFO_CACHE_EXPIRY_SECONDS = 3600
 
 # --- Funciones Auxiliares ---
 
+# <<< INICIO DE LA CORRECCIÓN >>>
 def _get_qty_precision_from_step(step_str: str) -> int:
-    """Calcula el número de decimales a partir del qtyStep."""
-    if not isinstance(step_str, str): print(f"WARN [_get_qty_precision]: qtyStep no es string ('{step_str}'). Asumiendo 0 decimales."); return 0
-    if '.' in step_str: return len(step_str.split('.')[-1].rstrip('0')) # Corrección rstrip
-    else:
-        try:
-            # Convertir a float para manejar notación científica si es necesario
-            step_float = float(step_str)
-            if step_float == 0: return 18 # Máxima precisión posible si step es 0? Revisar lógica Bybit
-            if step_float >= 1: return 0
-            else:
-                # Calcular precisión contando decimales después de convertir a string estándar
-                # Evitar notación científica estándar si es posible
-                s = format(step_float, '.18f') # Formato con muchos decimales
-                return len(s.split('.')[-1].rstrip('0'))
+    """
+    Calcula el número de decimales a partir del qtyStep usando el tipo Decimal
+    para mayor robustez y precisión.
+    """
+    if not isinstance(step_str, str) or not step_str.strip():
+        print(f"WARN [_get_qty_precision]: qtyStep inválido o vacío ('{step_str}'). Asumiendo 0 decimales.")
+        return 0
+    try:
+        # Usar Decimal para manejar correctamente todos los formatos numéricos
+        step_decimal = Decimal(step_str)
+        
+        # Si el valor no es finito (inf, nan) o es cero, no se puede determinar la precisión.
+        if not step_decimal.is_finite():
+            print(f"WARN [_get_qty_precision]: qtyStep no es un número finito ('{step_str}'). Asumiendo 0.")
+            return 0
+        
+        # El exponente del Decimal nos da directamente el número de decimales.
+        # ej. Decimal('0.001').as_tuple().exponent -> -3
+        # ej. Decimal('10').as_tuple().exponent -> 1 (necesitamos 0 decimales)
+        # ej. Decimal('1').as_tuple().exponent -> 0
+        exponent = step_decimal.as_tuple().exponent
+        if exponent < 0:
+            return abs(exponent)
+        else:
+            return 0
 
-        except (ValueError, TypeError): print(f"WARN [_get_qty_precision]: No se pudo convertir qtyStep ('{step_str}') a float. Asumiendo 0 decimales."); return 0
+    except InvalidOperation:
+        print(f"WARN [_get_qty_precision]: No se pudo convertir qtyStep ('{step_str}') a Decimal. Asumiendo 0.")
+        return 0
+# <<< FIN DE LA CORRECCIÓN >>>
 
 def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool:
     """Maneja respuestas de error comunes de la API Bybit v5."""
@@ -191,7 +206,6 @@ def place_market_order(
         if qty_rounded < Decimal(str(min_qty)):
             if not reduce_only: print(f"ERROR [Place Order]: Cantidad redondeada ({qty_str_api}) < mínimo ({min_qty})."); return None
             else: print(f"WARN [Place Order]: Cantidad de cierre ({qty_str_api}) < mínimo ({min_qty}), pero permitido por reduce_only=True.")
-    # <<< CORRECCIÓN: Capturar InvalidOperation >>>
     except (ValueError, TypeError, InvalidOperation) as e: print(f"ERROR [Place Order]: Cantidad inválida o error de redondeo '{quantity}': {e}."); return None
 
     target_account = account_name if account_name else getattr(config, 'ACCOUNT_MAIN', 'main')
@@ -414,18 +428,14 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
     if not position_to_close: print(f"  INFO [Close Position By Side]: No se encontró posición activa del lado '{side_to_close}'."); return True # Éxito si no hay nada que cerrar
 
     pos_size_str = position_to_close.get('size', '0'); pos_idx = position_to_close.get('positionIdx', 0);
-    # <<< CORRECCIÓN: Usar la variable correcta >>>
     close_order_side = "Sell" if side_to_close == "Buy" else "Buy"
     try:
         pos_size_float = float(pos_size_str)
-        # <<< No es necesario chequear min_qty para cierre reduce_only >>>
         qty_decimal = Decimal(pos_size_str); rounding_factor = Decimal('1e-' + str(qty_precision)); qty_rounded = qty_decimal.quantize(rounding_factor, rounding=ROUND_DOWN); qty_to_close_str = str(qty_rounded)
         if qty_rounded <= Decimal(0): print(f"  ERROR [Close Position By Side]: Cantidad redondeada a cero para {pos_size_str}."); return False
-    # <<< CORRECCIÓN: Capturar InvalidOperation >>>
     except (ValueError, TypeError, InvalidOperation) as e: print(f"  ERROR [Close Position By Side]: Error procesando tamaño '{pos_size_str}': {e}"); return False
 
     print(f"  -> Intentando cerrar {side_to_close} PosIdx={pos_idx} (Tamaño API: {qty_to_close_str})...")
-    # <<< CORRECCIÓN: Usar la variable correcta 'close_order_side' >>>
     close_response = place_market_order( symbol=symbol, side=close_order_side, quantity=qty_to_close_str, reduce_only=True, position_idx=pos_idx, account_name=target_account )
     if close_response and close_response.get('retCode') == 0: print(f"  ÉXITO [Close Position By Side]: Orden de cierre para {side_to_close} enviada."); return True
     else: print(f"  FALLO [Close Position By Side]: No se pudo enviar orden de cierre para {side_to_close}."); return False
@@ -446,37 +456,29 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
                                         lista vacía si no hay ejecuciones/error API,
                                         o None si hay un error crítico/excepción.
     """
-    # <<< Adaptación como función independiente (requiere session del manager) >>>
     if not connection_manager: print("ERROR [Get Executions]: Connection manager no disponible."); return None
-    # Obtener sesión (ej. de la cuenta principal)
-    # <<< Añadir chequeo para config >>>
     session = None
     if config:
          session = connection_manager.get_client(getattr(config, 'ACCOUNT_MAIN', 'main'))
     if not session: print("ERROR [Get Executions]: No se pudo obtener sesión API."); return None
-    # <<< Chequear si la sesión tiene el método necesario >>>
     if not hasattr(session, 'get_executions'): print("ERROR Fatal [Get Executions]: Sesión API no tiene método 'get_executions'."); return None
 
-    endpoint = "/v5/execution/list" # Endpoint correcto
+    endpoint = "/v5/execution/list"
     params = {
         "category": category,
         "symbol": symbol,
         "orderId": order_id,
-        "limit": min(limit, 100) # Asegurar límite <= 100
+        "limit": min(limit, 100)
     }
     print(f"DEBUG [Get Executions]: Consultando API para Orden ID: {order_id}...")
     try:
         response = session.get_executions(**params)
-
-        # <<< Usar helper genérico de error >>>
         if _handle_api_error_generic(response, f"Get Executions for Order {order_id}"):
-            # Código 110001 significa orden no encontrada, devolver lista vacía
             if response and response.get('retCode') == 110001:
                  print(f"  INFO [Get Executions]: Orden {order_id} no encontrada (110001).")
                  return []
-            return [] # Devolver lista vacía en otros errores API esperados
+            return []
         else:
-            # Devolver la lista de ejecuciones del resultado
             executions_list = response.get('result', {}).get('list', [])
             print(f"  -> ÉXITO [Get Executions]: {len(executions_list)} ejecuciones encontradas para Orden ID {order_id}.")
             return executions_list
@@ -484,11 +486,11 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
         print(f"ERROR API [Get Executions] para orden {order_id}: {api_err} (Status: {status_code})")
-        return None # Devolver None en error API
+        return None
     except Exception as e:
         print(f"ERROR Inesperado [Get Executions] para orden {order_id}: {e}")
         traceback.print_exc()
-        return None # Devolver None en excepción general
+        return None
 
 
-# =============== FIN ARCHIVO: core/live_operations.py (Corregido v6) ===============
+# =============== FIN ARCHIVO: core/live_operations.py (Corregido y Mejorado) ===============

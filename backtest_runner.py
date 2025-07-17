@@ -1,13 +1,10 @@
-# =============== INICIO ARCHIVO: backtest_runner.py (Modificado según instrucciones) ===============
 """
 Contiene la lógica para ejecutar el modo Backtest del bot.
-Incluye carga de datos, configuración interactiva (tamaño base por posición y slots iniciales),
-simulación, reporte y visualización (default).
+Incluye carga de datos, configuración interactiva, simulación, reporte y visualización.
 
-v8.7.x: Modificado para pedir tamaño base por posición y número inicial de slots.
-v8.7.10: Corrige cuarto nombre de argumento en llamada a plotter.plot_signals_and_price.
-v8.7.0: Inicio interactivo para modo/capital. Visualización por defecto.
-Modificado: Corregido cálculo de "Margen Usado" y "Equity Final" en el reporte.
+v8.8:
+- Integrado el manejo de la excepción GlobalStopLossException para detener
+  el backtest de forma controlada sin interrumpir la generación de reportes.
 """
 import os
 import traceback
@@ -36,22 +33,21 @@ except Exception as e_imp_other: print(f"ERROR CRITICO [BT Runner Import]: Excep
 
 # --- Lógica Modo Backtest ---
 def run_backtest_mode(
-    final_summary: Dict[str, Any], # Este diccionario se llenará con el resumen del PM
+    final_summary: Dict[str, Any],
     operation_mode: str,
     # --- Argumentos de Dependencias ---
-    config_module: Any, 
+    config_module: Any,
     utils_module: Any,
     menu_module: Any,
-    position_manager_module: Optional[Any], 
-    event_processor_module: Optional[Any],    
-    open_snapshot_logger_module: Optional[Any], 
-    results_reporter_module: Optional[Any], 
-    balance_manager_module: Optional[Any], 
-    position_state_module: Optional[Any],  
-    ta_manager_module: Optional[Any]          
+    position_manager_module: Optional[Any],
+    event_processor_module: Optional[Any],
+    open_snapshot_logger_module: Optional[Any],
+    results_reporter_module: Optional[Any],
+    balance_manager_module: Optional[Any],
+    position_state_module: Optional[Any],
+    ta_manager_module: Optional[Any]
     ):
 
-    # --- Verificaciones iniciales ---
     if not all([config_module, utils_module, menu_module, event_processor_module, ta_manager_module, data_feeder]):
          missing = [name for name, mod in [('config', config_module), ('utils', utils_module), ('menu', menu_module), ('EP', event_processor_module), ('TA', ta_manager_module), ('DataFeeder', data_feeder)] if not mod]
          print(f"ERROR CRITICO [Backtest Runner]: Faltan módulos esenciales: {missing}. Abortando.")
@@ -62,11 +58,10 @@ def run_backtest_mode(
          print(f"ERROR CRITICO [Backtest Runner]: Gestión habilitada pero faltan módulos PM/PS/BM: {missing_pm}. Abortando.")
          return
 
-    # --- 1. Obtener Configuración Interactiva ---
     print("\n--- Configuración Interactiva para Backtest ---")
     selected_trading_mode = menu_module.get_trading_mode_interactively()
     if selected_trading_mode == "CANCEL": print("Backtest cancelado."); return
-    
+
     selected_base_size, selected_initial_slots = menu_module.get_position_setup_interactively()
     if selected_base_size is None or selected_initial_slots is None:
         print("Backtest cancelado (Configuración de Posiciones)."); return
@@ -78,26 +73,24 @@ def run_backtest_mode(
     print("-" * 62)
     print("Confirmando configuración..."); time.sleep(1.5)
 
-    # --- 2. Actualizar Config Global (Temporal) ---
     original_trading_mode = getattr(config_module, 'POSITION_TRADING_MODE', 'LONG_SHORT')
     try:
         setattr(config_module, 'POSITION_TRADING_MODE', selected_trading_mode)
-        setattr(config_module, 'PRINT_TICK_LIVE_STATUS', False) 
+        setattr(config_module, 'PRINT_TICK_LIVE_STATUS', False)
         print(f"INFO [Backtest Runner]: Configuración temporal aplicada (Modo: {selected_trading_mode}).")
     except Exception as e_cfg_set: print(f"ERROR [Backtest Runner]: Aplicando config temporal: {e_cfg_set}"); return
 
-    # --- 3. Inicializar Componentes Core ---
     print(f"\n--- Iniciando MODO {operation_mode.upper()} (Trading: {selected_trading_mode}) ---")
     management_enabled_runtime = getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False)
     print(f"Gestión Posiciones: {'Activada' if management_enabled_runtime else 'Desactivada'}")
-    if management_enabled_runtime: 
+    if management_enabled_runtime:
         print(f"Log Snap Final: {getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False)}")
         print(f"Generar Reporte: {'Sí' if results_reporter_module else 'No'}")
     print("\nInicializando Componentes Core (TA, EventProcessor)...")
     try:
         if not ta_manager_module or not hasattr(ta_manager_module, 'initialize'): raise RuntimeError("TA Manager no disponible/inválido.")
         ta_manager_module.initialize()
-        
+
         if open_snapshot_logger_module and hasattr(open_snapshot_logger_module, 'initialize_logger') and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
             try: open_snapshot_logger_module.initialize_logger()
             except Exception as e_log_init: print(f"WARN: Error inicializando OSL: {e_log_init}")
@@ -107,7 +100,7 @@ def run_backtest_mode(
         print(f"  Inicializando Event Processor (Modo: {operation_mode})...")
         event_processor_module.initialize(
             operation_mode=operation_mode,
-            initial_real_state=None, 
+            initial_real_state=None,
             base_position_size_usdt=selected_base_size,
             initial_max_logical_positions=selected_initial_slots
         )
@@ -119,7 +112,6 @@ def run_backtest_mode(
     except RuntimeError as e_init_core: print(f"ERROR CRITICO [BT Runner]: Inicializando componentes: {e_init_core}"); traceback.print_exc(); return
     except Exception as e_init_gen: print(f"ERROR CRITICO [BT Runner]: Excepción inesperada inicializando: {e_init_gen}"); traceback.print_exc(); return
 
-    # --- 4. Procesar Backtest ---
     print("\nProcesando datos históricos..."); print("-" * 30)
     historical_data = None; backtest_completed_successfully = False
     try:
@@ -130,17 +122,30 @@ def run_backtest_mode(
         if historical_data is not None and not historical_data.empty:
             print(f"Ejecutando backtest ({len(historical_data)} filas)...");
             if not hasattr(event_processor_module, 'process_event'): raise RuntimeError("Event Processor sin método 'process_event'.")
-            data_feeder.run_backtest( historical_data_df=historical_data, callback=event_processor_module.process_event )
+
+            # <<< INICIO DE LA MODIFICACIÓN >>>
+            try:
+                data_feeder.run_backtest(
+                    historical_data_df=historical_data,
+                    callback=event_processor_module.process_event
+                )
+            except event_processor_module.GlobalStopLossException as e:
+                print("\n" + "="*80)
+                print("--- BACKTEST DETENIDO POR GLOBAL STOP LOSS ---".center(80))
+                print(f"--- Razón: {e} ---".center(80))
+                print("--- El proceso continuará para generar el reporte y gráfico final. ---".center(80))
+                print("="*80)
+            # <<< FIN DE LA MODIFICACIÓN >>>
+
             print("\n--- Backtest Finalizado (Procesamiento de Datos) ---"); backtest_completed_successfully = True
 
             management_enabled_final = getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False)
             pm_initialized_final = getattr(position_manager_module, '_initialized', False) if position_manager_module else False
-            
-            # Obtener el resumen final del Position Manager para el reporte
+
             if management_enabled_final and position_manager_module and pm_initialized_final:
                  final_pm_summary_local = position_manager_module.get_position_summary()
                  if final_pm_summary_local and 'error' not in final_pm_summary_local:
-                     final_summary.clear(); final_summary.update(final_pm_summary_local) # Actualizar el dict pasado por referencia
+                     final_summary.clear(); final_summary.update(final_pm_summary_local)
                      print("\n--- Resumen Final (Backtest PM) ---"); print(json.dumps(final_pm_summary_local, indent=2)); print("-" * 30)
                      if open_snapshot_logger_module and hasattr(open_snapshot_logger_module, 'log_open_positions_snapshot') and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
                           try: open_snapshot_logger_module.log_open_positions_snapshot(final_pm_summary_local);
@@ -156,30 +161,22 @@ def run_backtest_mode(
         try: setattr(config_module, 'POSITION_TRADING_MODE', original_trading_mode); print(f"INFO [BT Runner]: Config POSITION_TRADING_MODE restaurada a '{original_trading_mode}'.")
         except Exception as e_cfg_restore: print(f"WARN: No se pudo restaurar config.POSITION_TRADING_MODE: {e_cfg_restore}")
 
-    # --- 5. Generación de Reporte y Visualización (Default si éxito) ---
     if backtest_completed_successfully:
         management_enabled_report = getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False)
-        # Usar el 'final_summary' que se llenó arriba con datos de PM
         if results_reporter_module and management_enabled_report and final_summary and isinstance(final_summary, dict) and 'error' not in final_summary:
              print("\nGenerando reporte de resultados...")
              try:
-                 if hasattr(results_reporter_module, 'generate_backtest_report_from_summary'): # Asumiendo que existe una función específica
+                 if hasattr(results_reporter_module, 'generate_backtest_report_from_summary'):
                       report_path = getattr(config_module, 'RESULTS_FILEPATH', 'result/results.txt'); report_dir = os.path.dirname(report_path);
                       if report_dir: os.makedirs(report_dir, exist_ok=True)
-                      
-                      # Pasar el final_summary (que es el de PM) a la función de reporte
-                      # Esta función generate_backtest_report_from_summary DEBE SER CREADA o adaptada
-                      # en results_reporter.py para usar las claves correctas de final_summary
-                      # y realizar los cálculos correctos de Margen Usado y Equity Final.
                       results_reporter_module.generate_backtest_report_from_summary(
-                          pm_summary=final_summary, 
+                          pm_summary=final_summary,
                           operation_mode=operation_mode,
-                          # Puedes pasar config y utils si son necesarios dentro del reporter
-                          config_module=config_module, 
-                          utils_module=utils_module 
+                          config_module=config_module,
+                          utils_module=utils_module
                       )
                       print(f"Reporte generado en: {os.path.abspath(report_path)}")
-                 elif hasattr(results_reporter_module, 'generate_report'): # Fallback a la función genérica
+                 elif hasattr(results_reporter_module, 'generate_report'):
                       print("WARN: Usando generate_report genérico. Asegúrate que calcula bien el Equity y Margen Usado para backtest.")
                       report_path = getattr(config_module, 'RESULTS_FILEPATH', 'result/results.txt'); report_dir = os.path.dirname(report_path);
                       if report_dir: os.makedirs(report_dir, exist_ok=True)
@@ -223,5 +220,3 @@ def run_backtest_mode(
              except Exception as plot_err: print(f"ERROR durante visualización: {plot_err}"); traceback.print_exc()
         else: print("\nNo se puede visualizar: datos históricos no disponibles.")
     else: print("\nBacktest no completado con éxito. No se generará reporte ni visualización.")
-
-# =============== FIN ARCHIVO: backtest_runner.py (Modificado según instrucciones) ===============

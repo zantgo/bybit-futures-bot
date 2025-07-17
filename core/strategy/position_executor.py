@@ -1,39 +1,28 @@
-# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v1.6.3 - LiqP Individual con Recálculo Post-Sync) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v14 - Con SL Individual y Trailing Stop) ===============
 """
-Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución
-para abrir y cerrar posiciones, interactuando con la API (live) o simulando
-(backtest), y gestionando el estado interno (balance, lógico, físico).
+Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución.
 
-v1.6.3: Asegura que el 'est_liq_price' individual se recalcule y actualice
-        en PositionState después de una sincronización exitosa de precio/cantidad
-        en modo Live.
-v1.6.2: Modificado execute_open para calcular y almacenar 'est_liq_price'
-        individual para cada nueva posición lógica.
-v1.6.1: Adapta execute_close para usar nuevas claves de reinversión/transferencia de PNL Neto.
-        Clarifica responsabilidad de execute_transfer sobre actualización de balances lógicos.
-v1.5: Añade lógica de reintento a execute_transfer para modo Live y corrección para manejo de None en sync_physical_state.
-v1.4: Corrige UnboundLocalError en execute_close al manejar error 110001.
-v1.3: Corrige errores de sintaxis detectados por Pylance en execute_close.
-v1.2: Desacopla el éxito de la apertura del éxito de la sincronización inicial.
-v1.1: Asegura sincronización de precio de entrada post-add y añade print JSON físico.
+v14:
+- Modificado `execute_open` para:
+  - Calcular y almacenar un `stop_loss_price` individual para cada posición.
+  - Eliminar el cálculo de `take_profit_price`.
+  - Inicializar los campos necesarios para el Trailing Stop.
+- Actualizada la lógica de sincronización para recalcular el SL si el precio de entrada cambia.
 """
 import datetime
 import uuid
 import time
 import traceback
-import json # Para imprimir JSON
+import json
 from typing import Optional, Dict, Any, Tuple
 
 # --- Dependencias (inyectadas a través de __init__) ---
-# Se usarán type hints con Any para flexibilidad
-
 MAX_TRANSFER_RETRIES = 2
-TRANSFER_RETRY_DELAY = 5
+TRANSFER_RETRY_DELAY = 2
 
 class PositionExecutor:
     """
-    Clase responsable de la ejecución mecánica de apertura y cierre de posiciones,
-    independientemente de la estrategia o trigger que lo solicite.
+    Clase responsable de la ejecución mecánica de apertura y cierre de posiciones.
     """
     def __init__(self,
                  is_live_mode: bool,
@@ -95,27 +84,34 @@ class PositionExecutor:
             print(f"  Tamaño Final: {size_contracts_final_float:.{qty_precision_used}f} ({size_contracts_str_api} para API), Margen Usado Estimado: {margin_used_final:.4f} USDT")
         except Exception as e: result['message'] = f"Excepción calculando tamaño/margen: {e}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); return result
 
-        logical_position_id = str(uuid.uuid4()); tp_price = self._position_calculations.calculate_take_profit(side, entry_price)
-        
+        # <<< INICIO DE CAMBIOS >>>
+        logical_position_id = str(uuid.uuid4())
+
+        # Calcular SL y Liq. Estimado
+        stop_loss_price = self._position_calculations.calculate_stop_loss(side, entry_price)
         est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
-            side=side,
-            avg_entry_price=entry_price, 
-            leverage=self._leverage
+            side=side, avg_entry_price=entry_price, leverage=self._leverage
         )
 
+        # Preparar el diccionario de la nueva posición con campos para SL y Trailing Stop
         new_position_data = {
-            'id': logical_position_id, 
-            'entry_timestamp': timestamp, 
-            'entry_price': entry_price, 
-            'margin_usdt': margin_used_final, 
-            'size_contracts': size_contracts_final_float, 
-            'leverage': self._leverage, 
-            'take_profit_price': tp_price,
-            'est_liq_price': est_liq_price_individual, 
-            'api_order_id': None, 
-            'api_avg_fill_price': None, 
+            'id': logical_position_id,
+            'entry_timestamp': timestamp,
+            'entry_price': entry_price,
+            'margin_usdt': margin_used_final,
+            'size_contracts': size_contracts_final_float,
+            'leverage': self._leverage,
+            'stop_loss_price': stop_loss_price,
+            'est_liq_price': est_liq_price_individual,
+            'ts_is_active': False,          # Trailing Stop no está activo al inicio
+            'ts_peak_price': None,          # Aún no hay precio pico
+            'ts_stop_price': None,          # Aún no hay precio de stop dinámico
+            'api_order_id': None,
+            'api_avg_fill_price': None,
             'api_filled_qty': None
         }
+        # <<< FIN DE CAMBIOS >>>
+
         result['logical_position_id'] = logical_position_id
 
         execution_success = False; api_order_id = None
@@ -134,7 +130,7 @@ class PositionExecutor:
             else: # Backtest
                 print(f"  Ejecutando Apertura BACKTEST (Simulada)..."); execution_success = True; api_order_id = None; print(f"  -> ÉXITO Simulado.")
             if execution_success:
-                self._balance_manager.decrease_operational_margin(side, margin_used_final) 
+                self._balance_manager.decrease_operational_margin(side, margin_used_final)
         except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); execution_success = False
 
         add_ok = False; sync_ok = not self._is_live_mode; updated_pos_details = None
@@ -148,45 +144,47 @@ class PositionExecutor:
                 if self._is_live_mode and api_order_id and api_order_id != 'N/A':
                     print(f"\n  --- SYNC PRECIO/QTY POST-APERTURA ---"); print(f"    Esperando {self._post_order_delay}s..."); time.sleep(self._post_order_delay)
                     sync_ok = self._position_state.sync_new_logical_entry_price(side, logical_position_id, api_order_id)
-                    if sync_ok: 
+                    if sync_ok:
                         print(f"    Sincronización de precio/tamaño OK para pos ...{logical_position_id[-6:]}.")
                         updated_pos_after_sync = self._position_state.get_position_by_id(side, logical_position_id)
                         if updated_pos_after_sync:
                             new_entry_price_synced = updated_pos_after_sync.get('entry_price', entry_price)
-                            # <<<<<<< INICIO RECALCULO Y ACTUALIZACIÓN LiqP Individual >>>>>>>
-                            est_liq_price_individual_synced = self._position_calculations.calculate_liquidation_price(
-                                side=side,
-                                avg_entry_price=new_entry_price_synced, # Usar el precio de entrada sincronizado
-                                leverage=updated_pos_after_sync.get('leverage', self._leverage) # Usar el leverage de la posición
+
+                            # <<< INICIO DE CAMBIOS: Recalcular SL y LiqP post-sync >>>
+                            update_details = {}
+                            # Recalcular Liq. Price con el precio real
+                            est_liq_price_synced = self._position_calculations.calculate_liquidation_price(
+                                side=side, avg_entry_price=new_entry_price_synced, leverage=updated_pos_after_sync.get('leverage', self._leverage)
                             )
-                            if est_liq_price_individual_synced is not None:
-                                update_liq_details = {'est_liq_price': est_liq_price_individual_synced}
-                                # Actualizar también el precio de TP si el precio de entrada cambió
-                                if abs(new_entry_price_synced - entry_price) > 1e-9: # Si el precio de entrada cambió
-                                    new_tp_price_synced = self._position_calculations.calculate_take_profit(side, new_entry_price_synced)
-                                    update_liq_details['take_profit_price'] = new_tp_price_synced
-                                
-                                self._position_state.update_logical_position_details(side, logical_position_id, update_liq_details)
-                                print(f"    Precio Liq. Estimado Individual Actualizado para ...{logical_position_id[-6:]}: {est_liq_price_individual_synced:.{self._price_prec}f}")
-                                if 'take_profit_price' in update_liq_details:
-                                     print(f"    Take Profit Price Actualizado para ...{logical_position_id[-6:]}: {new_tp_price_synced:.{self._price_prec}f}")
-                            # <<<<<<< FIN RECALCULO Y ACTUALIZACIÓN LiqP Individual >>>>>>>
-                            updated_pos_details = updated_pos_after_sync # Guardar para el log y actualización física
-                    else: 
+                            if est_liq_price_synced is not None:
+                                update_details['est_liq_price'] = est_liq_price_synced
+                                print(f"    Precio Liq. Estimado Individual Actualizado: {est_liq_price_synced:.{self._price_prec}f}")
+
+                            # Recalcular Stop Loss con el precio real
+                            if abs(new_entry_price_synced - entry_price) > 1e-9:
+                                new_sl_price_synced = self._position_calculations.calculate_stop_loss(side, new_entry_price_synced)
+                                if new_sl_price_synced is not None:
+                                    update_details['stop_loss_price'] = new_sl_price_synced
+                                    print(f"    Stop Loss Price Individual Actualizado: {new_sl_price_synced:.{self._price_prec}f}")
+
+                            if update_details:
+                                self._position_state.update_logical_position_details(side, logical_position_id, update_details)
+                            # <<< FIN DE CAMBIOS >>>
+                            updated_pos_details = updated_pos_after_sync
+                    else:
                         print(f"WARN [Exec Open]: Falló sync post-apertura para pos ...{logical_position_id[-6:]}. Usando datos estimados!")
-                    
+
                     if self._print_updates:
-                        # 'updated_pos_details' ya se obtuvo arriba si sync_ok
                         if updated_pos_details: print(f"      > Px Entrada Real: {updated_pos_details.get('entry_price', 0.0):.{self._price_prec}f}, Tamaño Real: {updated_pos_details.get('size_contracts', 0.0):.{qty_precision_used}f}")
                         else: print("      (WARN: No se pudieron leer detalles actualizados)")
                         print("\n  --- ESTADO POST-SYNC PRECIO/QTY ---"); self._position_state.display_logical_table(side); print("  " + "-"*60)
-                
+
                 print(f"  Actualizando estado físico agregado...")
                 open_positions_now = self._position_state.get_open_logical_positions(side)
                 aggregates = self._position_calculations.calculate_physical_aggregates(open_positions_now)
                 liq_price_aggregate = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
                 ts_for_phys_update = timestamp
-                if self._is_live_mode and sync_ok and updated_pos_details: 
+                if self._is_live_mode and sync_ok and updated_pos_details:
                     updated_ts = updated_pos_details.get('entry_timestamp')
                     if isinstance(updated_ts, datetime.datetime): ts_for_phys_update = updated_ts
                 self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price_aggregate, ts_for_phys_update)
@@ -206,14 +204,9 @@ class PositionExecutor:
 
     def execute_close(self, side: str, position_index: int, exit_price: float,
                       timestamp: datetime.datetime) -> Dict[str, Any]:
-        """Ejecuta el cierre de una posición por índice (Live o Backtest)."""
         result = {
-            'success': False, 
-            'pnl_net_usdt': 0.0, 
-            'amount_reinvested_in_operational_margin': 0.0, 
-            'amount_transferable_to_profit': 0.0,
-            'log_data': {},
-            'message': 'Error no especificado',
+            'success': False, 'pnl_net_usdt': 0.0, 'amount_reinvested_in_operational_margin': 0.0,
+            'amount_transferable_to_profit': 0.0, 'log_data': {}, 'message': 'Error no especificado',
             'closed_position_id': None
         }
         print(f"\n--- EXECUTE CLOSE [{side.upper()} Idx: {position_index}] ---")
@@ -277,29 +270,28 @@ class PositionExecutor:
                     entry_ts_for_calc = removed_pos_data.get('entry_timestamp')
                     leverage_for_calc = self._utils.safe_float_convert(removed_pos_data.get('leverage'), self._leverage)
                     print(f"  Position State: Posición lógica ...{pos_id_for_log[-6:]} removida.")
-                elif ret_code == 110001: 
+                elif ret_code == 110001:
                     remove_ok = True; print(f"  INFO [Exec Close]: Pos lógica idx {position_index} (ID: ...{pos_id_for_log[-6:]}) no encontrada, consistente con API 110001.")
                 else:
                     result['message'] = f"Ejecución OK pero falló remover pos lógica idx {position_index} (ID: ...{pos_id_for_log[-6:]})."; print(f"ERROR SEVERE [Exec Close]: {result['message']}"); result['success'] = False; return result
 
                 calc_results = self._position_calculations.calculate_pnl_commission_reinvestment(side, entry_price_for_calc, exit_price, size_contracts_for_calc)
-                pnl_gross_usdt = calc_results['pnl_gross_usdt']
-                commission_usdt = calc_results['commission_usdt']
-                pnl_net_usdt = calc_results['pnl_net_usdt']
-                amount_reinvested_op_margin = calc_results['amount_reinvested_in_operational_margin']
-                amount_transferable_profit = calc_results['amount_transferable_to_profit']
-                
-                result['pnl_net_usdt'] = pnl_net_usdt
-                result['amount_reinvested_in_operational_margin'] = amount_reinvested_op_margin
-                result['amount_transferable_to_profit'] = amount_transferable_profit
+                pnl_gross_usdt, commission_usdt, pnl_net_usdt = calc_results['pnl_gross_usdt'], calc_results['commission_usdt'], calc_results['pnl_net_usdt']
+                amount_reinvested_op_margin, amount_transferable_profit = calc_results['amount_reinvested_in_operational_margin'], calc_results['amount_transferable_to_profit']
+
+                result.update({
+                    'pnl_net_usdt': pnl_net_usdt,
+                    'amount_reinvested_in_operational_margin': amount_reinvested_op_margin,
+                    'amount_transferable_to_profit': amount_transferable_profit
+                })
                 print(f"  Cálculos PNL: Neto={pnl_net_usdt:+.{self._pnl_prec}f}, Reinv Op.Margin={amount_reinvested_op_margin:.{self._pnl_prec}f}, Transf. Profit={amount_transferable_profit:.{self._pnl_prec}f}")
 
-                if remove_ok and removed_pos_data: 
-                    margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin 
-                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op) 
+                if remove_ok and removed_pos_data:
+                    margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin
+                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op)
                 elif remove_ok and ret_code == 110001:
                      print("  Balance Manager: No se modifica margen operativo (posición no encontrada).")
-                
+
                 print(f"  Actualizando estado físico agregado post-remoción...")
                 open_positions_now = self._position_state.get_open_logical_positions(side);
                 if open_positions_now:
@@ -313,15 +305,15 @@ class PositionExecutor:
 
                 log_entry_ts_str = self._utils.format_datetime(entry_ts_for_calc) if entry_ts_for_calc else "N/A"; log_exit_ts_str = self._utils.format_datetime(timestamp); duration = (timestamp - entry_ts_for_calc).total_seconds() if isinstance(entry_ts_for_calc, datetime.datetime) else None
                 log_data_final = {
-                    "id": pos_id_for_log, "side": side, "entry_timestamp": log_entry_ts_str, 
-                    "exit_timestamp": log_exit_ts_str, "duration_seconds": duration, 
-                    "entry_price": entry_price_for_calc, "exit_price": exit_price, 
-                    "size_contracts": size_contracts_for_calc, "margin_usdt": initial_margin_for_calc, 
-                    "leverage": leverage_for_calc, "pnl_gross_usdt": pnl_gross_usdt, 
-                    "commission_usdt": commission_usdt, "pnl_net_usdt": pnl_net_usdt, 
-                    "reinvest_usdt": amount_reinvested_op_margin, 
-                    "transfer_usdt": amount_transferable_profit,  
-                    "api_close_order_id": api_order_id_close, 
+                    "id": pos_id_for_log, "side": side, "entry_timestamp": log_entry_ts_str,
+                    "exit_timestamp": log_exit_ts_str, "duration_seconds": duration,
+                    "entry_price": entry_price_for_calc, "exit_price": exit_price,
+                    "size_contracts": size_contracts_for_calc, "margin_usdt": initial_margin_for_calc,
+                    "leverage": leverage_for_calc, "pnl_gross_usdt": pnl_gross_usdt,
+                    "commission_usdt": commission_usdt, "pnl_net_usdt": pnl_net_usdt,
+                    "reinvest_usdt": amount_reinvested_op_margin,
+                    "transfer_usdt": amount_transferable_profit,
+                    "api_close_order_id": api_order_id_close,
                     "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg
                 }
                 result['log_data'] = log_data_final
@@ -329,11 +321,11 @@ class PositionExecutor:
                 if self._closed_position_logger and hasattr(self._closed_position_logger, 'log_closed_position'):
                     try: self._closed_position_logger.log_closed_position(log_data_final)
                     except Exception as log_e: print(f"ERROR [Exec Close]: Fallo log pos cerrada ID {pos_id_for_log}: {log_e}")
-                
+
                 if self._print_updates: print("\n  --- ESTADO POST-CIERRE (Lógica Eliminada) ---"); self._position_state.display_logical_table(side); print("  " + "-"*60)
             except Exception as state_err: result['message'] = f"Ejecución OK pero falló post-proceso: {state_err}"; print(f"ERROR SEVERE [Exec Close]: {result['message']}"); traceback.print_exc(); result['success'] = False; return result
 
-        if self._is_live_mode and execution_success and remove_ok: 
+        if self._is_live_mode and execution_success and remove_ok:
             print(f"\n  --- SYNC FISICO POST-CIERRE ---"); print(f"    Esperando {self._post_close_delay}s..."); time.sleep(self._post_close_delay)
             try:
                 self.sync_physical_state(side);
@@ -343,7 +335,7 @@ class PositionExecutor:
         result['success'] = execution_success and remove_ok
         if not result['success'] and not result['message']: result['message'] = "Fallo en cierre por razón desconocida."
         elif result['success']: result['message'] = f"Cierre {side.upper()} idx {position_index} exitoso."
-        
+
         print(f"--- FIN EXECUTE CLOSE [{side.upper()} Idx: {position_index}] -> Success: {result['success']} ---")
         return result
 
@@ -365,9 +357,9 @@ class PositionExecutor:
                 except ValueError: print(f"ERROR [Exec Transfer Live]: UIDs inválidos (no int)."); return 0.0
 
                 TRANSFER_API_PRECISION = 4; amount_str = f"{amount:.{TRANSFER_API_PRECISION}f}"
-                main_acc_for_call = getattr(self._config, 'ACCOUNT_MAIN', 'main'); 
+                main_acc_for_call = getattr(self._config, 'ACCOUNT_MAIN', 'main');
                 session_for_call = self._live_manager.get_client(main_acc_for_call)
-                if not session_for_call: session_for_call = self._live_manager.get_client(from_acc_name) 
+                if not session_for_call: session_for_call = self._live_manager.get_client(from_acc_name)
                 if not session_for_call: print(f"ERROR [Exec Transfer Live]: Sesión API no disponible."); return 0.0
 
                 for attempt in range(MAX_TRANSFER_RETRIES):
@@ -387,16 +379,16 @@ class PositionExecutor:
                     if resp and resp.get('retCode') == 0:
                         transfer_id = resp.get('result', {}).get('transferId', 'N/A')
                         print(f"    -> ÉXITO API Transfer: ID={transfer_id}, Status={resp.get('result',{}).get('status','?')}")
-                        transferred_amount_api_or_sim = amount 
-                        break 
-                    elif resp: 
+                        transferred_amount_api_or_sim = amount
+                        break
+                    elif resp:
                         ret_code_t = resp.get('retCode', -1); ret_msg_t = resp.get('retMsg', 'N/A')
                         print(f"    -> FALLO API Transfer (Intento {attempt + 1}): Code={ret_code_t}, Msg='{ret_msg_t}'")
                         non_retryable_codes = [131200, 131001, 131228, 10003, 10005, 10019, 131214, 131204, 131206, 131210]
                         if ret_code_t in non_retryable_codes: print("      Error no recuperable."); transferred_amount_api_or_sim = 0.0; break
                         if attempt < MAX_TRANSFER_RETRIES - 1: time.sleep(TRANSFER_RETRY_DELAY)
                         else: print("    Fallo API después de máximos reintentos."); transferred_amount_api_or_sim = 0.0
-                    else: 
+                    else:
                         print(f"    -> FALLO API Transfer (Intento {attempt + 1}): No se recibió respuesta.")
                         if attempt < MAX_TRANSFER_RETRIES - 1: time.sleep(TRANSFER_RETRY_DELAY)
                         else: print("    Fallo API sin respuesta después de máximos reintentos."); transferred_amount_api_or_sim = 0.0

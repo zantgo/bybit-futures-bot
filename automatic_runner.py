@@ -1,12 +1,12 @@
-# =============== INICIO ARCHIVO: automatic_runner.py (v13.5 - Firma y Lógica Corregidas) ===============
 """
 Contiene la lógica para ejecutar el Modo Automático del bot en VIVO.
 
-v13.5:
-- CORREGIDO: La firma de la función `run_automatic_mode` ahora acepta
-  `results_reporter_module` y `plotter_module` para solucionar el TypeError.
-- Sincronizada la lógica de la máquina de estados con el backtest runner.
-- Añadida estructura `try...finally` para un cierre robusto.
+v13.7 (Límite de Trades):
+- Añadida lógica para limitar el número de trades por tendencia, controlada por
+  AUTOMATIC_TRADE_LIMIT_ENABLED y AUTOMATIC_MAX_TRADES_PER_TREND.
+v13.6 (Parada de Emergencia):
+- Integrado el manejo del `_global_stop_loss_event` para una detención
+  completa y limpia del bot si se activa el disyuntor global.
 """
 import time
 import traceback
@@ -33,7 +33,11 @@ if TYPE_CHECKING:
 _bot_state: str = "NEUTRAL"
 _ut_bot_signal: str = "HOLD"
 _stop_loss_event = threading.Event()
+_global_stop_loss_event = threading.Event()
 _sl_cooldown_until: Optional[datetime.datetime] = None
+# <<< INICIO MODIFICACIÓN: Añadir contador de trades >>>
+_trades_in_current_trend: int = 0
+# <<< FIN MODIFICACIÓN >>>
 _key_pressed_event = threading.Event()
 _manual_intervention_char = 'm'
 _stop_key_listener_thread = threading.Event()
@@ -141,7 +145,7 @@ def handle_manual_intervention_menu(
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
-# --- Lógica Principal del Runner ---
+# --- Lógica Principal del Runner (MODIFICADA) ---
 def run_automatic_mode(
     final_summary: Dict[str, Any], operation_mode: str,
     config_module: Any, utils_module: Any, menu_module: Any,
@@ -150,17 +154,17 @@ def run_automatic_mode(
     open_snapshot_logger_module: Any, event_processor_module: Any,
     ta_manager_module: Any, ut_bot_controller_module: Any,
     connection_ticker_module: Any,
-    # <<< INICIO DE LA CORRECCIÓN >>>
     plotter_module: Any,
     results_reporter_module: Any
-    # <<< FIN DE LA CORRECCIÓN >>>
 ):
-    global _bot_state, _ut_bot_signal, _sl_cooldown_until
+    global _bot_state, _ut_bot_signal, _sl_cooldown_until, _global_stop_loss_event, _trades_in_current_trend
 
     print(f"\n--- INICIANDO MODO: {operation_mode.upper()} ---")
     key_listener_hilo: Optional[threading.Thread] = None
     ut_bot_hilo: Optional[threading.Thread] = None
     bot_started = False
+    
+    _global_stop_loss_event.clear()
 
     try:
         from live.connection import manager as live_manager
@@ -176,7 +180,8 @@ def run_automatic_mode(
         event_processor_module.initialize(
             operation_mode=operation_mode,
             ut_bot_controller_instance=ut_controller,
-            stop_loss_event=_stop_loss_event
+            stop_loss_event=_stop_loss_event,
+            global_stop_loss_event=_global_stop_loss_event
         )
 
         if not getattr(position_manager_module, '_initialized', False):
@@ -188,6 +193,7 @@ def run_automatic_mode(
         print("INFO [Automatic Runner]: Estableciendo estado inicial a NEUTRAL.")
         _bot_state = "NEUTRAL"
         setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
+        _trades_in_current_trend = 0
 
         print("Iniciando hilos de operación (Ticker, UT Bot, Key Listener)...")
         connection_ticker_module.start_ticker_thread(raw_event_callback=event_processor_module.process_event)
@@ -200,6 +206,10 @@ def run_automatic_mode(
         print("--- BOT OPERATIVO EN MODO AUTOMÁTICO ---")
 
         while True:
+            if _global_stop_loss_event.is_set():
+                print("--- [Runner] Detención por Global Stop Loss detectada. Saliendo del bucle principal. ---")
+                break
+
             if getattr(config_module, 'INTERACTIVE_MANUAL_MODE', False) and _key_pressed_event.is_set():
                 _stop_key_listener_thread.set()
                 if key_listener_hilo: key_listener_hilo.join(timeout=1.5)
@@ -219,6 +229,14 @@ def run_automatic_mode(
             if _sl_cooldown_until and datetime.datetime.now() < _sl_cooldown_until:
                 time.sleep(1); continue
 
+            # <<< INICIO MODIFICACIÓN: Chequeo de trades cerrados >>>
+            closed_count = position_manager_module.get_and_reset_closed_trades_count()
+            if closed_count > 0:
+                _trades_in_current_trend += closed_count
+                print(f"INFO [Runner]: {closed_count} trade(s) cerrado(s). Total en tendencia: {_trades_in_current_trend}.")
+                _check_trade_limit_and_switch_to_neutral(config_module)
+            # <<< FIN MODIFICACIÓN >>>
+
             if _bot_state in ["ACTIVE_LONG", "ACTIVE_SHORT"]:
                 _check_roi_and_switch_to_neutral(config_module, position_manager_module, utils_module)
 
@@ -229,20 +247,24 @@ def run_automatic_mode(
                         print(f"INFO [State Machine]: NEUTRAL -> BUY Signal. Cambiando a ACTIVE_LONG.")
                         _bot_state = "ACTIVE_LONG"
                         setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                        _trades_in_current_trend = 0 # Resetear contador
                     elif current_signal == "SELL":
                         print(f"INFO [State Machine]: NEUTRAL -> SELL Signal. Cambiando a ACTIVE_SHORT.")
                         _bot_state = "ACTIVE_SHORT"
                         setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                        _trades_in_current_trend = 0 # Resetear contador
                 elif _bot_state == "ACTIVE_LONG" and current_signal == "SELL":
                     print(f"INFO [State Machine]: ACTIVE_LONG -> SELL Signal (FLIP). Cambiando a ACTIVE_SHORT.")
                     _handle_flip('short', position_manager_module, config_module)
                     _bot_state = "ACTIVE_SHORT"
                     setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                    _trades_in_current_trend = 0 # Resetear contador
                 elif _bot_state == "ACTIVE_SHORT" and current_signal == "BUY":
                     print(f"INFO [State Machine]: ACTIVE_SHORT -> BUY Signal (FLIP). Cambiando a ACTIVE_LONG.")
                     _handle_flip('long', position_manager_module, config_module)
                     _bot_state = "ACTIVE_LONG"
                     setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                    _trades_in_current_trend = 0 # Resetear contador
 
                 _ut_bot_signal = "HOLD"
 
@@ -264,35 +286,26 @@ def run_automatic_mode(
                 summary = position_manager_module.get_position_summary()
                 final_summary.clear(); final_summary.update(summary)
                 print("\n--- Resumen Final (Automatic Runner) ---\n" + json.dumps(summary, indent=2))
-
                 if open_snapshot_logger_module:
                     open_snapshot_logger_module.log_open_positions_snapshot(summary)
                 if results_reporter_module:
                     results_reporter_module.generate_report(summary, operation_mode)
-
                 if plotter_module:
                     print("INFO: La visualización final para el modo live/automático se basa en los logs generados.")
-                    signal_log = getattr(config_module, 'SIGNAL_LOG_FILE', '')
-                    closed_log = getattr(config_module, 'POSITION_CLOSED_LOG_FILE', '')
-                    plot_output = os.path.join(getattr(config_module, 'RESULT_DIR', 'result'), "automatic_live_final_plot.png")
-                    print(f"WARN: No se puede generar un gráfico de precios sin datos históricos. Intenta el backtest para una visualización completa.")
 
 # --- Funciones de Apoyo ---
 def _check_roi_and_switch_to_neutral(config_module: Any, position_manager_module: Any, utils_module: Any):
     global _bot_state
     if not getattr(config_module, 'AUTOMATIC_ROI_PROFIT_TAKING_ENABLED', False): return
     if _bot_state == "NEUTRAL": return
-
     try:
         summary = position_manager_module.get_position_summary()
         if 'error' in summary: return
         initial_capital = summary.get('initial_total_capital', 0.0)
         if initial_capital < 1e-6: return
-
         total_pnl = summary.get('total_realized_pnl_long', 0.0) + summary.get('total_realized_pnl_short', 0.0)
         current_roi_pct = utils_module.safe_division(total_pnl, initial_capital) * 100
         target_roi_pct = getattr(config_module, 'AUTOMATIC_ROI_PROFIT_TARGET_PCT', 0.1)
-
         if current_roi_pct >= target_roi_pct:
             print("\n" + "#"*80)
             print(f"### OBJETIVO DE ROI ALCANZADO ({current_roi_pct:.3f}% >= {target_roi_pct:.3f}%) ###".center(80))
@@ -304,10 +317,26 @@ def _check_roi_and_switch_to_neutral(config_module: Any, position_manager_module
     except Exception as e:
         print(f"ERROR [Runner Check ROI]: {e}")
 
+# <<< INICIO MODIFICACIÓN: Nueva función de chequeo de límite de trades >>>
+def _check_trade_limit_and_switch_to_neutral(config_module: Any):
+    global _bot_state, _trades_in_current_trend
+    if not getattr(config_module, 'AUTOMATIC_TRADE_LIMIT_ENABLED', False): return
+    if _bot_state == "NEUTRAL": return
+
+    limit = getattr(config_module, 'AUTOMATIC_MAX_TRADES_PER_TREND', 5)
+    if _trades_in_current_trend >= limit:
+        print("\n" + "#"*80)
+        print(f"### LÍMITE DE TRADES ALCANZADO ({_trades_in_current_trend}/{limit}) ###".center(80))
+        print(f"### Cambiando estado de '{_bot_state}' a 'NEUTRAL'. No se abrirán nuevas posiciones. ###".center(80))
+        print("### Esperando nueva señal del UT Bot para reactivar. ###".center(80))
+        print("#"*80 + "\n")
+        _bot_state = "NEUTRAL"
+        setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
+# <<< FIN MODIFICACIÓN >>>
+
 def _handle_flip(target_side: str, position_manager_module: Any, config_module: Any):
     current_side = 'short' if target_side == 'long' else 'long'
     print(f"--- Ejecutando FLIP de {current_side.upper()} a {target_side.upper()} ---")
-
     summary = position_manager_module.get_position_summary()
     if 'error' in summary:
         print(f"ERROR [Flip]: No se pudo obtener resumen PM: {summary['error']}"); return
@@ -317,7 +346,6 @@ def _handle_flip(target_side: str, position_manager_module: Any, config_module: 
         current_price = position_manager_module.get_current_price_for_exit()
         if not current_price:
             print("ERROR [Flip]: No se pudo obtener precio actual para cierre. Abortando flip."); return
-
         print(f"Cerrando {num_to_close} posiciones {current_side.upper()}...")
         success_closing = position_manager_module.close_all_logical_positions(current_side, current_price, datetime.datetime.now())
         if not success_closing:
@@ -333,5 +361,3 @@ def _handle_flip(target_side: str, position_manager_module: Any, config_module: 
         print("INFO [Flip]: Cierre completado. Comportamiento de no-reapertura configurado.")
 
     print("--- FLIP completado ---")
-
-# =============== FIN ARCHIVO: automatic_runner.py (v13.5 - Firma y Lógica Corregidas) ===============

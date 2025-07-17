@@ -1,8 +1,16 @@
-# =============== INICIO ARCHIVO: config.py (v13.1 - Con ROI Profit Taking) ===============
 """
-Configuración Esencial (v13.1 - Con ROI Profit Taking).
+Configuración Esencial (v14.2 - Con Límite de Trades).
 Parámetros para TA, Feeder, Logger, Plotter, conexiones Live y Gestión de Posiciones.
-ASUME QUE ESTE ARCHIVO ESTÁ EN LA RAÍZ DEL PROYECTO.
+
+v14.2:
+- Añadidos AUTOMATIC_TRADE_LIMIT_ENABLED y AUTOMATIC_MAX_TRADES_PER_TREND
+  para limitar la sobreoperación por tendencia.
+v14.1:
+- Añadido GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT para un disyuntor a nivel de cuenta.
+v14:
+- Añadido POSITION_INDIVIDUAL_STOP_LOSS_PCT para SL por posición lógica.
+- Eliminado POSITION_PHYSICAL_STOP_LOSS_PCT.
+- Reemplazado Take Profit fijo con parámetros para Trailing Stop.
 """
 import os
 import json
@@ -62,55 +70,63 @@ STRATEGY_INCREMENT_THRESHOLD = 0.45
 
 # --- Position Management Configuration ---
 POSITION_MANAGEMENT_ENABLED = True
-# 'LONG_SHORT', 'LONG_ONLY', 'SHORT_ONLY' son para modo interactivo.
-# 'NEUTRAL' es un estado de espera. El modo automático gestionará este valor dinámicamente.
 POSITION_TRADING_MODE = "LONG_SHORT"
 POSITION_BASE_SIZE_USDT = 1.0
 POSITION_MAX_LOGICAL_POSITIONS = 10
 POSITION_LEVERAGE = 10.0
-POSITION_TAKE_PROFIT_PCT_LONG = 0.3
-POSITION_TAKE_PROFIT_PCT_SHORT = 0.3
 POSITION_COMMISSION_RATE = 0.001
 POSITION_REINVEST_PROFIT_PCT = 10.0
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 
-# --- Stop Loss Físico (NUEVO) ---
-# Porcentaje de pérdida sobre el margen inicial AGREGADO de la posición física
-# que activará el cierre de todas las posiciones de ese lado.
-POSITION_PHYSICAL_STOP_LOSS_PCT = 10.0 # 5% de Stop Loss (parece ser calculado desde la posicion obtenida al peor precio)
+# --- Stop Loss Individual por Posición Lógica ---
+# Porcentaje de pérdida sobre el precio de entrada de CADA posición que
+# activará el cierre individual de esa posición.
+# Poner a 0.0 para desactivar.
+POSITION_INDIVIDUAL_STOP_LOSS_PCT = 10.0
+
+# --- Trailing Stop (reemplaza al Take Profit fijo) ---
+# Porcentaje de ganancia que debe alcanzar una posición para que el Trailing Stop se active.
+TRAILING_STOP_ACTIVATION_PCT = 0.3
+
+# Porcentaje de retroceso desde el precio PICO (el más favorable alcanzado)
+# que activará el cierre de la posición para tomar ganancias.
+TRAILING_STOP_DISTANCE_PCT = 0.1
+
+# --- Global Account Stop-Loss (Circuit Breaker) ---
+# Si el ROI total de la cuenta (realizado + no realizado) cae por debajo de este
+# umbral negativo, el bot cerrará TODAS las posiciones y se detendrá.
+# Escribe el valor como un número positivo (ej: 25.0 para -25%).
+# Ponlo a 0.0 para desactivar esta función.
+GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT = 10.0
 
 # --- Filtros, Delays y Cooldown ---
-POSITION_SIGNAL_COOLDOWN_ENABLED = False #True
+POSITION_SIGNAL_COOLDOWN_ENABLED = False
 POSITION_SIGNAL_COOLDOWN_LONG = 0
 POSITION_SIGNAL_COOLDOWN_SHORT = 0
-POSITION_PRE_OPEN_SYNC_CHECK = True #False
+POSITION_PRE_OPEN_SYNC_CHECK = True
 POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.25
 POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.25
 POST_ORDER_CONFIRMATION_DELAY_SECONDS = 0.1
 POST_CLOSE_SYNC_DELAY_SECONDS = 0.1
 
 # --- Modos de Operación y Control ---
-INTERACTIVE_MANUAL_MODE = True # Habilita el menú de intervención con 'm'
+INTERACTIVE_MANUAL_MODE = True
 
 # --- AUTOMATIC MODE & UT BOT CONFIGURATION ---
 AUTOMATIC_MODE_ENABLED = False
-UT_BOT_SIGNAL_INTERVAL_SECONDS = 1800
+UT_BOT_SIGNAL_INTERVAL_SECONDS = 2700
 UT_BOT_KEY_VALUE = 1.0
 UT_BOT_ATR_PERIOD = 10
-AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = False #True
+AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = False
 AUTOMATIC_SL_COOLDOWN_SECONDS = 1
 
-# <<< INICIO NUEVAS OPCIONES >>>
 # --- Lógica de Toma de Ganancias por ROI de Tendencia (Modo Automático) ---
-# Si está activado, cuando el bot está en un modo de tendencia (LONG_ONLY o SHORT_ONLY)
-# y el ROI total alcanza el objetivo, dejará de abrir nuevas posiciones en esa
-# dirección y esperará a la siguiente señal de "flip".
 AUTOMATIC_ROI_PROFIT_TAKING_ENABLED = True
+AUTOMATIC_ROI_PROFIT_TARGET_PCT = 0.1
 
-# El porcentaje de ROI (basado en el PNL total realizado vs. el capital inicial total)
-# que activará el bloqueo de nuevas posiciones.
-AUTOMATIC_ROI_PROFIT_TARGET_PCT = 0.1 # 0.1%
-# <<< FIN NUEVAS OPCIONES >>>
+# --- Lógica de Límite de Trades por Tendencia (Modo Automático) ---
+AUTOMATIC_TRADE_LIMIT_ENABLED = True
+AUTOMATIC_MAX_TRADES_PER_TREND = 10
 
 # --- Printing / Logging Configuration ---
 POSITION_LOG_CLOSED_POSITIONS = True
@@ -120,7 +136,6 @@ PRINT_SIGNAL_OUTPUT = False
 LOG_SIGNAL_OUTPUT = True
 PRINT_RAW_EVENT_ALWAYS = False
 PRINT_PROCESSED_DATA_ALWAYS = False
-# PRINT_TICK_LIVE_STATUS se controla ahora dinámicamente desde el menú
 
 # --- Fallbacks y Constantes ---
 DEFAULT_QTY_PRECISION = 3
@@ -141,7 +156,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 BACKTEST_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 BACKTEST_CSV_FILE = "data.csv"
 BACKTEST_CSV_TIMESTAMP_COL = "timestamp"
-BACKTEST_CSV_PRICE_COL = "price" #"close"
+BACKTEST_CSV_PRICE_COL = "price"
 
 RESULT_DIR = os.path.join(PROJECT_ROOT, "result")
 PLOT_OUTPUT_FILENAME = f"plot_{TICKER_SYMBOL}.png"
@@ -185,10 +200,10 @@ def _load_and_validate_uids():
         LOADED_UIDS = {}
     return all_uids_valid
 
-# --- Función de Impresión de Configuración (se mantiene para depuración) ---
+# --- Función de Impresión de Configuración ---
 def print_initial_config(operation_mode="unknown"):
     """Imprime un resumen de la configuración cargada."""
-    print("-" * 70); print(f"Configuración Base Cargada (config.py v13.1)");
+    print("-" * 70); print(f"Configuración Base Cargada (config.py v14.2)");
     print(f"  Modo Testnet API        : {UNIVERSAL_TESTNET_MODE}")
     print(f"  Ticker Símbolo          : {TICKER_SYMBOL}")
     print("-" * 70)
@@ -197,9 +212,12 @@ def print_initial_config(operation_mode="unknown"):
     if pos_enabled:
         print(f"    Modo Automático por Defecto: {'Activado' if AUTOMATIC_MODE_ENABLED else 'Desactivado'}")
         print(f"    Toma Ganancias por ROI   : {'Activado' if AUTOMATIC_ROI_PROFIT_TAKING_ENABLED else 'Desactivado'} (Objetivo: {AUTOMATIC_ROI_PROFIT_TARGET_PCT}%)")
-        print(f"    Stop Loss Físico (%)  : {POSITION_PHYSICAL_STOP_LOSS_PCT}%")
-        print(f"    Apalancamiento        : {POSITION_LEVERAGE:.1f}x")
-        print(f"    TP % (L/S)            : {POSITION_TAKE_PROFIT_PCT_LONG * 100:.2f}% / {POSITION_TAKE_PROFIT_PCT_SHORT * 100:.2f}%")
+        print(f"    Límite de Trades x Tendencia: {'Activado (' + str(AUTOMATIC_MAX_TRADES_PER_TREND) + ' trades)' if AUTOMATIC_TRADE_LIMIT_ENABLED else 'Desactivado'}")
+        print(f"    Stop Loss Individual (%) : {POSITION_INDIVIDUAL_STOP_LOSS_PCT}%")
+        print(f"    Trailing Stop Activación(%): {TRAILING_STOP_ACTIVATION_PCT}%")
+        print(f"    Trailing Stop Distancia(%): {TRAILING_STOP_DISTANCE_PCT}%")
+        print(f"    Stop Loss Global Cuenta (% ROI): {'Desactivado' if GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT <= 0 else f'-{GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT}%'}")
+        print(f"    Apalancamiento           : {POSITION_LEVERAGE:.1f}x")
     print("-" * 70)
 
 # Carga UIDs al importar el módulo

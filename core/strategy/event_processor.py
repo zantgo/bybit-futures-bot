@@ -1,17 +1,13 @@
-# =============== INICIO ARCHIVO: core/strategy/event_processor.py (v13.2 - Lógica de Apertura Delegada) ===============
 """
 Procesa un único evento de precio (tick).
 Calcula TA, genera señal, y ahora delega TODA la gestión de posiciones al position_manager.
-
+v13.3 - Añadido chequeo de Global Stop Loss.
 v13.2 (Lógica Corregida):
 - Se elimina la lógica de apertura de posiciones de este módulo.
-- Ahora, la señal de bajo nivel generada se pasa directamente al position_manager,
-  que tomará la decisión final de abrir una posición si las condiciones de alto
-  y bajo nivel se cumplen.
+- Ahora, la señal de bajo nivel generada se pasa directamente al position_manager.
 v13:
 - Modificada la inicialización para aceptar una instancia del UTBotController y un
   evento de Stop Loss.
-- En cada evento, pasa el tick de precio al UTBotController si está presente.
 """
 import datetime
 import traceback
@@ -19,7 +15,7 @@ import pandas as pd
 import numpy as np
 import json
 import sys
-import threading # Necesario para el tipo de stop_loss_event
+import threading
 from typing import Optional, Dict, Any, List
 
 # --- Importaciones Core y Strategy ---
@@ -28,6 +24,9 @@ try:
     from core import utils
     from . import ta_manager
     from . import signal_generator
+    # <<< AÑADIR IMPORTACIÓN DE position_state >>>
+    from . import position_state
+
     position_manager = None
     _pm_enabled_in_config = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if _pm_enabled_in_config:
@@ -53,31 +52,41 @@ try:
 
 except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación base (config/utils/core?): {e}")
-    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None
+    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None
     traceback.print_exc(); sys.exit(1)
 except Exception as e_imp:
     print(f"ERROR CRÍTICO [Event Proc Import]: Excepción inesperada durante imports: {e_imp}")
-    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None
+    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None
     traceback.print_exc(); sys.exit(1)
+
+# <<< AÑADIR EXCEPCIÓN PERSONALIZADA >>>
+class GlobalStopLossException(Exception):
+    """Excepción para ser lanzada cuando se activa el Global Stop Loss en backtest."""
+    pass
 
 # --- Estado del Módulo ---
 _previous_raw_event_price = np.nan
 _is_first_event = True
 _operation_mode = "unknown"
 _ut_bot_controller_instance: Optional[Any] = None
+# <<< AÑADIR VARIABLES PARA EL EVENTO DE STOP >>>
+_global_stop_loss_event: Optional[threading.Event] = None
+_global_stop_loss_triggered: bool = False # Flag para evitar acciones repetidas
 
 
-# --- Inicialización ---
+# --- Inicialización (MODIFICADA) ---
 def initialize(
     operation_mode: str,
     initial_real_state: Optional[Dict[str, Dict[str, Any]]] = None,
     base_position_size_usdt: Optional[float] = None,
     initial_max_logical_positions: Optional[int] = None,
     ut_bot_controller_instance: Optional[Any] = None,
-    stop_loss_event: Optional[threading.Event] = None
+    stop_loss_event: Optional[threading.Event] = None,
+    # <<< AÑADIR NUEVO PARÁMETRO >>>
+    global_stop_loss_event: Optional[threading.Event] = None
 ):
     global _previous_raw_event_price, _is_first_event, _operation_mode, _ut_bot_controller_instance
-    global position_manager
+    global position_manager, _global_stop_loss_event, _global_stop_loss_triggered
 
     if not config or not utils or not ta_manager or not signal_generator:
         raise RuntimeError("Event Processor no pudo inicializarse por dependencias faltantes.")
@@ -87,6 +96,9 @@ def initialize(
     _is_first_event = True
     _operation_mode = operation_mode
     _ut_bot_controller_instance = ut_bot_controller_instance
+    # <<< ALMACENAR EL NUEVO EVENTO Y RESETEAR FLAG >>>
+    _global_stop_loss_event = global_stop_loss_event
+    _global_stop_loss_triggered = False
 
     if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False) and hasattr(signal_logger, 'initialize_logger'):
         try: signal_logger.initialize_logger()
@@ -101,7 +113,7 @@ def initialize(
                      initial_real_state=initial_real_state,
                      base_position_size_usdt_param=base_position_size_usdt,
                      initial_max_logical_positions_param=initial_max_logical_positions,
-                     stop_loss_event=stop_loss_event # Pasar el evento de SL
+                     stop_loss_event=stop_loss_event
                  )
                  print("  -> Position Manager inicializado vía Event Processor.")
              except Exception as e_pm_init:
@@ -117,31 +129,33 @@ def initialize(
     print("[Event Processor] Inicializado.")
 
 
-# --- Procesamiento Principal de Evento ---
+# --- Procesamiento Principal de Evento (MODIFICADO) ---
 def process_event(intermediate_ticks_info: list, final_price_info: dict):
-    global _previous_raw_event_price, _is_first_event
+    global _previous_raw_event_price, _is_first_event, _global_stop_loss_triggered
     global position_manager, _ut_bot_controller_instance
+
+    # <<< AÑADIR CHEQUEO DEL FLAG AL INICIO >>>
+    if _global_stop_loss_triggered:
+        return # No procesar más eventos si el stop global ya se activó
 
     if not all([ta_manager, signal_generator, utils, config]):
         print("ERROR CRÍTICO [EP Process]: Faltan módulos esenciales. Imposible procesar evento."); return
 
     if not final_price_info:
         print("WARN [EP Process]: Evento final vacío."); return
-        
+
     current_timestamp = final_price_info.get("timestamp")
     current_price = utils.safe_float_convert(final_price_info.get("price"), default=np.nan)
-    
+
     if not isinstance(current_timestamp, (datetime.datetime, pd.Timestamp)) or pd.isna(current_price) or current_price <= 0:
         print(f"WARN [EP Process]: Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}"); return
 
-    # --- Pasar tick al controlador UT Bot si existe ---
     if _ut_bot_controller_instance and hasattr(_ut_bot_controller_instance, 'add_tick'):
         try:
             _ut_bot_controller_instance.add_tick(current_price, current_timestamp)
         except Exception as e_ut_tick:
             print(f"ERROR [EP Process]: Falló al pasar tick a UTBotController: {e_ut_tick}")
 
-    # --- Lógica de bajo nivel (sin cambios) ---
     increment = 0
     decrement = 0
     if not _is_first_event and pd.notna(_previous_raw_event_price):
@@ -162,13 +176,13 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
     signal_data = None
     nan_fmt = "NaN"
     base_signal_dict = {
-        "timestamp": utils.format_datetime(current_timestamp), 
-        "price_float": current_price, 
-        "price": f"{current_price:.{getattr(config, 'PRICE_PRECISION', 4)}f}", 
-        "ema": nan_fmt, "inc_price_change_pct": nan_fmt, "dec_price_change_pct": nan_fmt, 
+        "timestamp": utils.format_datetime(current_timestamp),
+        "price_float": current_price,
+        "price": f"{current_price:.{getattr(config, 'PRICE_PRECISION', 4)}f}",
+        "ema": nan_fmt, "inc_price_change_pct": nan_fmt, "dec_price_change_pct": nan_fmt,
         "weighted_increment": nan_fmt, "weighted_decrement": nan_fmt
     }
-    
+
     try:
         if getattr(config, 'STRATEGY_ENABLED', True):
             if processed_data:
@@ -181,19 +195,14 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         print(f"ERROR [Signal Gen Call]: {e_signal}"); traceback.print_exc()
         signal_data = {**base_signal_dict, "signal": "HOLD_SIGNAL_ERROR", "signal_reason": f"Error: {e_signal}"}
 
-    # <<< INICIO DE LA CORRECCIÓN >>>
-    # La lógica de Position Manager se centraliza aquí.
     pm_enabled_runtime = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if pm_enabled_runtime and position_manager and getattr(position_manager, '_initialized', False):
         try:
-            # 1. Siempre chequear cierres (TP/SL). Esto no cambia.
-            if hasattr(position_manager, 'check_and_close_positions'): 
+            if hasattr(position_manager, 'check_and_close_positions'):
                 position_manager.check_and_close_positions(current_price, current_timestamp)
-            else: 
+            else:
                 print("ERROR CRÍTICO [EP Process]: PM sin 'check_and_close_positions'.")
-            
-            # 2. Pasar la señal de BAJO NIVEL al position_manager para que ÉL decida si abrir.
-            #    Esto reemplaza la lógica de apertura que estaba aquí antes.
+
             if signal_data and hasattr(position_manager, 'handle_low_level_signal'):
                 position_manager.handle_low_level_signal(
                     signal=signal_data.get("signal"),
@@ -205,7 +214,12 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
 
         except Exception as pm_err:
             print(f"ERROR [PM Call from EP]: {pm_err}"); traceback.print_exc()
-    # <<< FIN DE LA CORRECCIÓN >>>
+
+    # <<< INICIO DE LA MODIFICACIÓN: AÑADIR CHEQUEO GLOBAL >>>
+    # Siempre chequear, incluso si PM está deshabilitado, como medida de seguridad.
+    if getattr(config, 'GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT', 0.0) > 0:
+        _check_global_stop_loss(current_price, current_timestamp)
+    # <<< FIN DE LA MODIFICACIÓN >>>
 
     if signal_data:
         if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False):
@@ -260,81 +274,47 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
                     pnl_l = summary.get('total_realized_pnl_long', 0.0)
                     pnl_s = summary.get('total_realized_pnl_short', 0.0)
                     tf = summary.get('total_transferred_profit', 0.0)
-
                     print(f"    Longs: {lc}/{max_p} Shorts: {sc}/{max_p}")
                     print(f"    Margen Disp(L): {al:<15.4f} Usado(L): {ul:<15.4f}")
                     print(f"    Margen Disp(S): {as_val:<15.4f} Usado(S): {us_val:<15.4f}")
                     print(f"    Balance Profit: {pb:<15.4f} PNL Neto(L): {pnl_l:<+15.4f}")
                     print(f"    Transferido:    {tf:<15.4f} PNL Neto(S): {pnl_s:<+15.4f}")
-
                     liq_price_fmt_str = f".{config.PRICE_PRECISION}f" if hasattr(config, 'PRICE_PRECISION') else ".2f"
                     qty_fmt_str = f".{config.DEFAULT_QTY_PRECISION}f" if hasattr(config, 'DEFAULT_QTY_PRECISION') else ".3f"
-
-                    # --- Para Avg LiqP Long ---
                     open_longs = summary.get('open_long_positions', [])
                     avg_liq_price_long_str = "N/A"
                     if lc > 0 and open_longs:
-                        total_liq_price_weighted_sum_long = 0.0
-                        total_size_long = 0.0
+                        total_liq_price_weighted_sum_long = 0.0; total_size_long = 0.0
                         for p in open_longs:
-                            liq_p_val = utils.safe_float_convert(p.get('est_liq_price'))
-                            pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
+                            liq_p_val = utils.safe_float_convert(p.get('est_liq_price')); pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
                             if pd.notna(liq_p_val) and pd.notna(pos_size_val) and pos_size_val > 0 and liq_p_val > 0:
-                                total_liq_price_weighted_sum_long += liq_p_val * pos_size_val
-                                total_size_long += pos_size_val
-                        if total_size_long > 0:
-                            avg_liq_price_long = total_liq_price_weighted_sum_long / total_size_long
-                            avg_liq_price_long_str = f"{avg_liq_price_long:{liq_price_fmt_str}}"
-                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_longs):
-                            avg_liq_price_long_str = "Inv.Calc"
+                                total_liq_price_weighted_sum_long += liq_p_val * pos_size_val; total_size_long += pos_size_val
+                        if total_size_long > 0: avg_liq_price_long_str = f"{(total_liq_price_weighted_sum_long / total_size_long):{liq_price_fmt_str}}"
+                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_longs): avg_liq_price_long_str = "Inv.Calc"
                     print(f"    Avg LiqP Long : {avg_liq_price_long_str}")
-
-                    # --- Para Avg LiqP Short ---
                     open_shorts = summary.get('open_short_positions', [])
                     avg_liq_price_short_str = "N/A"
                     if sc > 0 and open_shorts:
-                        total_liq_price_weighted_sum_short = 0.0
-                        total_size_short = 0.0
+                        total_liq_price_weighted_sum_short = 0.0; total_size_short = 0.0
                         for p_short in open_shorts:
-                            liq_p_val_s = utils.safe_float_convert(p_short.get('est_liq_price'))
-                            pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
+                            liq_p_val_s = utils.safe_float_convert(p_short.get('est_liq_price')); pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
                             if pd.notna(liq_p_val_s) and pd.notna(pos_size_val_s) and pos_size_val_s > 0 and liq_p_val_s > 0:
-                                total_liq_price_weighted_sum_short += liq_p_val_s * pos_size_val_s
-                                total_size_short += pos_size_val_s
-                        if total_size_short > 0:
-                            avg_liq_price_short = total_liq_price_weighted_sum_short / total_size_short
-                            avg_liq_price_short_str = f"{avg_liq_price_short:{liq_price_fmt_str}}"
-                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_shorts):
-                             avg_liq_price_short_str = "Inv.Calc"
+                                total_liq_price_weighted_sum_short += liq_p_val_s * pos_size_val_s; total_size_short += pos_size_val_s
+                        if total_size_short > 0: avg_liq_price_short_str = f"{(total_liq_price_weighted_sum_short / total_size_short):{liq_price_fmt_str}}"
+                        elif any(pd.notna(utils.safe_float_convert(p.get('est_liq_price'))) for p in open_shorts): avg_liq_price_short_str = "Inv.Calc"
                     print(f"    Avg LiqP Short: {avg_liq_price_short_str}")
-
-                    # --- Detalles de posiciones individuales (SIN LiqP individual) ---
                     if lc > 0 and open_longs:
                         pos_details = []
                         for p in open_longs:
-                            pos_id_short = "..." + str(p.get('id', 'N/A'))[-6:]
-                            entry_p_val = utils.safe_float_convert(p.get('entry_price'))
-                            entry_p_str = f"{entry_p_val:{liq_price_fmt_str}}" if pd.notna(entry_p_val) else "N/A"
-                            pos_size_val = utils.safe_float_convert(p.get('size_contracts'))
-                            size_str_print = f"{pos_size_val:{qty_fmt_str}}" if pd.notna(pos_size_val) else "N/A"
-                            pos_details.append(f"ID:{pos_id_short}(Ent:{entry_p_str} Sz:{size_str_print})")
+                            pos_id_short = "..." + str(p.get('id', 'N/A'))[-6:]; entry_p_val = utils.safe_float_convert(p.get('entry_price')); entry_p_str = f"{entry_p_val:{liq_price_fmt_str}}" if pd.notna(entry_p_val) else "N/A"; pos_size_val = utils.safe_float_convert(p.get('size_contracts')); size_str_print = f"{pos_size_val:{qty_fmt_str}}" if pd.notna(pos_size_val) else "N/A"; pos_details.append(f"ID:{pos_id_short}(Ent:{entry_p_str} Sz:{size_str_print})")
                         print(f"    Open Longs Det: {', '.join(pos_details)}")
-                    elif lc > 0:
-                        print(f"    Open Longs    : {lc} (Detalles no disponibles en summary)")
-
+                    elif lc > 0: print(f"    Open Longs    : {lc} (Detalles no disponibles en summary)")
                     if sc > 0 and open_shorts:
                         pos_details_short = []
                         for p_short in open_shorts:
-                            pos_id_short_s = "..." + str(p_short.get('id', 'N/A'))[-6:]
-                            entry_p_val_s = utils.safe_float_convert(p_short.get('entry_price'))
-                            entry_p_str_s = f"{entry_p_val_s:{liq_price_fmt_str}}" if pd.notna(entry_p_val_s) else "N/A"
-                            pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts'))
-                            size_str_print_s = f"{pos_size_val_s:{qty_fmt_str}}" if pd.notna(pos_size_val_s) else "N/A"
-                            pos_details_short.append(f"ID:{pos_id_short_s}(Ent:{entry_p_str_s} Sz:{size_str_print_s})")
+                            pos_id_short_s = "..." + str(p_short.get('id', 'N/A'))[-6:]; entry_p_val_s = utils.safe_float_convert(p_short.get('entry_price')); entry_p_str_s = f"{entry_p_val_s:{liq_price_fmt_str}}" if pd.notna(entry_p_val_s) else "N/A"; pos_size_val_s = utils.safe_float_convert(p_short.get('size_contracts')); size_str_print_s = f"{pos_size_val_s:{qty_fmt_str}}" if pd.notna(pos_size_val_s) else "N/A"; pos_details_short.append(f"ID:{pos_id_short_s}(Ent:{entry_p_str_s} Sz:{size_str_print_s})")
                         print(f"    Open Shorts Det: {', '.join(pos_details_short)}")
-                    elif sc > 0:
-                        print(f"    Open Shorts   : {sc} (Detalles no disponibles en summary)")
-
+                    elif sc > 0: print(f"    Open Shorts   : {sc} (Detalles no disponibles en summary)")
                 elif summary and 'error' in summary: print(f"    Error resumen PM: {summary.get('error', 'N/A')}")
                 else: print(f"    Error resumen PM (Respuesta inválida).")
             elif pm_enabled_runtime and position_manager and not pm_initialized_runtime_print: print("    (PM no inicializado)")
@@ -342,4 +322,60 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             print("=" * len(hdr))
         except Exception as e_print: print(f"ERROR [Print Tick Status]: {e_print}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/event_processor.py (v13.2 - Lógica de Apertura Delegada) ===============
+# <<< INICIO DE NUEVA FUNCIÓN PRIVADA >>>
+def _check_global_stop_loss(current_price: float, current_timestamp: datetime.datetime):
+    """
+    Calcula el ROI total y activa el stop de emergencia si se alcanza el umbral.
+    """
+    global _global_stop_loss_triggered
+
+    if not position_manager or not position_state or not utils or not config:
+        return
+
+    summary = position_manager.get_position_summary()
+    if not summary or 'error' in summary:
+        return
+
+    initial_capital = summary.get('initial_total_capital', 0.0)
+    if initial_capital < 1e-6:
+        return
+
+    total_realized_pnl = summary.get('total_realized_pnl_long', 0.0) + summary.get('total_realized_pnl_short', 0.0)
+    total_unrealized_pnl = 0.0
+    open_longs = position_state.get_open_logical_positions('long')
+    for pos in open_longs:
+        entry_price = utils.safe_float_convert(pos.get('entry_price'), 0.0)
+        size = utils.safe_float_convert(pos.get('size_contracts'), 0.0)
+        if entry_price > 0 and size > 0:
+            total_unrealized_pnl += (current_price - entry_price) * size
+
+    open_shorts = position_state.get_open_logical_positions('short')
+    for pos in open_shorts:
+        entry_price = utils.safe_float_convert(pos.get('entry_price'), 0.0)
+        size = utils.safe_float_convert(pos.get('size_contracts'), 0.0)
+        if entry_price > 0 and size > 0:
+            total_unrealized_pnl += (entry_price - current_price) * size
+
+    total_equity_pnl = total_realized_pnl + total_unrealized_pnl
+    current_roi_pct = utils.safe_division(total_equity_pnl, initial_capital) * 100.0
+    
+    stop_loss_threshold_pct = -abs(getattr(config, 'GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT', 0.0))
+
+    if current_roi_pct <= stop_loss_threshold_pct:
+        _global_stop_loss_triggered = True
+
+        print("\n" + "!"*80)
+        print("!!!   ALERTA DE EMERGENCIA: GLOBAL STOP LOSS ACTIVADO   !!!".center(80))
+        print(f"!!! ROI Total ({current_roi_pct:.2f}%) <= Umbral ({stop_loss_threshold_pct:.2f}%) !!!".center(80))
+        print("!!! CERRANDO TODAS LAS POSICIONES Y DETENIENDO EL BOT... !!!".center(80))
+        print("!"*80 + "\n")
+
+        position_manager.close_all_logical_positions('long', current_price, current_timestamp)
+        position_manager.close_all_logical_positions('short', current_price, current_timestamp)
+
+        if _operation_mode.startswith("live") or _operation_mode.startswith("automatic"):
+            if _global_stop_loss_event:
+                _global_stop_loss_event.set()
+        else: # Backtest
+            raise GlobalStopLossException(f"Global Stop Loss activado. ROI: {current_roi_pct:.2f}%")
+# <<< FIN DE NUEVA FUNCIÓN PRIVADA >>>

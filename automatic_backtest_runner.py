@@ -1,11 +1,12 @@
-# =============== INICIO ARCHIVO: automatic_backtest_runner.py (v1.6 - Robusto con Logging y Sombreado) ===============
 """
 Contiene la lógica para ejecutar un backtest del Modo Automático del bot.
 
-v1.6:
-- Añadida estructura try...finally para garantizar que el reporte y el gráfico
-  se generen incluso si el backtest se interrumpe con Ctrl+C.
-- Implementado el registro de cambios de estado para el sombreado del gráfico.
+v1.8 (Límite de Trades):
+- Añadida lógica para limitar el número de trades por tendencia, controlada por
+  AUTOMATIC_TRADE_LIMIT_ENABLED y AUTOMATIC_MAX_TRADES_PER_TREND.
+v1.7:
+- Integrado el manejo de la excepción GlobalStopLossException para detener
+  el backtest de forma controlada sin interrumpir la generación de reportes.
 """
 import os
 import traceback
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
 # --- Estado Global del Runner ---
 _bot_state: str = "NEUTRAL"
 _sl_cooldown_until: Optional[datetime.datetime] = None
+# <<< INICIO MODIFICACIÓN: Añadir contador de trades >>>
+_trades_in_current_trend: int = 0
+# <<< FIN MODIFICACIÓN >>>
 
 # --- Lógica del Runner de Backtest Automático ---
 def run_automatic_backtest_mode(
@@ -52,9 +56,8 @@ def run_automatic_backtest_mode(
     data_feeder_module: Any,
     plotter_module: Any
 ):
-    global _bot_state, _sl_cooldown_until
+    global _bot_state, _sl_cooldown_until, _trades_in_current_trend
 
-    # --- 1. Verificaciones y Configuración Interactiva ---
     if not all([config_module, utils_module, menu_module, event_processor_module,
                 ta_manager_module, data_feeder_module, ut_bot_controller_module,
                 position_manager_module, balance_manager_module, position_state_module]):
@@ -68,21 +71,21 @@ def run_automatic_backtest_mode(
 
     print(f"INFO [Auto BT Runner]: Usando Tamaño Base: {selected_base_size:.2f} USDT, Slots: {selected_initial_slots}")
     print(f"\n--- Iniciando MODO: {operation_mode.upper()} ---")
-    
-    # --- 2. Inicialización de Componentes ---
+
     _bot_state = "NEUTRAL"
     setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
     _sl_cooldown_until = None
-    
-    # Variables para el bloque finally
+    _trades_in_current_trend = 0
+
     historical_data = None
     backtest_completed_or_interrupted = False
-    
+    state_changes_log = []
+
     try:
         ut_controller = ut_bot_controller_module.UTBotController(config_module, utils_module)
         ta_manager_module.initialize()
         if open_snapshot_logger_module: open_snapshot_logger_module.initialize_logger()
-        
+
         event_processor_module.initialize(
             operation_mode=operation_mode,
             initial_real_state=None,
@@ -95,7 +98,6 @@ def run_automatic_backtest_mode(
             raise RuntimeError("Position Manager no se inicializó correctamente.")
         print("Componentes Core inicializados para Backtest Automático.")
 
-        # --- 3. Carga de Datos Históricos ---
         print("\nCargando datos históricos para el backtest...")
         data_dir = getattr(config_module, 'BACKTEST_DATA_DIR', 'data')
         csv_file = getattr(config_module, 'BACKTEST_CSV_FILE', 'data.csv')
@@ -106,79 +108,79 @@ def run_automatic_backtest_mode(
         if historical_data is None or historical_data.empty:
             raise RuntimeError("No se cargaron datos históricos válidos. Abortando backtest.")
 
-        # --- 4. Bucle Principal de Backtest ---
         print(f"\n--- Ejecutando Backtest Automático sobre {len(historical_data)} filas ---")
         start_time = time.time()
         total_rows = len(historical_data)
         print_interval = max(1, total_rows // 20)
 
-        state_changes_log = []
         initial_timestamp = historical_data.index[0]
         state_changes_log.append({'timestamp': initial_timestamp.isoformat(), 'mode': 'NEUTRAL'})
 
-        for i, row in enumerate(historical_data.itertuples(index=True)):
-            current_timestamp = row.Index
-            current_price = float(getattr(row, 'price'))
+        try:
+            for i, row in enumerate(historical_data.itertuples(index=True)):
+                current_timestamp = row.Index
+                current_price = float(getattr(row, 'price'))
 
-            if not isinstance(current_timestamp, (datetime.datetime, pd.Timestamp)):
-                continue
+                if not isinstance(current_timestamp, (datetime.datetime, pd.Timestamp)):
+                    continue
 
-            low_level_signal_data = event_processor_module.process_event([], {"timestamp": current_timestamp, "price": current_price, "symbol": config_module.TICKER_SYMBOL})
-            low_level_signal = low_level_signal_data.get('signal') if low_level_signal_data else "HOLD"
+                low_level_signal_data = event_processor_module.process_event([], {"timestamp": current_timestamp, "price": current_price, "symbol": config_module.TICKER_SYMBOL})
+                low_level_signal = low_level_signal_data.get('signal') if low_level_signal_data else "HOLD"
 
-            ut_controller.add_tick(current_price, current_timestamp)
-            ut_bot_signal = ut_controller.get_latest_signal()
+                ut_controller.add_tick(current_price, current_timestamp)
+                ut_bot_signal = ut_controller.get_latest_signal()
 
-            previous_mode = config_module.POSITION_TRADING_MODE
+                previous_mode = config_module.POSITION_TRADING_MODE
 
-            if _sl_cooldown_until and current_timestamp < _sl_cooldown_until:
-                pass
-            elif _bot_state in ["ACTIVE_LONG", "ACTIVE_SHORT"]:
-                _check_roi_and_switch_to_neutral(config_module, position_manager_module, utils_module, state_changes_log, current_timestamp)
+                # <<< INICIO MODIFICACIÓN: Chequeo de trades cerrados >>>
+                closed_count = position_manager_module.get_and_reset_closed_trades_count()
+                if closed_count > 0:
+                    _trades_in_current_trend += closed_count
+                    _check_trade_limit_and_switch_to_neutral(config_module, state_changes_log, current_timestamp)
+                # <<< FIN MODIFICACIÓN >>>
 
-            if ut_bot_signal != "HOLD":
-                if _bot_state == "NEUTRAL":
-                    if ut_bot_signal == "BUY":
-                        _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
-                        position_manager_module.handle_low_level_signal("BUY", current_price, current_timestamp)
-                    elif ut_bot_signal == "SELL":
+                if _sl_cooldown_until and current_timestamp < _sl_cooldown_until:
+                    pass
+                elif _bot_state in ["ACTIVE_LONG", "ACTIVE_SHORT"]:
+                    _check_roi_and_switch_to_neutral(config_module, position_manager_module, utils_module, state_changes_log, current_timestamp)
+
+                if ut_bot_signal != "HOLD":
+                    if _bot_state == "NEUTRAL":
+                        if ut_bot_signal == "BUY":
+                            _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                            position_manager_module.handle_low_level_signal("BUY", current_price, current_timestamp)
+                            _trades_in_current_trend = 0
+                        elif ut_bot_signal == "SELL":
+                            _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
+                            position_manager_module.handle_low_level_signal("SELL", current_price, current_timestamp)
+                            _trades_in_current_trend = 0
+                    elif _bot_state == "ACTIVE_LONG" and ut_bot_signal == "SELL":
+                        _handle_flip_backtest('short', position_manager_module, config_module, current_price, current_timestamp)
                         _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
                         position_manager_module.handle_low_level_signal("SELL", current_price, current_timestamp)
-                elif _bot_state == "ACTIVE_LONG" and ut_bot_signal == "SELL":
-                    _handle_flip_backtest('short', position_manager_module, config_module, current_price, current_timestamp)
-                    _bot_state = "ACTIVE_SHORT"; setattr(config_module, 'POSITION_TRADING_MODE', 'SHORT_ONLY')
-                    position_manager_module.handle_low_level_signal("SELL", current_price, current_timestamp)
-                elif _bot_state == "ACTIVE_SHORT" and ut_bot_signal == "BUY":
-                    _handle_flip_backtest('long', position_manager_module, config_module, current_price, current_timestamp)
-                    _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
-                    position_manager_module.handle_low_level_signal("BUY", current_price, current_timestamp)
-            elif _bot_state != "NEUTRAL":
-                position_manager_module.handle_low_level_signal(low_level_signal, current_price, current_timestamp)
+                        _trades_in_current_trend = 0
+                    elif _bot_state == "ACTIVE_SHORT" and ut_bot_signal == "BUY":
+                        _handle_flip_backtest('long', position_manager_module, config_module, current_price, current_timestamp)
+                        _bot_state = "ACTIVE_LONG"; setattr(config_module, 'POSITION_TRADING_MODE', 'LONG_ONLY')
+                        position_manager_module.handle_low_level_signal("BUY", current_price, current_timestamp)
+                        _trades_in_current_trend = 0
+                elif _bot_state != "NEUTRAL":
+                    position_manager_module.handle_low_level_signal(low_level_signal, current_price, current_timestamp)
 
-            current_mode = config_module.POSITION_TRADING_MODE
-            if current_mode != previous_mode:
-                state_changes_log.append({'timestamp': current_timestamp.isoformat(), 'mode': current_mode})
+                current_mode = config_module.POSITION_TRADING_MODE
+                if current_mode != previous_mode:
+                    state_changes_log.append({'timestamp': current_timestamp.isoformat(), 'mode': current_mode})
 
-            sl_pct = getattr(config_module, 'POSITION_PHYSICAL_STOP_LOSS_PCT', 0.0)
-            if sl_pct > 0:
-                for side in ['long', 'short']:
-                    physical_state = position_state_module.get_physical_position_state(side)
-                    avg_entry = utils_module.safe_float_convert(physical_state.get('avg_entry_price'))
-                    if avg_entry > 0 and len(position_state_module.get_open_logical_positions(side)) > 0:
-                        sl_price = avg_entry * (1 - sl_pct / 100.0) if side == 'long' else avg_entry * (1 + sl_pct / 100.0)
-                        if (side == 'long' and current_price <= sl_price) or (side == 'short' and current_price >= sl_price):
-                            print(f"\nALERTA [Backtest]: STOP LOSS FÍSICO SIMULADO para {side.upper()} a precio {current_price:.4f}")
-                            position_manager_module.close_all_logical_positions(side, current_price, current_timestamp)
-                            _bot_state = "NEUTRAL"
-                            setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
-                            cooldown_secs = getattr(config_module, 'AUTOMATIC_SL_COOLDOWN_SECONDS', 900)
-                            _sl_cooldown_until = current_timestamp + datetime.timedelta(seconds=cooldown_secs)
-                            if config_module.POSITION_TRADING_MODE != 'NEUTRAL':
-                                state_changes_log.append({'timestamp': current_timestamp.isoformat(), 'mode': 'NEUTRAL'})
+                if (i + 1) % print_interval == 0 or i == total_rows - 1:
+                    print(f"\r[Auto Backtest] Procesando: {i + 1}/{total_rows} ({((i + 1) / total_rows) * 100:.1f}%)", end="")
 
-            if (i + 1) % print_interval == 0 or i == total_rows - 1:
-                print(f"\r[Auto Backtest] Procesando: {i + 1}/{total_rows} ({((i + 1) / total_rows) * 100:.1f}%)", end="")
-        
+        except event_processor_module.GlobalStopLossException as e:
+            print("\n" + "="*80)
+            print("--- BACKTEST DETENIDO POR GLOBAL STOP LOSS ---".center(80))
+            print(f"--- Razón: {e} ---".center(80))
+            print("--- El proceso continuará para generar el reporte y gráfico final. ---".center(80))
+            print("="*80)
+
         print(f"\n\n--- Backtest Automático Finalizado en {time.time() - start_time:.2f} segundos ---")
         backtest_completed_or_interrupted = True
 
@@ -188,11 +190,9 @@ def run_automatic_backtest_mode(
     except Exception as e:
         print(f"ERROR CRITICO durante la ejecución del backtest: {e}")
         traceback.print_exc()
-        backtest_completed_or_interrupted = True # Aún intentar generar reporte
+        backtest_completed_or_interrupted = True
     finally:
-        # --- 5. Reporte y Visualización (se ejecuta siempre al salir del try) ---
         if backtest_completed_or_interrupted:
-            # Guardar el log de cambios de estado
             log_dir = getattr(config_module, 'LOG_DIR', 'logs')
             state_log_path = os.path.join(log_dir, 'state_changes.json')
             try:
@@ -235,12 +235,26 @@ def _check_roi_and_switch_to_neutral(config_module: Any, position_manager_module
     total_pnl = summary.get('total_realized_pnl_long', 0.0) + summary.get('total_realized_pnl_short', 0.0)
     current_roi_pct = utils_module.safe_division(total_pnl, initial_capital) * 100
     target_roi_pct = getattr(config_module, 'AUTOMATIC_ROI_PROFIT_TARGET_PCT', 0.1)
-    
+
     if current_roi_pct >= target_roi_pct:
         print(f"\nINFO [Auto Backtest]: ROI Alcanzado ({current_roi_pct:.3f}%). Cambiando a NEUTRAL.")
         _bot_state = "NEUTRAL"
         setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
         state_log.append({'timestamp': timestamp.isoformat(), 'mode': 'NEUTRAL'})
+
+# <<< INICIO MODIFICACIÓN: Nueva función de chequeo de límite de trades >>>
+def _check_trade_limit_and_switch_to_neutral(config_module: Any, state_log: list, timestamp: datetime.datetime):
+    global _bot_state, _trades_in_current_trend
+    if not getattr(config_module, 'AUTOMATIC_TRADE_LIMIT_ENABLED', False): return
+    if _bot_state == "NEUTRAL": return
+
+    limit = getattr(config_module, 'AUTOMATIC_MAX_TRADES_PER_TREND', 5)
+    if _trades_in_current_trend >= limit:
+        print(f"\nINFO [Auto Backtest]: Límite de trades ({_trades_in_current_trend}/{limit}) alcanzado. Cambiando a NEUTRAL.")
+        _bot_state = "NEUTRAL"
+        setattr(config_module, 'POSITION_TRADING_MODE', 'NEUTRAL')
+        state_log.append({'timestamp': timestamp.isoformat(), 'mode': 'NEUTRAL'})
+# <<< FIN MODIFICACIÓN >>>
 
 def _handle_flip_backtest(target_side: str, position_manager_module: Any, config_module: Any, current_price: float, current_timestamp: datetime.datetime):
     current_side = 'short' if target_side == 'long' else 'long'

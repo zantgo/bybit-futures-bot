@@ -1,6 +1,6 @@
 ================================================================================
-                         Reporte de Ejecución - Bot v13                         
-                         Generado: 2025-07-17 00:38:09                          
+                         Reporte de Ejecución - Bot v14                         
+                         Generado: 2025-07-17 15:06:47                          
                             Modo: AUTOMATIC_BACKTEST                            
 ================================================================================
 
@@ -11,28 +11,37 @@
   Capital Inicial Asignado: 20.00 USDT
   Apalancamiento: 10.0x
   Max Pos Lógicas (Final): 10 (por lado)
-  TP % (L/S): 30.00% / 30.00%
+  Stop Loss Individual (%): 10.00%
+  Trailing Stop Activación (%): 0.30%
+  Trailing Stop Distancia (%): 0.10%
   Comisión %: 0.100%
   Reinvertir PNL Operacional %: 10.00%
 
   --- Parámetros del Modo Automático ---
-    Intervalo Señal UT Bot: 1800 seg
+    Intervalo Señal UT Bot: 2700 seg
     UT Bot Key Value:       1.0
     UT Bot ATR Period:      10
     Flip Abre Posiciones:   False
     Cooldown Post-SL:       1 seg
-    Stop Loss Físico:       10.0%
 
 --- Resumen Trades Cerrados ---------------------------------------------------
-  No se cerraron trades durante esta sesión o no se pudo leer el log.
+  Total Trades Cerrados: 39 (Long: 13, Short: 26)
+  Trades Ganadores:      34 (87.18%) (Long: 11, Short: 23)
+  Trades Perdedores:     5
+  PNL Neto Total:        +0.5612 USDT (Long: +0.1305, Short: +0.4308)
+  Ganancia Promedio:     +0.0168 USDT
+  Pérdida Promedio:      -0.0022 USDT
+  Profit Factor:         52.27
 
 --- Estado Final --------------------------------------------------------------
   Capital Inicial Total Operativo:    20.00 USDT
-  Capital Final Total (Equity Lóg.):  20.0000 USDT
-  Retorno Sobre Capital Inicial (%):  +0.00%
+  Capital Final Total (Equity Lóg.):  20.5613 USDT
+  Retorno Sobre Capital Inicial (%):  +2.81%
 
   Balance Operativo Final Long:         10.0000 USDT
   Balance Operativo Final Short:        10.0000 USDT
-  Balance Cuenta Profit Final:          0.0000 USDT
+  Balance Cuenta Profit Final:          0.5131 USDT
 
-  Posiciones Abiertas al Final: 0
+  Posiciones Abiertas al Final: 1
+    Shorts Abiertas (1):
+      - ID: ...d596fe, Entry: 0.1962, Size: 50.978, SL: N/A, TS: Inactivo
