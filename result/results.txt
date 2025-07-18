@@ -1,39 +1,12 @@
 ================================================================================
                          Reporte de Ejecución - Bot v14                         
-                         Generado: 2025-07-17 18:41:08                          
+                         Generado: 2025-07-18 18:25:50                          
                             Modo: AUTOMATIC_BACKTEST                            
 ================================================================================
 
 --- Configuración de la Sesión ------------------------------------------------
   Símbolo: FARTCOINUSDT
-  Gestión de Posiciones: Activada
-  Modo Trading (final): LONG_SHORT
-  Capital Inicial Asignado: 20.00 USDT
-  Apalancamiento: 10.0x
-  Max Pos Lógicas (Final): 10 (por lado)
-  Stop Loss Individual (%): 10.00%
-  Trailing Stop Activación (%): 0.30%
-  Trailing Stop Distancia (%): 0.10%
-  Comisión %: 0.100%
-  Reinvertir PNL Operacional %: 10.00%
-
-  --- Parámetros del Modo Automático ---
-    Intervalo Señal UT Bot: N/A seg
-    UT Bot Key Value:       N/A
-    UT Bot ATR Period:      N/A
-    Flip Abre Posiciones:   False
-    Cooldown Post-SL:       1 seg
-
---- Resumen Trades Cerrados ---------------------------------------------------
-  No se cerraron trades durante esta sesión o no se pudo leer el log.
+  Gestión de Posiciones: Desactivada
 
 --- Estado Final --------------------------------------------------------------
-  Capital Inicial Total Operativo:    20.00 USDT
-  Capital Final Total (Equity Lóg.):  20.0000 USDT
-  Retorno Sobre Capital Inicial (%):  +0.00%
-
-  Balance Operativo Final Long:         10.0000 USDT
-  Balance Operativo Final Short:        10.0000 USDT
-  Balance Cuenta Profit Final:          0.0000 USDT
-
-  Posiciones Abiertas al Final: 0
+  Gestión de Posiciones Desactivada o resumen no disponible.

@@ -1,15 +1,12 @@
-# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v14.1 - Con Exit Reason) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_executor.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
 """
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución.
 
-v14.1:
-- Modificado `execute_close` para aceptar y registrar un `exit_reason`.
-v14:
-- Modificado `execute_open` para:
-  - Calcular y almacenar un `stop_loss_price` individual para cada posición.
-  - Eliminar el cálculo de `take_profit_price`.
-  - Inicializar los campos necesarios para el Trailing Stop.
-- Actualizada la lógica de sincronización para recalcular el SL si el precio de entrada cambia.
+v18.0:
+- Corregida la inyección de dependencias. `pm_state` ya no se inyecta en el
+  constructor, sino que se importa directamente dentro de la clase para
+  romper dependencias circulares y simplificar el llamado.
+- Se mantiene la lógica de SL dinámico y logging de `exit_reason`.
 """
 import datetime
 import uuid
@@ -30,6 +27,7 @@ class PositionExecutor:
                  is_live_mode: bool,
                  config: Optional[Any] = None,
                  utils: Optional[Any] = None,
+                 # pm_state: Optional[Any] = None,  # <<< LÍNEA ELIMINADA SEGÚN INSTRUCCIONES >>>
                  balance_manager: Optional[Any] = None,
                  position_state: Optional[Any] = None,
                  position_calculations: Optional[Any] = None,
@@ -41,6 +39,7 @@ class PositionExecutor:
         self._is_live_mode = is_live_mode
         self._config = config
         self._utils = utils
+        # self._pm_state = pm_state  # <<< LÍNEA ELIMINADA SEGÚN INSTRUCCIONES >>>
         self._balance_manager = balance_manager
         self._position_state = position_state
         self._position_calculations = position_calculations
@@ -48,10 +47,26 @@ class PositionExecutor:
         self._closed_position_logger = closed_position_logger
         self._position_helpers = position_helpers
         self._live_manager = live_manager
+        
+        # <<< MODIFICACIÓN DE LA LISTA DE DEPENDENCIAS ESENCIALES >>>
         essential_deps = [self._config, self._utils, self._balance_manager, self._position_state, self._position_calculations, self._position_helpers]
-        if not all(essential_deps): raise ValueError(f"PositionExecutor: Faltan dependencias esenciales: {[name for name, mod in zip(['Config', 'Utils', 'BalanceMgr', 'PositionState', 'Calculations', 'Helpers'], essential_deps) if not mod]}")
+        dep_names = ['Config', 'Utils', 'BalanceMgr', 'PositionState', 'Calculations', 'Helpers']
+        if not all(essential_deps):
+            missing = [name for name, mod in zip(dep_names, essential_deps) if not mod]
+            raise ValueError(f"PositionExecutor: Faltan dependencias esenciales: {missing}")
+
+        # <<< IMPORTACIÓN INTERNA DE pm_state >>>
+        try:
+            from . import pm_state
+            self._pm_state = pm_state
+        except ImportError:
+            self._pm_state = None
+            print("ERROR CRITICO [PositionExecutor]: No se pudo importar pm_state.")
+            raise
+        
         if self._is_live_mode and not self._live_operations: raise ValueError("PositionExecutor: Modo Live requiere 'live_operations'.")
         if self._is_live_mode and not self._live_manager: print("WARN [PositionExecutor Init]: Modo Live pero 'live_manager' no proporcionado. Transferencias API fallarán.")
+        
         self._leverage = 1.0; self._symbol = "N/A"; self._post_order_delay = 3; self._post_close_delay = 3; self._print_updates = False; self._price_prec = 4; self._qty_prec = 3; self._pnl_prec = 2
         try:
             self._leverage = float(getattr(self._config, 'POSITION_LEVERAGE', 1.0)); self._symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
@@ -67,7 +82,7 @@ class PositionExecutor:
         if side not in ['long', 'short']: result['message'] = f"Lado inválido '{side}'."; print(f"ERROR [Exec Open]: {result['message']}"); return result
         if not isinstance(entry_price, (int, float)) or entry_price <= 0: result['message'] = f"Precio entrada inválido {entry_price}."; print(f"ERROR [Exec Open]: {result['message']}"); return result
         if margin_to_use is None and size_contracts_str_api is None: result['message'] = "Debe proveer 'margin_to_use' o 'size_contracts_str_api'."; print(f"ERROR [Exec Open]: {result['message']}"); return result
-        if not all([self._position_state, self._balance_manager, self._position_calculations, self._position_helpers, self._utils]): result['message'] = "Faltan dependencias internas."; print(f"ERROR [Exec Open]: {result['message']}"); return result
+        if not all([self._position_state, self._balance_manager, self._position_calculations, self._position_helpers, self._utils, self._pm_state]): result['message'] = "Faltan dependencias internas."; print(f"ERROR [Exec Open]: {result['message']}"); return result
 
         size_contracts_final_float = 0.0; margin_used_final = 0.0; qty_precision_used = self._qty_prec
         try:
@@ -87,7 +102,10 @@ class PositionExecutor:
         except Exception as e: result['message'] = f"Excepción calculando tamaño/margen: {e}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); return result
 
         logical_position_id = str(uuid.uuid4())
-        stop_loss_price = self._position_calculations.calculate_stop_loss(side, entry_price)
+        
+        individual_sl_pct = self._pm_state.get_individual_stop_loss_pct()
+        stop_loss_price = self._position_calculations.calculate_stop_loss(side, entry_price, individual_sl_pct)
+        
         est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
             side=side, avg_entry_price=entry_price, leverage=self._leverage
         )
@@ -152,7 +170,7 @@ class PositionExecutor:
                                 update_details['est_liq_price'] = est_liq_price_synced
                                 print(f"    Precio Liq. Estimado Individual Actualizado: {est_liq_price_synced:.{self._price_prec}f}")
                             if abs(new_entry_price_synced - entry_price) > 1e-9:
-                                new_sl_price_synced = self._position_calculations.calculate_stop_loss(side, new_entry_price_synced)
+                                new_sl_price_synced = self._position_calculations.calculate_stop_loss(side, new_entry_price_synced, individual_sl_pct)
                                 if new_sl_price_synced is not None:
                                     update_details['stop_loss_price'] = new_sl_price_synced
                                     print(f"    Stop Loss Price Individual Actualizado: {new_sl_price_synced:.{self._price_prec}f}")
@@ -189,10 +207,8 @@ class PositionExecutor:
         print(f"--- FIN EXECUTE OPEN [{side.upper()}] -> Success: {result['success']} ---")
         return result
 
-    # <<< INICIO DE LA MODIFICACIÓN >>>
     def execute_close(self, side: str, position_index: int, exit_price: float,
                       timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
-    # <<< FIN DE LA MODIFICACIÓN >>>
         result = {
             'success': False, 'pnl_net_usdt': 0.0, 'amount_reinvested_in_operational_margin': 0.0,
             'amount_transferable_to_profit': 0.0, 'log_data': {}, 'message': 'Error no especificado',
@@ -294,7 +310,6 @@ class PositionExecutor:
 
                 log_entry_ts_str = self._utils.format_datetime(entry_ts_for_calc) if entry_ts_for_calc else "N/A"; log_exit_ts_str = self._utils.format_datetime(timestamp); duration = (timestamp - entry_ts_for_calc).total_seconds() if isinstance(entry_ts_for_calc, datetime.datetime) else None
                 
-                # <<< INICIO DE LA MODIFICACIÓN >>>
                 log_data_final = {
                     "id": pos_id_for_log, "side": side, "entry_timestamp": log_entry_ts_str,
                     "exit_timestamp": log_exit_ts_str, "duration_seconds": duration,
@@ -308,7 +323,6 @@ class PositionExecutor:
                     "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg,
                     "exit_reason": exit_reason # Añadir la razón del cierre al log
                 }
-                # <<< FIN DE LA MODIFICACIÓN >>>
                 
                 result['log_data'] = log_data_final
 
@@ -428,4 +442,4 @@ class PositionExecutor:
             print(f"    -------------------------------------------------")
         except Exception as sync_err: print(f"    ERROR SYNC: Excepción durante sincronización {side.upper()}: {sync_err}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/position_executor.py (v14.1 - Con Exit Reason) ===============
+# =============== FIN ARCHIVO: core/strategy/position_executor.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============

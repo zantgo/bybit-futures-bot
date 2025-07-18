@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: runners/live_interactive_menus.py (COMPLETO) ===============
 """
 Contiene la lógica de los menús previos al inicio del modo Live Interactivo,
 incluyendo la verificación del estado de las cuentas y la prueba de ciclo completo.
@@ -21,17 +20,17 @@ def run_pre_start_menu(
     position_manager_module: Any,
     balance_manager_module: Any,
     position_state_module: Any
-) -> Tuple[Optional[float], Optional[int], Optional[str]]:
+) -> Tuple[Optional[float], Optional[int], Optional[str], Optional[Dict[str, Any]]]: # <<< CORRECCIÓN: Devolver balances
     """
-    Ejecuta el bucle del menú pre-inicio. Devuelve la configuración de la sesión
-    o la señal para salir.
+    Ejecuta el bucle del menú pre-inicio. Devuelve la configuración de la sesión,
+    la señal para salir y los balances ya obtenidos.
     """
     symbol = getattr(config_module, 'TICKER_SYMBOL', None)
     
     # Obtener y mostrar el estado de las cuentas una vez al entrar
+    real_account_states = {} # <<< CORRECCIÓN: Guardar balances aquí
     if menu_module and hasattr(menu_module, 'display_live_pre_start_overview'):
         print("\nObteniendo estado real de las cuentas desde la API...")
-        real_account_states = {}
         for acc_name in initialized_accs:
             try:
                 acc_state = {
@@ -47,12 +46,12 @@ def run_pre_start_menu(
     while True:
         choice = menu_module.get_live_main_menu_choice() if menu_module else '2'
 
-        if choice == '1': # Ver/Gestionar Estado Detallado
+        if choice == '1':
             print("\nINFO: La gestión detallada de posiciones está disponible en el menú de intervención una vez iniciado el bot.")
             input("Presione Enter para continuar...")
             continue
             
-        elif choice == '2': # Iniciar el Bot
+        elif choice == '2':
             print("\n--- Configuración para esta Sesión de Trading ---")
             
             base_size, initial_slots = menu_module.get_position_setup_interactively()
@@ -60,26 +59,29 @@ def run_pre_start_menu(
                 print("Inicio del bot cancelado.")
                 continue
             
-            return base_size, initial_slots, "START_BOT"
+            # <<< CORRECCIÓN: Devolver balances para no tener que pedirlos de nuevo >>>
+            return base_size, initial_slots, "START_BOT", real_account_states
 
-        elif choice == '3': # Probar Ciclo Completo
+        elif choice == '3':
+            # <<< CORRECCIÓN: Pasar los balances ya obtenidos a la prueba >>>
             run_full_test_cycle(
                 config_param=config_module,
                 utils_param=utils_module,
                 live_operations_param=live_operations_module,
                 position_manager_param=position_manager_module,
                 balance_manager_param=balance_manager_module,
-                position_state_param=position_state_module
+                position_state_param=position_state_module,
+                real_account_states=real_account_states # Pasar los balances
             )
             continue
             
-        elif choice == '4': # Ver Tabla de Posiciones Lógicas
+        elif choice == '4':
             print("\nINFO: Las posiciones lógicas estarán disponibles una vez iniciado el bot (opción 'status' en el menú de intervención).")
             input("Presione Enter para continuar...")
             continue
 
-        elif choice == '0': # Salir
-            return None, None, "EXIT"
+        elif choice == '0':
+            return None, None, "EXIT", None
         
         else:
             print("Opción no válida.")
@@ -92,7 +94,8 @@ def run_full_test_cycle(
     live_operations_param: Any,
     position_manager_param: Any,
     balance_manager_param: Any,
-    position_state_param: Any
+    position_state_param: Any,
+    real_account_states: Dict[str, Any] # <<< CORRECCIÓN: Aceptar balances como argumento
 ):
     """
     Ejecuta una prueba de ciclo completo para abrir y cerrar posiciones
@@ -100,14 +103,16 @@ def run_full_test_cycle(
     """
     print(f"\n--- Iniciando Prueba de Ciclo Forzado Dinámica (LONG & SHORT) ---")
 
-    # Re-inicializar PM para la prueba, para no interferir con la sesión principal
     print("Inicializando entorno de prueba para Position Manager...")
+    # <<< CORRECCIÓN: Pasar los balances reales a la inicialización del PM >>>
     position_manager_param.initialize(
-        operation_mode="live_interactive", # Forzar modo live para usar ejecutor real
+        operation_mode="live_interactive",
         base_position_size_usdt_param=getattr(config_param, 'POSITION_BASE_SIZE_USDT', 10.0),
-        initial_max_logical_positions_param=getattr(config_param, 'POSITION_MAX_LOGICAL_POSITIONS', 1)
+        initial_max_logical_positions_param=getattr(config_param, 'POSITION_MAX_LOGICAL_POSITIONS', 1),
+        initial_real_state=real_account_states # Aquí se pasan los balances
     )
-    if not getattr(position_manager_param, '_initialized', False):
+    # <<< CORRECCIÓN: La comprobación de inicialización debe usar pm_state >>>
+    if not position_manager_param.pm_state.is_initialized():
         print("ERROR CRITICO [Test Cycle]: Position Manager no se pudo inicializar para la prueba.")
         input("Presione Enter para volver...")
         return
@@ -122,7 +127,6 @@ def run_full_test_cycle(
     except ImportError:
         print("ERROR [Test Cycle]: No se pudo importar live_manager."); input("Enter..."); return
 
-    # --- Configuración Interactiva para la Prueba ---
     try:
         amount_usdt = click.prompt(
             "Ingrese cantidad BASE USDT por posición para la prueba", 
@@ -138,7 +142,7 @@ def run_full_test_cycle(
         print("Prueba cancelada.")
         return
 
-    # --- Funciones Helper Internas a la Prueba ---
+    # --- El resto de la función run_full_test_cycle no necesita cambios ---
     def get_current_price_helper() -> Optional[float]:
         session_ticker = live_manager.get_client(getattr(config_param, 'TICKER_SOURCE_ACCOUNT', 'profit')) or \
                          live_manager.get_client(getattr(config_param, 'ACCOUNT_MAIN', 'main'))
@@ -150,7 +154,6 @@ def run_full_test_cycle(
         except Exception: return None
 
     def calculate_qty_str_helper(price: float, amount: float, lev: float) -> Optional[str]:
-        # (Esta función helper interna se mantiene completa)
         if not utils_param or not config_param or price <= 0: return None
         size_raw = utils_param.safe_division(amount * lev, price, default=0.0);
         if size_raw <= 0: return None
@@ -171,7 +174,6 @@ def run_full_test_cycle(
         except (InvalidOperation, Exception) as round_err: print(f"ERROR [Test Qty] redondeando {size_raw}: {round_err}."); return None
 
     def print_detailed_status_helper(step_description: str):
-        # (Esta función helper interna se mantiene completa)
         print(f"\n========== ESTADO DETALLADO: {step_description} ==========")
         position_manager_param.display_logical_positions()
         print("\n  --- Balances ---")
@@ -179,7 +181,6 @@ def run_full_test_cycle(
         print(json.dumps(balances, indent=2))
         print("=======================================================\n")
 
-    # --- Flujo de la Prueba ---
     test_successful = True
     try:
         print(f"Obteniendo precio inicial...")
@@ -192,7 +193,6 @@ def run_full_test_cycle(
         print(f"Precio Inicial: {initial_price:.4f}, Cantidad a usar: {qty_str_test}")
         click.confirm("¿Continuar con la prueba de ciclo?", abort=True)
 
-        # --- PRUEBA LONG ---
         print("\n--- INICIO PRUEBA LONG ---")
         for i in range(num_positions):
             print(f"\n{i+1}. Abriendo LONG #{i+1}...")
@@ -203,7 +203,7 @@ def run_full_test_cycle(
 
         for i in range(num_positions):
             print(f"\n{i + num_positions + 1}. Cerrando LONG #{i+1}...")
-            exit_price = initial_price * 1.005 # Simular ganancia
+            exit_price = initial_price * 1.005
             close_ok = position_manager_param.force_close_test_position('long', 0, exit_price, datetime.datetime.now())
             if not close_ok: raise RuntimeError(f"Falló cierre forzado LONG #{i+1}")
             time.sleep(3)
@@ -212,7 +212,6 @@ def run_full_test_cycle(
         print("--- FIN PRUEBA LONG ---")
         time.sleep(5)
 
-        # --- PRUEBA SHORT ---
         print("\n--- INICIO PRUEBA SHORT ---")
         current_price_short = get_current_price_helper()
         if current_price_short is None: raise RuntimeError("No se pudo obtener precio para SHORT.")
@@ -228,7 +227,7 @@ def run_full_test_cycle(
 
         for i in range(num_positions):
             print(f"\n{i + 3*num_positions + 1}. Cerrar SHORT #{i+1}...")
-            exit_price = current_price_short * 0.995 # Simular ganancia
+            exit_price = current_price_short * 0.995
             close_ok = position_manager_param.force_close_test_position('short', 0, exit_price, datetime.datetime.now())
             if not close_ok: raise RuntimeError(f"Falló cierre forzado SHORT #{i+1}")
             time.sleep(3)
@@ -257,4 +256,3 @@ def run_full_test_cycle(
         click.secho(f"--- RESULTADO PRUEBA CICLO: {'EXITOSA' if test_successful else 'FALLIDA'} ---", fg=color, bold=True)
         click.echo("IMPORTANTE: Revisa los logs y el estado FÍSICO en la web de Bybit.")
         input("Presiona Enter para volver al menú principal...")
-# =============== FIN ARCHIVO: runners/live_interactive_menus.py (COMPLETO) ===============

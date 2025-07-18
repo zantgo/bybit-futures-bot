@@ -1,12 +1,11 @@
-# =============== INICIO ARCHIVO: core/strategy/position_calculations.py (v14 - Con SL Individual) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_calculations.py (CORREGIDO Y COMPLETO) ===============
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
 
-v14:
-- Añadida la función `calculate_stop_loss` para el SL individual por posición.
-- Eliminada la función `calculate_take_profit`, ya que es reemplazada por la
-  lógica de Trailing Stop.
+v17:
+- Modificada `calculate_stop_loss` para aceptar `sl_pct` como argumento,
+  permitiendo el ajuste dinámico del SL individual por posición.
 """
 import math
 import numpy as np
@@ -22,18 +21,15 @@ try:
     from core import utils
 except ImportError as e:
     print(f"ERROR [Position Calculations Import]: No se pudo importar core.config o core.utils: {e}")
+    # Definir stubs/dummies si las importaciones fallan, para que las funciones no fallen catastróficamente
     config_attrs = {
-        'POSITION_MAX_LOGICAL_POSITIONS': 1,
-        'POSITION_INDIVIDUAL_STOP_LOSS_PCT': 2.0,
         'POSITION_COMMISSION_RATE': 0.0,
         'POSITION_REINVEST_PROFIT_PCT': 0.0
     }
     config = type('obj', (object,), config_attrs)()
-    utils_dummy = type('obj', (object,), {
-        'safe_division': lambda num, den, default=0.0: (num / den) if den and den != 0 else default,
-        'safe_float_convert': lambda v, default=0.0: float(v) if v is not None else default
+    utils = type('obj', (object,), {
+        'safe_division': lambda num, den, default=0.0: (num / den) if den and den != 0 else default
     })()
-    utils = utils_dummy
 except Exception as e_imp:
      print(f"ERROR inesperado importando en position_calculations: {e_imp}")
      config = type('obj', (object,), {})()
@@ -50,23 +46,20 @@ def calculate_margin_per_slot(available_margin: float, open_positions_count: int
     available_slots = max(0, max_logical_positions - open_positions_count)
     if available_slots <= 0 or available_margin < 1e-6:
         return 0.0
-    if utils:
-        margin_per_slot = utils.safe_division(available_margin, available_slots, default=0.0)
-    else:
-        print("WARN [Calc]: utils.safe_division no disponible, usando división estándar.")
-        margin_per_slot = available_margin / available_slots if available_slots != 0 else 0.0
-    return margin_per_slot
+    
+    if not utils:
+        # Fallback si utils no está disponible
+        return available_margin / available_slots if available_slots != 0 else 0.0
+        
+    return utils.safe_division(available_margin, available_slots, default=0.0)
 
-# <<< FUNCIÓN ELIMINADA: calculate_take_profit >>>
-# Esta función ya no es necesaria porque la lógica de toma de ganancias ahora
-# será manejada por el Trailing Stop en `position_manager.py`.
-
-# <<< INICIO NUEVA FUNCIÓN >>>
-def calculate_stop_loss(side: str, entry_price: float) -> Optional[float]:
+# <<< CORRECCIÓN: La función ahora acepta sl_pct como argumento >>>
+def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optional[float]:
     """
     Calcula el precio de Stop Loss para una posición individual.
+    Recibe el porcentaje de SL como argumento para permitir el ajuste dinámico.
     """
-    sl_pct = getattr(config, 'POSITION_INDIVIDUAL_STOP_LOSS_PCT', 0.0)
+    # sl_pct = getattr(config, 'POSITION_INDIVIDUAL_STOP_LOSS_PCT', 0.0) # Ya no se lee de config
     if sl_pct <= 0:
         return None # No hay Stop Loss si el porcentaje es cero o negativo
 
@@ -86,7 +79,6 @@ def calculate_stop_loss(side: str, entry_price: float) -> Optional[float]:
     except Exception as e:
         print(f"ERROR [Calc SL]: Excepción calculando SL: {e}")
         return None
-# <<< FIN NUEVA FUNCIÓN >>>
 
 def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: float) -> Optional[float]:
     """
@@ -96,7 +88,9 @@ def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: flo
         return None
     if not isinstance(leverage, (int, float)) or not np.isfinite(leverage) or leverage <= 0:
         return None
-    mmr_approx = 0.005
+    
+    # El margen de mantenimiento mínimo varía por exchange, usamos una aproximación
+    mmr_approx = 0.005 
     try:
         if leverage == 0:
             return None
@@ -110,12 +104,8 @@ def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: flo
             liq_price = avg_entry_price * factor
             return liq_price
         else:
-            print(f"WARN [Calc Liq]: Lado '{side}' inválido.")
             return None
     except (ZeroDivisionError, TypeError, ValueError):
-        return None
-    except Exception as e:
-        print(f"ERROR [Calc Liq]: Excepción calculando Liq Price: {e}")
         return None
 
 def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_price: float, size_contracts: float) -> Dict[str, float]:
@@ -124,14 +114,13 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     Luego, calcula la porción del PNL NETO a reinvertir y la porción a transferir.
     """
     commission_rate = getattr(config, 'POSITION_COMMISSION_RATE', 0.0)
-    reinvest_pct_raw = getattr(config, 'POSITION_REINVEST_PROFIT_PCT', 0.0)
-    reinvest_fraction = reinvest_pct_raw / 100.0
+    reinvest_fraction = getattr(config, 'POSITION_REINVEST_PROFIT_PCT', 0.0) / 100.0
 
     pnl_gross_usdt = 0.0
     commission_usdt = 0.0
     pnl_net_usdt = 0.0
-    amount_reinvested_in_operational_margin = 0.0
-    amount_transferable_to_profit = 0.0
+    amount_reinvested = 0.0
+    amount_transferable = 0.0
 
     valid_inputs = (isinstance(entry_price, (int, float)) and np.isfinite(entry_price) and
                     isinstance(exit_price, (int, float)) and np.isfinite(exit_price) and
@@ -151,21 +140,19 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
 
             pnl_net_usdt = pnl_gross_usdt - commission_usdt
 
-            if pnl_net_usdt > 1e-9:
-                amount_reinvested_in_operational_margin = pnl_net_usdt * reinvest_fraction
-                amount_transferable_to_profit = pnl_net_usdt - amount_reinvested_in_operational_margin
+            if pnl_net_usdt > 0:
+                amount_reinvested = pnl_net_usdt * reinvest_fraction
+                amount_transferable = pnl_net_usdt - amount_reinvested
         except Exception as e:
-            print(f"ERROR [Calc PNL]: Excepción calculando PNL/Comm/Reinv: {e}")
-            pnl_gross_usdt, commission_usdt, pnl_net_usdt, amount_reinvested_in_operational_margin, amount_transferable_to_profit = 0.0, 0.0, 0.0, 0.0, 0.0
-    else:
-        print(f"WARN [Calc PNL]: Entradas inválidas para cálculo PNL ({entry_price=}, {exit_price=}, {size_contracts=}).")
-
+            print(f"ERROR [Calc PNL]: Excepción calculando PNL: {e}")
+            pnl_gross_usdt, commission_usdt, pnl_net_usdt, amount_reinvested, amount_transferable = 0.0, 0.0, 0.0, 0.0, 0.0
+    
     return {
         "pnl_gross_usdt": float(pnl_gross_usdt),
         "commission_usdt": float(commission_usdt),
         "pnl_net_usdt": float(pnl_net_usdt),
-        "amount_reinvested_in_operational_margin": float(amount_reinvested_in_operational_margin),
-        "amount_transferable_to_profit": float(amount_transferable_to_profit)
+        "amount_reinvested_in_operational_margin": float(amount_reinvested),
+        "amount_transferable_to_profit": float(amount_transferable)
     }
 
 def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -176,26 +163,22 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
     if not open_positions:
         return {'avg_entry_price': 0.0, 'total_size_contracts': 0.0, 'total_margin_usdt': 0.0}
 
-    total_value = 0.0
-    total_contracts = 0.0
-    total_margin = 0.0
+    total_value, total_contracts, total_margin = 0.0, 0.0, 0.0
 
     for pos in open_positions:
         entry = pos.get('entry_price', 0.0)
         size = pos.get('size_contracts', 0.0)
         margin = pos.get('margin_usdt', 0.0)
 
-        if isinstance(entry, (int, float)) and np.isfinite(entry) and \
-           isinstance(size, (int, float)) and np.isfinite(size) and \
-           isinstance(margin, (int, float)) and np.isfinite(margin):
+        if all(isinstance(v, (int, float)) and np.isfinite(v) for v in [entry, size, margin]):
             total_value += entry * size
             total_contracts += size
             total_margin += margin
 
-    if utils:
-        avg_entry_price = utils.safe_division(total_value, total_contracts, default=0.0)
-    else:
+    if not utils:
         avg_entry_price = (total_value / total_contracts) if total_contracts else 0.0
+    else:
+        avg_entry_price = utils.safe_division(total_value, total_contracts, default=0.0)
 
     return {
         'avg_entry_price': float(avg_entry_price),
@@ -203,4 +186,4 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
         'total_margin_usdt': float(total_margin)
     }
 
-# =============== FIN ARCHIVO: core/strategy/position_calculations.py (v14 - Con SL Individual) ===============
+# =============== FIN ARCHIVO: core/strategy/position_calculations.py (CORREGIDO Y COMPLETO) ===============
