@@ -1,16 +1,13 @@
 """
-Configuración Esencial (v14.2 - Con Límite de Trades).
+Configuración Esencial (v15.0 - Estrategia de Régimen de Mercado).
 Parámetros para TA, Feeder, Logger, Plotter, conexiones Live y Gestión de Posiciones.
 
+v15.0:
+- Reemplazado UT Bot con Market Regime Controller (Bollinger Bands) para definir zonas de operación.
 v14.2:
-- Añadidos AUTOMATIC_TRADE_LIMIT_ENABLED y AUTOMATIC_MAX_TRADES_PER_TREND
-  para limitar la sobreoperación por tendencia.
+- Añadidos AUTOMATIC_TRADE_LIMIT_ENABLED y AUTOMATIC_MAX_TRADES_PER_TREND.
 v14.1:
 - Añadido GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT para un disyuntor a nivel de cuenta.
-v14:
-- Añadido POSITION_INDIVIDUAL_STOP_LOSS_PCT para SL por posición lógica.
-- Eliminado POSITION_PHYSICAL_STOP_LOSS_PCT.
-- Reemplazado Take Profit fijo con parámetros para Trailing Stop.
 """
 import os
 import json
@@ -79,24 +76,13 @@ POSITION_REINVEST_PROFIT_PCT = 10.0
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 
 # --- Stop Loss Individual por Posición Lógica ---
-# Porcentaje de pérdida sobre el precio de entrada de CADA posición que
-# activará el cierre individual de esa posición.
-# Poner a 0.0 para desactivar.
 POSITION_INDIVIDUAL_STOP_LOSS_PCT = 10.0
 
 # --- Trailing Stop (reemplaza al Take Profit fijo) ---
-# Porcentaje de ganancia que debe alcanzar una posición para que el Trailing Stop se active.
 TRAILING_STOP_ACTIVATION_PCT = 0.3
-
-# Porcentaje de retroceso desde el precio PICO (el más favorable alcanzado)
-# que activará el cierre de la posición para tomar ganancias.
 TRAILING_STOP_DISTANCE_PCT = 0.1
 
 # --- Global Account Stop-Loss (Circuit Breaker) ---
-# Si el ROI total de la cuenta (realizado + no realizado) cae por debajo de este
-# umbral negativo, el bot cerrará TODAS las posiciones y se detendrá.
-# Escribe el valor como un número positivo (ej: 25.0 para -25%).
-# Ponlo a 0.0 para desactivar esta función.
 GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT = 10.0
 
 # --- Filtros, Delays y Cooldown ---
@@ -112,11 +98,29 @@ POST_CLOSE_SYNC_DELAY_SECONDS = 0.1
 # --- Modos de Operación y Control ---
 INTERACTIVE_MANUAL_MODE = True
 
-# --- AUTOMATIC MODE & UT BOT CONFIGURATION ---
+# --- AUTOMATIC MODE CONFIGURATION ---
 AUTOMATIC_MODE_ENABLED = False
-UT_BOT_SIGNAL_INTERVAL_SECONDS = 2700
-UT_BOT_KEY_VALUE = 1.0
-UT_BOT_ATR_PERIOD = 10
+
+# --- Global Account Take-Profit (Session Target) ---
+# Si el ROI total de la cuenta alcanza este objetivo positivo, el bot entrará
+# en modo NEUTRAL, dejando de abrir nuevas posiciones pero gestionando las existentes.
+# Escribe el valor como un número positivo (ej: 5.0 para +5%).
+# Ponlo a 0.0 para desactivar esta función.
+GLOBAL_ACCOUNT_TAKE_PROFIT_ROI_PCT = 5.0 
+
+# <<< INICIO DE LA MODIFICACIÓN >>>
+# --- Market Regime Controller Configuration (High-Level Strategy) ---
+# Intervalo en segundos para recalcular el régimen del mercado (ej. 300s = 5 minutos)
+MARKET_REGIME_INTERVAL_SECONDS = 900 
+
+# Parámetros de las Bandas de Bollinger
+MARKET_REGIME_BBANDS_LENGTH = 20    # Período para la media móvil y la desviación estándar
+MARKET_REGIME_BBANDS_STD = 2.0      # Número de desviaciones estándar
+# Porcentaje de proximidad a las bandas para considerar una zona "activa".
+# 0.05 significa que el precio debe estar en el 5% inferior/superior del rango de las bandas.
+MARKET_REGIME_BBANDS_ZONE_PCT = 0.05 
+# <<< FIN DE LA MODIFICACIÓN >>>
+
 AUTOMATIC_FLIP_OPENS_NEW_POSITIONS = False
 AUTOMATIC_SL_COOLDOWN_SECONDS = 1
 
@@ -203,7 +207,7 @@ def _load_and_validate_uids():
 # --- Función de Impresión de Configuración ---
 def print_initial_config(operation_mode="unknown"):
     """Imprime un resumen de la configuración cargada."""
-    print("-" * 70); print(f"Configuración Base Cargada (config.py v14.2)");
+    print("-" * 70); print(f"Configuración Base Cargada (config.py v15.0)");
     print(f"  Modo Testnet API        : {UNIVERSAL_TESTNET_MODE}")
     print(f"  Ticker Símbolo          : {TICKER_SYMBOL}")
     print("-" * 70)
@@ -211,12 +215,17 @@ def print_initial_config(operation_mode="unknown"):
     print(f"  Gestión Posiciones Base : {'Activada' if pos_enabled else 'Desactivada'}")
     if pos_enabled:
         print(f"    Modo Automático por Defecto: {'Activado' if AUTOMATIC_MODE_ENABLED else 'Desactivado'}")
+        # La impresión de la configuración de alto nivel se podría añadir aquí si se desea,
+        # pero para mantenerlo simple, se deja como está, ya que el cambio es interno a la estrategia.
         print(f"    Toma Ganancias por ROI   : {'Activado' if AUTOMATIC_ROI_PROFIT_TAKING_ENABLED else 'Desactivado'} (Objetivo: {AUTOMATIC_ROI_PROFIT_TARGET_PCT}%)")
         print(f"    Límite de Trades x Tendencia: {'Activado (' + str(AUTOMATIC_MAX_TRADES_PER_TREND) + ' trades)' if AUTOMATIC_TRADE_LIMIT_ENABLED else 'Desactivado'}")
         print(f"    Stop Loss Individual (%) : {POSITION_INDIVIDUAL_STOP_LOSS_PCT}%")
         print(f"    Trailing Stop Activación(%): {TRAILING_STOP_ACTIVATION_PCT}%")
         print(f"    Trailing Stop Distancia(%): {TRAILING_STOP_DISTANCE_PCT}%")
         print(f"    Stop Loss Global Cuenta (% ROI): {'Desactivado' if GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT <= 0 else f'-{GLOBAL_ACCOUNT_STOP_LOSS_ROI_PCT}%'}")
+        # Dentro de la función print_initial_config
+
+        print(f"    Take Profit Global Cuenta (% ROI): {'Desactivado' if GLOBAL_ACCOUNT_TAKE_PROFIT_ROI_PCT <= 0 else f'+{GLOBAL_ACCOUNT_TAKE_PROFIT_ROI_PCT}%'}")
         print(f"    Apalancamiento           : {POSITION_LEVERAGE:.1f}x")
     print("-" * 70)
 

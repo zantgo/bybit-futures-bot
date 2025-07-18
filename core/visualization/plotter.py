@@ -1,19 +1,20 @@
-# =============== INICIO ARCHIVO: core/visualization/plotter.py (v6.4 - Escalable con Sombreado de Tendencia) ===============
 """
 Genera un gráfico a partir de datos históricos y logs.
-v6.4:
-- Añadida lógica de downsampling (remuestreo) para manejar grandes volúmenes de datos.
-- Si el número de puntos de datos históricos supera un umbral (MAX_POINTS_TO_PLOT),
-  el gráfico se genera a partir de barras OHLC en lugar de dibujar cada tick,
-  evitando problemas de memoria y rendimiento.
-- Integrado el sombreado de fondo para visualizar la tendencia (LONG/SHORT/NEUTRAL).
-- Aumentado el tamaño del gráfico para mejor legibilidad.
+
+v7.0 (Gráfico de Régimen de Mercado):
+- Rediseñado para visualizar la estrategia de Bandas de Bollinger.
+- Dibuja las bandas superior, media e inferior.
+- Sombrea las zonas de oportunidad (NEAR_SUPPORT/NEAR_RESISTANCE) en lugar de tendencias completas.
+- Distingue visualmente entre señales de bajo nivel aceptadas y las ignoradas por el filtro de contexto.
+- Se ha eliminado la dependencia del log de cambios de estado, ya que el contexto ahora es dinámico.
+- Estética general mejorada para mayor claridad.
 """
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.ticker import ScalarFormatter, FormatStrFormatter
+from matplotlib.ticker import FormatStrFormatter
+import pandas_ta as ta
 import json
 import os
 import traceback
@@ -29,171 +30,85 @@ try:
     from core import utils
 except ImportError:
     print("ERROR CRITICO [Plotter Import]: No se pudo importar config o utils.")
-    config = type('obj', (object,), {'TA_EMA_WINDOW': 20, 'TICKER_SYMBOL': 'N/A'})()
+    config = type('obj', (object,), {})()
     utils = type('obj', (object,), {'safe_float_convert': float})()
 
 # --- Constantes ---
-MAX_POINTS_TO_PLOT = 1000000 # Umbral para activar el remuestreo
+MAX_POINTS_TO_PLOT = 1000000
 
-# --- Función para cargar Log de Señales ---
+# --- Funciones de Carga de Logs (Sin cambios significativos) ---
+
 def load_signal_log(log_filepath: str) -> pd.DataFrame:
     """Carga el log de señales (JSON Lines) en un DataFrame."""
     print(f"[Plotter] Cargando log de señales desde: {os.path.basename(log_filepath)}")
     data = []
     try:
         with open(log_filepath, 'r', encoding='utf-8') as f:
-            for line_number, line in enumerate(f):
-                try:
-                    if not line.strip(): continue
-                    signal_event = json.loads(line)
-                    data.append(signal_event)
-                except json.JSONDecodeError as json_err:
-                    print(f"  Advertencia [Signals Log]: Ignorando línea #{line_number + 1} inválida: {json_err}")
-                    continue
-        if not data:
-            print(f"  Advertencia [Signals Log]: No se encontraron datos JSON válidos.")
-            return pd.DataFrame()
-
-        df_signals = pd.DataFrame(data)
-        if 'timestamp' not in df_signals.columns or 'signal' not in df_signals.columns:
-             print("  Error [Signals Log]: Columnas 'timestamp' o 'signal' no encontradas.")
-             return pd.DataFrame()
-
-        df_signals['timestamp_dt'] = pd.to_datetime(df_signals['timestamp'], errors='coerce')
-        df_signals.dropna(subset=['timestamp_dt'], inplace=True)
-        if df_signals.empty:
-             print("  Advertencia [Signals Log]: No hay timestamps válidos.")
-             return pd.DataFrame()
-        df_signals.set_index('timestamp_dt', inplace=True); df_signals.sort_index(inplace=True)
-
-        if 'price_float' in df_signals.columns:
-            df_signals['price_float'] = df_signals['price_float'].replace(['NaN', 'Inf', '-Inf', np.nan, np.inf, -np.inf], np.nan)
-            df_signals['price_float'] = pd.to_numeric(df_signals['price_float'], errors='coerce')
-        else:
-            print("  Advertencia [Signals Log]: Columna 'price_float' no encontrada.")
-            df_signals['price_float'] = np.nan
-
-        df_signals_plot = df_signals[df_signals['signal'].isin(['BUY', 'SELL'])].copy()
-        df_signals_plot.dropna(subset=['price_float'], inplace=True)
-
-        print(f"  Log de Señales procesado: {len(df_signals_plot)} señales BUY/SELL con precio válido para plotear.")
-        return df_signals_plot
-
+            for line in f:
+                if line.strip(): data.append(json.loads(line))
+        if not data: return pd.DataFrame()
+        
+        df = pd.DataFrame(data)
+        df['timestamp_dt'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        df.dropna(subset=['timestamp_dt', 'signal', 'price_float'], inplace=True)
+        df['price_float'] = pd.to_numeric(df['price_float'], errors='coerce')
+        df.dropna(subset=['price_float'], inplace=True)
+        df.set_index('timestamp_dt', inplace=True).sort_index(inplace=True)
+        
+        print(f"  Log de Señales procesado: {len(df)} señales totales.")
+        return df
     except FileNotFoundError:
         print(f"  Advertencia [Signals Log]: Archivo no encontrado: {os.path.basename(log_filepath)}")
         return pd.DataFrame()
     except Exception as e:
-        print(f"  ERROR [Signals Log]: Error inesperado: {e}")
-        traceback.print_exc()
+        print(f"  ERROR [Signals Log]: Error inesperado: {e}"); traceback.print_exc()
         return pd.DataFrame()
 
-# --- Función para cargar Log de Posiciones Cerradas ---
 def load_closed_positions_log(log_filepath: str) -> pd.DataFrame:
     """Carga el log de posiciones cerradas (JSON Lines) en un DataFrame."""
     print(f"[Plotter] Cargando log de posiciones cerradas desde: {os.path.basename(log_filepath)}")
     data = []
-    required_cols = ['side', 'entry_timestamp', 'exit_timestamp', 'entry_price', 'exit_price']
     try:
         with open(log_filepath, 'r', encoding='utf-8') as f:
-            for line_number, line in enumerate(f):
-                try:
-                    if not line.strip(): continue
-                    closed_pos = json.loads(line)
-                    if all(col in closed_pos for col in required_cols):
-                        data.append(closed_pos)
-                except json.JSONDecodeError as json_err:
-                    print(f"  Advertencia [Closed Pos Log]: Ignorando línea #{line_number + 1} inválida: {json_err}")
-                    continue
-        if not data:
-            print(f"  Advertencia [Closed Pos Log]: No se encontraron datos JSON válidos o completos.")
-            return pd.DataFrame()
+            for line in f:
+                if line.strip(): data.append(json.loads(line))
+        if not data: return pd.DataFrame()
 
-        df_closed = pd.DataFrame(data)
-
-        df_closed['entry_timestamp_dt'] = pd.to_datetime(df_closed['entry_timestamp'], errors='coerce')
-        df_closed['exit_timestamp_dt'] = pd.to_datetime(df_closed['exit_timestamp'], errors='coerce')
-        df_closed['entry_price'] = pd.to_numeric(df_closed['entry_price'], errors='coerce')
-        df_closed['exit_price'] = pd.to_numeric(df_closed['exit_price'], errors='coerce')
-
-        df_closed.dropna(subset=['side', 'entry_timestamp_dt', 'exit_timestamp_dt', 'entry_price', 'exit_price'], inplace=True)
-
-        if df_closed.empty:
-             print("  Advertencia [Closed Pos Log]: No hay datos válidos para plotear después del procesamiento.")
-             return pd.DataFrame()
-
-        df_closed = df_closed[df_closed['side'].isin(['long', 'short'])].copy()
-
-        print(f"  Log de Posiciones Cerradas procesado: {len(df_closed)} posiciones válidas para plotear.")
-        return df_closed
-
+        df = pd.DataFrame(data)
+        for col in ['entry_timestamp', 'exit_timestamp']:
+            df[f'{col}_dt'] = pd.to_datetime(df[col], errors='coerce')
+        for col in ['entry_price', 'exit_price']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df.dropna(subset=['side', 'entry_timestamp_dt', 'exit_timestamp_dt', 'entry_price', 'exit_price'], inplace=True)
+        df = df[df['side'].isin(['long', 'short'])].copy()
+        print(f"  Log de Posiciones Cerradas procesado: {len(df)} posiciones válidas.")
+        return df
     except FileNotFoundError:
-        print(f"  Info [Closed Pos Log]: Archivo no encontrado: {os.path.basename(log_filepath)} (Puede ser normal).")
+        print(f"  Info [Closed Pos Log]: Archivo no encontrado (puede ser normal).")
         return pd.DataFrame()
     except Exception as e:
-        print(f"  ERROR [Closed Pos Log]: Error inesperado: {e}")
-        traceback.print_exc()
+        print(f"  ERROR [Closed Pos Log]: Error inesperado: {e}"); traceback.print_exc()
         return pd.DataFrame()
 
-# --- Nueva Función para Cargar Log de Estados ---
-def load_state_changes_log(log_filepath: str) -> list:
-    """Carga el log de cambios de estado (JSON) en una lista de diccionarios."""
-    print(f"[Plotter] Cargando log de cambios de estado desde: {os.path.basename(log_filepath)}")
-    try:
-        with open(log_filepath, 'r', encoding='utf-8') as f:
-            state_changes = json.load(f)
 
-        for change in state_changes:
-            change['timestamp'] = pd.to_datetime(change['timestamp'])
-
-        print(f"  Log de Estados procesado: {len(state_changes)} cambios de estado encontrados.")
-        return state_changes
-    except FileNotFoundError:
-        print(f"  Info [State Log]: Archivo no encontrado: {os.path.basename(log_filepath)} (Normal si no es backtest automático).")
-        return []
-    except Exception as e:
-        print(f"  ERROR [State Log]: Error inesperado: {e}")
-        traceback.print_exc()
-        return []
-
-# --- Función Principal de Ploteo ---
+# --- Función Principal de Ploteo (REDISEÑADA) ---
 def plot_signals_and_price(
     historical_data_df: pd.DataFrame,
     signal_log_filepath: str,
     closed_positions_log_filepath: Optional[str],
     output_filepath: str,
-    state_changes_log_filepath: Optional[str] = None
+    **kwargs # Captura argumentos extra como state_changes_log_filepath para ignorarlos
 ):
-    """
-    Genera gráfico combinando precio, EMA, señales, posiciones y sombreado de tendencia.
-    Aplica downsampling si el número de datos es muy grande.
-    """
-    print("\n--- Iniciando Generación de Gráfico (v6.4 - Escalable) ---")
+    print("\n--- Iniciando Generación de Gráfico (v7.0 - Régimen de Mercado) ---")
 
     # 1. Validar y Preparar Datos Históricos
-    if historical_data_df is None or historical_data_df.empty:
+    if historical_data_df is None or historical_data_df.empty or 'price' not in historical_data_df.columns:
         print("[Plotter Error] Datos históricos inválidos."); return
-    if 'price' not in historical_data_df.columns:
-        print("[Plotter Error] Columna 'price' no encontrada en datos históricos."); return
-    historical_data_df['price'] = pd.to_numeric(historical_data_df['price'], errors='coerce')
-    historical_data_df.dropna(subset=['price'], inplace=True)
-    if historical_data_df.empty:
-        print("[Plotter Error] No hay datos históricos válidos después de limpiar precios."); return
+    historical_data_df.index = pd.to_datetime(historical_data_df.index)
+    historical_data_df.sort_index(inplace=True)
 
-    if not isinstance(historical_data_df.index, pd.DatetimeIndex):
-        if 'timestamp' in historical_data_df.columns:
-             try:
-                 historical_data_df['timestamp'] = pd.to_datetime(historical_data_df['timestamp'], errors='raise')
-                 historical_data_df = historical_data_df.set_index('timestamp')
-                 historical_data_df.sort_index(inplace=True)
-                 print("[Plotter Info] Índice Datetime establecido para datos históricos.")
-             except Exception as e:
-                  print(f"[Plotter Error] No se pudo convertir/establecer índice Datetime: {e}"); return
-        else:
-            print("[Plotter Error] Datos históricos sin índice/columna Datetime."); return
-    else:
-        historical_data_df.sort_index(inplace=True)
-
-    # Lógica de Downsampling
+    # 2. Lógica de Downsampling (Remuestreo)
     plot_df = historical_data_df
     resample_rule = None
     if len(historical_data_df) > MAX_POINTS_TO_PLOT:
@@ -201,133 +116,118 @@ def plot_signals_and_price(
         if duration_hours > 72: resample_rule = '30Min'
         elif duration_hours > 24: resample_rule = '15Min'
         elif duration_hours > 6: resample_rule = '5Min'
-        elif duration_hours > 1: resample_rule = '1Min'
-        else: resample_rule = '15S'
-
-        print(f"[Plotter Info] Demasiados puntos ({len(historical_data_df)}). Remuestreando a '{resample_rule}'.")
-
-        ohlc_dict = {'price': 'ohlc'}
-        plot_df = historical_data_df.resample(resample_rule).apply(ohlc_dict)
-        plot_df.columns = plot_df.columns.droplevel(0)
-        plot_df.dropna(inplace=True)
-        print(f"  Datos reducidos a {len(plot_df)} puntos (barras OHLC).")
-
-    # 2. Cargar Logs
+        else: resample_rule = '1Min'
+        print(f"[Plotter Info] Remuestreando datos a '{resample_rule}' para visualización.")
+        plot_df = historical_data_df['price'].resample(resample_rule).ohlc().dropna()
+    
+    # 3. Cargar Logs
     df_signals = load_signal_log(signal_log_filepath)
     df_closed_positions = pd.DataFrame()
-    if closed_positions_log_filepath and os.path.exists(closed_positions_log_filepath):
-         df_closed_positions = load_closed_positions_log(closed_positions_log_filepath)
+    if closed_positions_log_filepath:
+        df_closed_positions = load_closed_positions_log(closed_positions_log_filepath)
 
-    state_changes = []
-    if state_changes_log_filepath and os.path.exists(state_changes_log_filepath):
-        state_changes = load_state_changes_log(state_changes_log_filepath)
+    # 4. Calcular Indicadores para el Gráfico
+    bb_length = getattr(config, 'MARKET_REGIME_BBANDS_LENGTH', 20)
+    bb_std = getattr(config, 'MARKET_REGIME_BBANDS_STD', 2.0)
+    bb_zone_pct = getattr(config, 'MARKET_REGIME_BBANDS_ZONE_PCT', 0.05)
+    
+    price_series = plot_df['close'] if 'close' in plot_df.columns else plot_df['price']
+    
+    if len(price_series) >= bb_length:
+        print(f"[Plotter Info] Calculando Bandas de Bollinger ({bb_length}, {bb_std})...")
+        bband_cols = f"_{bb_length}_{bb_std}"
+        plot_df.ta.bbands(close=price_series, length=bb_length, std=bb_std, append=True)
+        
+        # Renombrar columnas para facilitar el acceso
+        plot_df.rename(columns={
+            f'BBL{bband_cols}': 'lower_band',
+            f'BBM{bband_cols}': 'middle_band',
+            f'BBU{bband_cols}': 'upper_band'
+        }, inplace=True, errors='ignore')
 
-    # 3. Calcular EMA
-    ema_window = getattr(config, 'TA_EMA_WINDOW', 20)
-    print(f"[Plotter Info] Calculando EMA({ema_window})...")
-    price_series_for_ema = plot_df['close'] if 'close' in plot_df.columns else plot_df['price']
-    try:
-        if len(price_series_for_ema) >= ema_window:
-            plot_df['EMA'] = price_series_for_ema.ewm(span=ema_window, adjust=False, min_periods=ema_window).mean()
-        else:
-             plot_df['EMA'] = np.nan
-    except Exception as e:
-        print(f"[Plotter Error] Cálculo EMA falló: {e}");
-        plot_df['EMA'] = np.nan
-
-    # 4. Crear Gráfico
+    # 5. Crear Gráfico y Ejes
     plt.style.use('seaborn-v0_8-darkgrid')
-    fig, ax = plt.subplots(figsize=(25, 12))
+    fig, ax = plt.subplots(figsize=(28, 14), facecolor='#F0F0F0')
+    ax.set_facecolor('#FDFDFD')
 
-    # 5. Plotear Sombreado de Fondo
-    if state_changes:
-        print("[Plotter Info] Aplicando sombreado de fondo por tendencia...")
-        for i in range(len(state_changes)):
-            start_time = state_changes[i]['timestamp']
-            mode = state_changes[i]['mode']
-            end_time = state_changes[i+1]['timestamp'] if i + 1 < len(state_changes) else historical_data_df.index[-1]
-            color = {'LONG_ONLY': 'green', 'SHORT_ONLY': 'red'}.get(mode, 'none')
-            if color != 'none':
-                ax.axvspan(start_time, end_time, color=color, alpha=0.1, zorder=0)
+    # 6. Plotear Bandas de Bollinger y Zonas de Oportunidad
+    if 'upper_band' in plot_df.columns:
+        ax.plot(plot_df.index, plot_df['middle_band'], label=f'BBands Media ({bb_length})', color='orange', ls=':', lw=1.5, alpha=0.8, zorder=2)
+        ax.plot(plot_df.index, plot_df['upper_band'], color='cornflowerblue', ls='--', lw=1.2, alpha=0.7, zorder=1)
+        ax.plot(plot_df.index, plot_df['lower_band'], color='cornflowerblue', ls='--', lw=1.2, alpha=0.7, zorder=1)
+        
+        # Sombreado entre las bandas
+        ax.fill_between(plot_df.index, plot_df['lower_band'], plot_df['upper_band'], color='skyblue', alpha=0.1, zorder=0, label='Rango Bollinger')
+        
+        # Sombreado de Zonas de Oportunidad
+        band_range = plot_df['upper_band'] - plot_df['lower_band']
+        support_zone_limit = plot_df['lower_band'] + (band_range * bb_zone_pct)
+        resistance_zone_limit = plot_df['upper_band'] - (band_range * bb_zone_pct)
+        
+        ax.fill_between(plot_df.index, plot_df['lower_band'], support_zone_limit, color='green', alpha=0.15, zorder=0, label=f'Zona Compra ({bb_zone_pct*100}%)')
+        ax.fill_between(plot_df.index, resistance_zone_limit, plot_df['upper_band'], color='red', alpha=0.15, zorder=0, label=f'Zona Venta ({bb_zone_pct*100}%)')
 
-    # 6. Plotear Datos de Precio y EMA
-    if resample_rule:
-        ax.plot(plot_df.index, plot_df['close'], label='Precio (Cierre Agregado)', color='grey', lw=1.2, alpha=0.9, zorder=1)
-        ax.fill_between(plot_df.index, plot_df['low'], plot_df['high'], color='grey', alpha=0.2, label=f'Rango H-L ({resample_rule})')
+    # 7. Plotear Precio
+    if 'ohlc' in str(plot_df.columns): # Si es remuestreado
+        ax.plot(plot_df.index, plot_df['close'], label='Precio (Cierre Agregado)', color='#333333', lw=1.5, zorder=3)
     else:
-        ax.plot(plot_df.index, plot_df['price'], label='Precio Histórico', color='grey', lw=1.0, alpha=0.8, zorder=1)
+        ax.plot(plot_df.index, plot_df['price'], label='Precio', color='#333333', lw=1.2, zorder=3)
 
-    if 'EMA' in plot_df and plot_df['EMA'].notna().any():
-        ax.plot(plot_df.index, plot_df['EMA'], label=f'EMA ({ema_window})', color='darkorange', ls='--', lw=1.5, alpha=0.9, zorder=2)
-
-    # Plotear marcadores
-    if not df_closed_positions.empty:
-        closed_longs = df_closed_positions[df_closed_positions['side'] == 'long']
-        closed_shorts = df_closed_positions[df_closed_positions['side'] == 'short']
-        if not closed_longs.empty:
-            ax.scatter(closed_longs['entry_timestamp_dt'], closed_longs['entry_price'], label='Open Long', marker='o', color='blue', s=80, alpha=0.7, zorder=3)
-            ax.scatter(closed_longs['exit_timestamp_dt'], closed_longs['exit_price'], label='Close Long', marker='x', color='blue', s=100, lw=2, alpha=0.9, zorder=4)
-        if not closed_shorts.empty:
-            ax.scatter(closed_shorts['entry_timestamp_dt'], closed_shorts['entry_price'], label='Open Short', marker='o', color='purple', s=80, alpha=0.7, zorder=3)
-            ax.scatter(closed_shorts['exit_timestamp_dt'], closed_shorts['exit_price'], label='Close Short', marker='x', color='purple', s=100, lw=2, alpha=0.9, zorder=4)
-
+    # 8. Plotear Señales (Aceptadas vs. Ignoradas)
     if not df_signals.empty:
-        buy_markers = df_signals[df_signals['signal'] == 'BUY']
-        sell_markers = df_signals[df_signals['signal'] == 'SELL']
-        if not buy_markers.empty:
-            ax.scatter(buy_markers.index, buy_markers['price_float'], label='BUY Signal', marker='^', color='lime', s=120, ec='black', lw=0.5, zorder=5)
-        if not sell_markers.empty:
-            ax.scatter(sell_markers.index, sell_markers['price_float'], label='SELL Signal', marker='v', color='red', s=120, ec='black', lw=0.5, zorder=5)
+        accepted_buys = df_closed_positions[df_closed_positions['side'] == 'long']['entry_timestamp_dt']
+        accepted_sells = df_closed_positions[df_closed_positions['side'] == 'short']['entry_timestamp_dt']
+        
+        all_buy_signals = df_signals[df_signals['signal'] == 'BUY']
+        all_sell_signals = df_signals[df_signals['signal'] == 'SELL']
 
-    # 7. AJUSTAR LÍMITES Y FORMATO DEL EJE Y
-    all_y_values_list = []
-    price_data_for_lim = plot_df['close'] if resample_rule else plot_df['price']
-    if price_data_for_lim.notna().any(): all_y_values_list.append(price_data_for_lim.dropna())
-    if 'EMA' in plot_df and plot_df['EMA'].notna().any(): all_y_values_list.append(plot_df['EMA'].dropna())
-    if not df_signals.empty and 'price_float' in df_signals and df_signals['price_float'].notna().any():
-         all_y_values_list.append(df_signals['price_float'].dropna())
+        # Marcadores de señales aceptadas (las que se convirtieron en una posición)
+        ax.scatter(accepted_buys, all_buy_signals.loc[accepted_buys]['price_float'],
+                   label='Señal Compra (Ejecutada)', marker='^', color='limegreen', s=150, ec='black', lw=1, zorder=5)
+        ax.scatter(accepted_sells, all_sell_signals.loc[accepted_sells]['price_float'],
+                   label='Señal Venta (Ejecutada)', marker='v', color='red', s=150, ec='black', lw=1, zorder=5)
+
+        # Marcadores de señales ignoradas
+        ignored_buys = all_buy_signals.index.difference(accepted_buys)
+        ignored_sells = all_sell_signals.index.difference(accepted_sells)
+        
+        ax.scatter(ignored_buys, all_buy_signals.loc[ignored_buys]['price_float'],
+                   label='Señal Compra (Ignorada)', marker='.', color='green', s=30, alpha=0.5, zorder=4)
+        ax.scatter(ignored_sells, all_sell_signals.loc[ignored_sells]['price_float'],
+                   label='Señal Venta (Ignorada)', marker='.', color='maroon', s=30, alpha=0.5, zorder=4)
+
+    # 9. Plotear Entradas/Salidas de Posiciones Cerradas
     if not df_closed_positions.empty:
-        if 'entry_price' in df_closed_positions and df_closed_positions['entry_price'].notna().any():
-             all_y_values_list.append(df_closed_positions['entry_price'].dropna())
-        if 'exit_price' in df_closed_positions and df_closed_positions['exit_price'].notna().any():
-             all_y_values_list.append(df_closed_positions['exit_price'].dropna())
+        for _, row in df_closed_positions.iterrows():
+            color = 'blue' if row['side'] == 'long' else 'purple'
+            linestyle = '-' if row['pnl_net_usdt'] >= 0 else '--'
+            ax.plot([row['entry_timestamp_dt'], row['exit_timestamp_dt']], 
+                    [row['entry_price'], row['exit_price']], 
+                    color=color, lw=1.5, ls=linestyle, marker='o', markersize=5, alpha=0.8, zorder=6)
 
-    if all_y_values_list:
-        all_y_data = pd.concat(all_y_values_list)
-        if not all_y_data.empty:
-            ymin, ymax = all_y_data.min(), all_y_data.max()
-            padding = (ymax - ymin) * 0.05 if (ymax - ymin) > 1e-9 else abs(ymin * 0.01)
-            padding = max(padding, 1e-8)
-            final_ymin = ymin - padding
-            final_ymax = ymax + padding
-            if ymin >= 0: final_ymin = max(0, final_ymin)
-            ax.set_ylim(final_ymin, final_ymax)
-
-    ax.yaxis.set_major_formatter(FormatStrFormatter('%.8f'))
-    plt.setp(ax.get_yticklabels(), rotation=30, ha="right")
-
-    # 8. Configuración Final y Guardado
+    # 10. Configuración Final y Guardado
     symbol_plot = getattr(config, 'TICKER_SYMBOL', 'N/A')
-    title = f'Historial {symbol_plot}, EMA({ema_window}), Señales y Posiciones (v6.4'
-    if resample_rule:
-        title += f' - Agregado a {resample_rule})'
-    else:
-        title += ')'
-    ax.set_title(title, fontsize=18)
-    ax.set_xlabel('Timestamp', fontsize=12); ax.set_ylabel('Precio (USDT)', fontsize=12)
-    ax.legend(fontsize=10, loc='best'); ax.grid(True, linestyle=':', alpha=0.6)
+    title = f'Análisis de Estrategia para {symbol_plot} - Régimen de Mercado con Bandas de Bollinger'
+    ax.set_title(title, fontsize=20, pad=20)
+    ax.set_xlabel('Timestamp', fontsize=14)
+    ax.set_ylabel('Precio (USDT)', fontsize=14)
+    
+    # Formato de ejes
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    plt.setp(ax.get_yticklabels(), rotation=15, ha="right")
+    
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+    plt.xticks(rotation=30, ha='right')
 
-    try:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        plt.xticks(rotation=30, ha='right')
-    except Exception as fmt_err:
-         print(f"Advertencia: Error formateando eje de fechas: {fmt_err}")
-
-    plt.tight_layout(pad=1.5)
+    ax.legend(fontsize=12, loc='upper left')
+    ax.grid(True, which='major', linestyle='--', linewidth=0.5, color='gray')
+    
+    plt.tight_layout(pad=2.0)
 
     try:
         os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-        plt.savefig(output_filepath, dpi=200)
+        plt.savefig(output_filepath, dpi=200, bbox_inches='tight')
         print(f"[Plotter Info] Gráfico guardado exitosamente en: {output_filepath}")
     except Exception as e:
         print(f"[Plotter Error] No se pudo guardar el gráfico: {e}"); traceback.print_exc()

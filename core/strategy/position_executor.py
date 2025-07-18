@@ -1,7 +1,9 @@
-# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v14 - Con SL Individual y Trailing Stop) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_executor.py (v14.1 - Con Exit Reason) ===============
 """
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución.
 
+v14.1:
+- Modificado `execute_close` para aceptar y registrar un `exit_reason`.
 v14:
 - Modificado `execute_open` para:
   - Calcular y almacenar un `stop_loss_price` individual para cada posición.
@@ -84,16 +86,11 @@ class PositionExecutor:
             print(f"  Tamaño Final: {size_contracts_final_float:.{qty_precision_used}f} ({size_contracts_str_api} para API), Margen Usado Estimado: {margin_used_final:.4f} USDT")
         except Exception as e: result['message'] = f"Excepción calculando tamaño/margen: {e}"; print(f"ERROR [Exec Open]: {result['message']}"); traceback.print_exc(); return result
 
-        # <<< INICIO DE CAMBIOS >>>
         logical_position_id = str(uuid.uuid4())
-
-        # Calcular SL y Liq. Estimado
         stop_loss_price = self._position_calculations.calculate_stop_loss(side, entry_price)
         est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
             side=side, avg_entry_price=entry_price, leverage=self._leverage
         )
-
-        # Preparar el diccionario de la nueva posición con campos para SL y Trailing Stop
         new_position_data = {
             'id': logical_position_id,
             'entry_timestamp': timestamp,
@@ -103,15 +100,13 @@ class PositionExecutor:
             'leverage': self._leverage,
             'stop_loss_price': stop_loss_price,
             'est_liq_price': est_liq_price_individual,
-            'ts_is_active': False,          # Trailing Stop no está activo al inicio
-            'ts_peak_price': None,          # Aún no hay precio pico
-            'ts_stop_price': None,          # Aún no hay precio de stop dinámico
+            'ts_is_active': False,
+            'ts_peak_price': None,
+            'ts_stop_price': None,
             'api_order_id': None,
             'api_avg_fill_price': None,
             'api_filled_qty': None
         }
-        # <<< FIN DE CAMBIOS >>>
-
         result['logical_position_id'] = logical_position_id
 
         execution_success = False; api_order_id = None
@@ -127,7 +122,7 @@ class PositionExecutor:
                     execution_success = True; api_order_id = api_response.get('result', {}).get('orderId', 'N/A'); print(f"  -> ÉXITO API: Orden Market {order_side_api} aceptada. OrderID: {api_order_id}")
                 else:
                     ret_code = api_response.get('retCode', -1) if api_response else -1; ret_msg = api_response.get('retMsg', 'N/A') if api_response else 'N/A'; result['message'] = f"Fallo API orden Market {order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
-            else: # Backtest
+            else:
                 print(f"  Ejecutando Apertura BACKTEST (Simulada)..."); execution_success = True; api_order_id = None; print(f"  -> ÉXITO Simulado.")
             if execution_success:
                 self._balance_manager.decrease_operational_margin(side, margin_used_final)
@@ -149,31 +144,23 @@ class PositionExecutor:
                         updated_pos_after_sync = self._position_state.get_position_by_id(side, logical_position_id)
                         if updated_pos_after_sync:
                             new_entry_price_synced = updated_pos_after_sync.get('entry_price', entry_price)
-
-                            # <<< INICIO DE CAMBIOS: Recalcular SL y LiqP post-sync >>>
                             update_details = {}
-                            # Recalcular Liq. Price con el precio real
                             est_liq_price_synced = self._position_calculations.calculate_liquidation_price(
                                 side=side, avg_entry_price=new_entry_price_synced, leverage=updated_pos_after_sync.get('leverage', self._leverage)
                             )
                             if est_liq_price_synced is not None:
                                 update_details['est_liq_price'] = est_liq_price_synced
                                 print(f"    Precio Liq. Estimado Individual Actualizado: {est_liq_price_synced:.{self._price_prec}f}")
-
-                            # Recalcular Stop Loss con el precio real
                             if abs(new_entry_price_synced - entry_price) > 1e-9:
                                 new_sl_price_synced = self._position_calculations.calculate_stop_loss(side, new_entry_price_synced)
                                 if new_sl_price_synced is not None:
                                     update_details['stop_loss_price'] = new_sl_price_synced
                                     print(f"    Stop Loss Price Individual Actualizado: {new_sl_price_synced:.{self._price_prec}f}")
-
                             if update_details:
                                 self._position_state.update_logical_position_details(side, logical_position_id, update_details)
-                            # <<< FIN DE CAMBIOS >>>
                             updated_pos_details = updated_pos_after_sync
                     else:
                         print(f"WARN [Exec Open]: Falló sync post-apertura para pos ...{logical_position_id[-6:]}. Usando datos estimados!")
-
                     if self._print_updates:
                         if updated_pos_details: print(f"      > Px Entrada Real: {updated_pos_details.get('entry_price', 0.0):.{self._price_prec}f}, Tamaño Real: {updated_pos_details.get('size_contracts', 0.0):.{qty_precision_used}f}")
                         else: print("      (WARN: No se pudieron leer detalles actualizados)")
@@ -202,14 +189,16 @@ class PositionExecutor:
         print(f"--- FIN EXECUTE OPEN [{side.upper()}] -> Success: {result['success']} ---")
         return result
 
+    # <<< INICIO DE LA MODIFICACIÓN >>>
     def execute_close(self, side: str, position_index: int, exit_price: float,
-                      timestamp: datetime.datetime) -> Dict[str, Any]:
+                      timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
+    # <<< FIN DE LA MODIFICACIÓN >>>
         result = {
             'success': False, 'pnl_net_usdt': 0.0, 'amount_reinvested_in_operational_margin': 0.0,
             'amount_transferable_to_profit': 0.0, 'log_data': {}, 'message': 'Error no especificado',
             'closed_position_id': None
         }
-        print(f"\n--- EXECUTE CLOSE [{side.upper()} Idx: {position_index}] ---")
+        print(f"\n--- EXECUTE CLOSE [{side.upper()} Idx: {position_index}, Razón: {exit_reason}] ---")
 
         if side not in ['long', 'short']: result['message'] = "Lado inválido."; print(f"ERROR [Exec Close]: {result['message']}"); return result
         if not isinstance(exit_price, (int, float)) or exit_price <= 0: result['message'] = "Precio salida inválido."; print(f"ERROR [Exec Close]: {result['message']}"); return result
@@ -253,7 +242,7 @@ class PositionExecutor:
                     else: ret_code = -1; ret_msg = 'No API Response'
                     result['message'] = f"Fallo API orden Cierre Market {close_order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; print(f"  -> ERROR API: {result['message']}")
                     if ret_code == 110001: execution_success = True; print("  WARN [Exec Close]: Orden/Posición no encontrada (110001). Permitiendo limpieza lógica.")
-            else: # Backtest
+            else:
                 print(f"  Ejecutando Cierre BACKTEST (Simulado)..."); execution_success = True; api_order_id_close = None; print(f"  -> ÉXITO Simulado.")
         except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; print(f"ERROR [Exec Close]: {result['message']}"); traceback.print_exc(); execution_success = False
 
@@ -304,6 +293,8 @@ class PositionExecutor:
                     print(f"  -> Estado físico {side.upper()} reseteado (no quedan pos lógicas).")
 
                 log_entry_ts_str = self._utils.format_datetime(entry_ts_for_calc) if entry_ts_for_calc else "N/A"; log_exit_ts_str = self._utils.format_datetime(timestamp); duration = (timestamp - entry_ts_for_calc).total_seconds() if isinstance(entry_ts_for_calc, datetime.datetime) else None
+                
+                # <<< INICIO DE LA MODIFICACIÓN >>>
                 log_data_final = {
                     "id": pos_id_for_log, "side": side, "entry_timestamp": log_entry_ts_str,
                     "exit_timestamp": log_exit_ts_str, "duration_seconds": duration,
@@ -314,8 +305,11 @@ class PositionExecutor:
                     "reinvest_usdt": amount_reinvested_op_margin,
                     "transfer_usdt": amount_transferable_profit,
                     "api_close_order_id": api_order_id_close,
-                    "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg
+                    "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg,
+                    "exit_reason": exit_reason # Añadir la razón del cierre al log
                 }
+                # <<< FIN DE LA MODIFICACIÓN >>>
+                
                 result['log_data'] = log_data_final
 
                 if self._closed_position_logger and hasattr(self._closed_position_logger, 'log_closed_position'):
@@ -392,7 +386,7 @@ class PositionExecutor:
                         print(f"    -> FALLO API Transfer (Intento {attempt + 1}): No se recibió respuesta.")
                         if attempt < MAX_TRANSFER_RETRIES - 1: time.sleep(TRANSFER_RETRY_DELAY)
                         else: print("    Fallo API sin respuesta después de máximos reintentos."); transferred_amount_api_or_sim = 0.0
-            else: # Backtest
+            else:
                 print("  Ejecutando Transferencia BACKTEST (Simulada)...")
                 if not self._balance_manager: print("ERROR [Exec Transfer BT]: balance_manager no disponible."); return 0.0
                 sim_success = self._balance_manager.simulate_profit_transfer(from_account_side, amount)
@@ -434,4 +428,4 @@ class PositionExecutor:
             print(f"    -------------------------------------------------")
         except Exception as sync_err: print(f"    ERROR SYNC: Excepción durante sincronización {side.upper()}: {sync_err}"); traceback.print_exc()
 
-# =============== FIN ARCHIVO: core/strategy/position_executor.py (v1.6.3 - LiqP Individual con Recálculo Post-Sync) ===============
+# =============== FIN ARCHIVO: core/strategy/position_executor.py (v14.1 - Con Exit Reason) ===============
