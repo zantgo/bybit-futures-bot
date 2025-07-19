@@ -2,14 +2,13 @@
 """
 Contiene la lógica principal para orquestar el modo Live Interactivo del bot.
 
-v17.0 (Asistente de Trading):
-- Simplificado para actuar como un lanzador para el nuevo Asistente de Trading CLI.
-- Delega toda la configuración inicial y el bucle de interacción al módulo `core.menu`.
-- Inicia los componentes core y el ticker, luego cede el control al bucle de la CLI.
+v18.0 (TUI - Terminal User Interface):
+- Simplificado para lanzar el bot y ceder el control al nuevo menú interactivo
+  (TUI) basado en `simple-term-menu`, gestionado desde `core/menu.py`.
+- Corregida la llamada a `clear_screen` para que se haga a través de `menu_module`.
 """
 import time
 import traceback
-# import json # Ya no se usa directamente en este archivo.
 import threading
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
@@ -21,9 +20,9 @@ if TYPE_CHECKING:
     from core.strategy import event_processor, ta_manager, balance_manager, position_state
     from core.logging import open_position_snapshot_logger
 
-# --- Importar helpers específicos del runner ---
-# from . import live_interactive_helpers # OBSOLETO: Reemplazado por la CLI bloqueante de core.menu
-# from . import live_interactive_menus # OBSOLETO: Reemplazado por el Asistente/Wizard en core.menu
+# --- Módulos obsoletos (comentados por referencia) ---
+# from . import live_interactive_helpers
+# from . import live_interactive_menus
 
 # --- Función Principal del Runner ---
 def run_live_interactive_mode(
@@ -43,14 +42,10 @@ def run_live_interactive_mode(
 ):
     
     connection_ticker_module: Optional[Any] = None
-    # key_listener_hilo: Optional[threading.Thread] = None # OBSOLETO
     bot_started: bool = False
     
     try:
-        # --- 1. Asistente de Configuración Inicial (Wizard) ---
-        print("\n--- INICIANDO MODO: LIVE INTERACTIVO ---")
-        
-        # El Asistente de Trading ahora maneja la configuración inicial.
+        # --- 1. Asistente de Configuración Inicial (Wizard TUI) ---
         base_size, initial_slots = menu_module.run_trading_assistant_wizard()
 
         if base_size is None or initial_slots is None:
@@ -60,7 +55,6 @@ def run_live_interactive_mode(
         # --- 2. Inicialización de Componentes Core ---
         print("\n--- Inicializando Componentes Core para la Sesión Live ---")
         
-        # Importar y verificar el gestor de conexión
         try:
             from live.connection import manager as live_manager
             from live.connection import ticker as connection_ticker
@@ -79,7 +73,7 @@ def run_live_interactive_mode(
 
         position_manager_module.initialize(
             operation_mode=operation_mode,
-            initial_real_state=None, # PM obtendrá el estado si lo necesita
+            initial_real_state=None,
             base_position_size_usdt_param=base_size,
             initial_max_logical_positions_param=initial_slots,
             stop_loss_event=None
@@ -87,7 +81,7 @@ def run_live_interactive_mode(
         
         event_processor_module.initialize(
             operation_mode=operation_mode,
-            ut_bot_controller_instance=None # No aplica en modo live
+            ut_bot_controller_instance=None
         )
 
         if not position_manager_module.pm_state.is_initialized():
@@ -95,35 +89,35 @@ def run_live_interactive_mode(
         
         bot_started = True
         print("Componentes Core inicializados con éxito.")
+        time.sleep(1.5) # Pausa para que el usuario pueda leer el mensaje
 
-        # --- 3. Inicio de Hilos y Bucle Principal de la CLI ---
+        # --- 3. Inicio de Hilos y Bucle de la TUI ---
         print("\n--- Iniciando Operación del Bot y Asistente Interactivo ---")
         connection_ticker_module.start_ticker_thread(
             raw_event_callback=event_processor_module.process_event
         )
         
-        # El listener de teclas ya no es necesario. La CLI de `core.menu` es bloqueante
-        # y toma el control del hilo principal para la interacción del usuario.
+        menu_module.clear_screen()
+        print("=============================================================")
+        print("  EL BOT ESTÁ OPERATIVO Y PROCESANDO DATOS DE MERCADO".center(60))
+        print("  Entrando en el Asistente de Trading Interactivo...".center(60))
+        print("=============================================================")
+        time.sleep(2)
 
-        print("\n" + "="*50)
-        print("EL BOT ESTÁ OPERATIVO Y PROCESANDO DATOS DE MERCADO".center(50))
-        print("Iniciado en modo NEUTRAL.".center(50))
-        print("Entrando en el Asistente de Trading Interactivo...".center(50))
-        print("Presiona Ctrl+C en cualquier momento para detener el bot.".center(50))
-        print("="*50)
+        # Ceder el control al bucle de la TUI. Esta función es bloqueante.
+        menu_module.run_tui_menu_loop()
 
-        # Ceder el control al bucle de la CLI. Esta función es bloqueante.
-        menu_module.run_cli_menu_loop()
-
-        # Si el usuario sale del bucle con 'exit', el programa continuará hasta ser detenido por Ctrl+C.
+        # Si el usuario sale del bucle del menú...
+        # <<< INICIO DE LA CORRECCIÓN >>>
+        menu_module.clear_screen()
+        # <<< FIN DE LA CORRECCIÓN >>>
         print("\n[Live Runner] Saliendo del menú interactivo. El bot seguirá corriendo en segundo plano.")
         print("Presiona Ctrl+C para detener completamente el bot.")
         while True:
-            # Mantener el hilo principal vivo para que los hilos de fondo (ticker) sigan funcionando.
-            time.sleep(3600)
+            time.sleep(3600) # Mantener el hilo principal vivo
 
     except (KeyboardInterrupt, SystemExit):
-        print("\n[Live Runner] Interrupción detectada. Iniciando secuencia de apagado...")
+        print("\n\n[Live Runner] Interrupción detectada. Iniciando secuencia de apagado...")
     except RuntimeError as e:
         print(f"\nERROR CRÍTICO EN TIEMPO DE EJECUCIÓN: {e}")
         traceback.print_exc()
@@ -133,12 +127,6 @@ def run_live_interactive_mode(
     finally:
         # --- 5. Secuencia de Apagado Limpio ---
         print("\n--- Limpieza Final del Live Runner ---")
-        
-        # Ya no hay un hilo listener de teclas que detener.
-        # stop_event = live_interactive_helpers.get_stop_key_listener_event()
-        # stop_event.set()
-        # if key_listener_hilo and key_listener_hilo.is_alive():
-        #     key_listener_hilo.join(timeout=1.0)
         
         if bot_started and connection_ticker_module and connection_ticker_module._ticker_thread.is_alive():
             print("Deteniendo el Ticker de precios...")

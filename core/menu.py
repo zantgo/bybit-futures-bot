@@ -1,151 +1,205 @@
-# =============== INICIO ARCHIVO: core/menu.py (CORREGIDO Y COMPLETO) ===============
+# =============== INICIO ARCHIVO: core/menu.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
 """
-Módulo para gestionar la interfaz de línea de comandos (CLI) completa del bot.
-Utiliza `click` para crear un Asistente de Trading Interactivo y profesional.
+Módulo para gestionar la Interfaz de Usuario de Terminal (TUI) del bot.
+Utiliza `simple-term-menu` para crear una experiencia de usuario guiada e
+intuitiva, similar a los instaladores de sistemas operativos.
 """
-import click
+import os
 import time
 import datetime
+import click  # Se mantiene para el lanzador principal de main.py
 from typing import Dict, Any, Optional, Tuple
 
-# --- Dependencias del Proyecto ---
-# Se importan de forma segura para evitar fallos si el módulo se usa aisladamente.
+try:
+    from simple_term_menu import TerminalMenu
+except ImportError:
+    print("ERROR CRITICO: La librería 'simple-term-menu' no está instalada.")
+    print("Por favor, ejecute: pip install simple-term-menu")
+    TerminalMenu = None
+
+# Dependencias del Proyecto
 try:
     from core.strategy import pm_facade as position_manager
     from core import utils
     import config
 except ImportError:
-    # Definir stubs si las importaciones fallan, para que el módulo al menos se cargue.
-    position_manager = type('obj', (object,), {
-        'get_position_summary': lambda: {"error": "PM no importado"},
-        'get_current_price_for_exit': lambda: 0.0,
-        'get_unrealized_pnl': lambda p: 0.0,
-        'pm_state': type('obj', (object,), {
-            'get_individual_stop_loss_pct': lambda: 0.0,
-            'get_trailing_stop_params': lambda: {'activation': 0.0, 'distance': 0.0},
-            'get_global_tp_pct': lambda: 0.0
-        })(),
-        'get_global_sl_pct': lambda: 0.0,
-        'get_session_time_limit': lambda: {'duration': 0, 'action': 'N/A'},
-        'display_logical_positions': lambda: click.echo("  (PM no importado)")
-    })()
-    utils = None
-    config = None
+    position_manager, utils, config = None, None, None
 
-# --- Funciones de Ayuda para Formato ---
+# --- Funciones de Ayuda para Formato y TUI ---
+def clear_screen():
+    """Limpia la pantalla de la terminal."""
+    os.system('cls' if os.name == 'nt' else 'clear')
 
-def print_header(title: str, width: int = 85):
-    """Imprime una cabecera estilizada y consistente."""
-    click.echo("\n" + "=" * width)
-    click.secho(f"{title.center(width)}", fg='cyan', bold=True)
+def get_input(prompt: str, type_func=str, default=None):
+    """Función robusta para obtener entrada del usuario con validación de tipo."""
+    while True:
+        try:
+            val_str = input(f"{prompt} [{default}]: ")
+            if not val_str and default is not None:
+                return default
+            val = type_func(val_str)
+            # Validaciones adicionales
+            if type_func == float and val < 0:
+                print("El valor no puede ser negativo.")
+                continue
+            if type_func == int and val < 0:
+                print("El valor no puede ser negativo.")
+                continue
+            return val
+        except (ValueError, TypeError):
+            print(f"Entrada inválida. Por favor, introduce un valor de tipo '{type_func.__name__}'.")
+
+def print_tui_header(title: str, width: int = 80):
+    """Imprime una cabecera estilizada para la TUI."""
+    print("=" * width)
+    print(f"{title.center(width)}")
     if utils and hasattr(utils, 'format_datetime'):
         now_str = utils.format_datetime(datetime.datetime.now())
-        click.secho(f"{now_str.center(width)}", fg='white')
-    click.echo("=" * width)
-
-def print_status_section(title: str, data: Dict[str, Any], color: str = 'yellow'):
-    """Imprime una sección formateada del reporte de estado."""
-    click.secho(f"\n--- {title} ---", fg=color, bold=True)
-    if not data:
-        click.echo("  (No hay datos disponibles)")
-        return
-    max_key_len = max(len(str(key)) for key in data.keys()) if data else 20
-    for key, value in data.items():
-        click.echo(f"  {str(key):<{max_key_len + 2}}: {value}")
+        print(f"{now_str.center(width)}")
+    print("=" * width)
 
 # ---
-# --- Asistente de Inicio / Wizard para el Modo Live (REEMPLAZA MENÚS PRE-INICIO)
+# --- Asistente de Inicio / Wizard para el Modo Live ---
 # ---
-
-def run_trading_assistant_wizard() -> Tuple[Optional[float], Optional[int]]:
+def run_trading_assistant_wizard() -> Optional[Tuple[float, int]]:
     """Guía al usuario a través de la configuración inicial antes de lanzar el bot."""
-    print_header("Asistente de Configuración - Modo Live Interactivo")
-    click.secho("¡Bienvenido! Este asistente te guiará para configurar tu sesión de trading.", fg='green')
+    if not TerminalMenu: return None, None
+
+    clear_screen()
+    print_tui_header("Asistente de Configuración - Modo Live Interactivo")
+    print("\n¡Bienvenido! Este asistente te guiará para configurar tu sesión de trading.")
+    input("\nPresiona Enter para comenzar...")
 
     # 1. Configurar Símbolo
-    click.secho("\nPASO 1: SÍMBOLO DEL TICKER", bold=True)
-    click.echo("Este es el par de trading que el bot monitoreará (ej: BTCUSDT, ETHUSDT).")
+    clear_screen()
+    print_tui_header("PASO 1 de 2: SÍMBOLO DEL TICKER")
+    print("\nEste es el par de trading que el bot monitoreará (ej: BTCUSDT, ETHUSDT).")
     default_symbol = getattr(config, 'TICKER_SYMBOL', 'BTCUSDT')
-    symbol = click.prompt("Introduce el símbolo del ticker", default=default_symbol).upper()
+    symbol = get_input(f"\nIntroduce el símbolo del ticker", str, default_symbol).upper()
     setattr(config, 'TICKER_SYMBOL', symbol)
-    click.secho(f"Símbolo establecido en: {symbol}\n", fg='green')
-    time.sleep(1)
+    print(f"\n✅ Símbolo establecido en: {symbol}")
+    time.sleep(1.5)
 
     # 2. Configurar Capital
-    print_header("Configuración de Capital para la Sesión")
-    click.secho("PASO 2: GESTIÓN DE CAPITAL", bold=True)
-    click.echo("Define cuánto capital arriesgar por cada posición y cuántas posiciones simultáneas permitir.")
-    
+    clear_screen()
+    print_tui_header("PASO 2 de 2: GESTIÓN DE CAPITAL")
+    print("\nDefine cuánto capital arriesgar y cuántas posiciones simultáneas permitir.")
     default_base_size = float(getattr(config, 'POSITION_BASE_SIZE_USDT', 10.0))
-    base_size = click.prompt(
-        "Tamaño base por posición (USDT)", 
-        type=float, 
-        default=default_base_size
-    )
+    base_size = get_input("\nTamaño base por posición (USDT)", float, default_base_size)
     
     default_slots = int(getattr(config, 'POSITION_MAX_LOGICAL_POSITIONS', 1))
-    slots = click.prompt(
-        "Número máximo de posiciones (slots) por lado (long/short)",
-        type=click.IntRange(1, 100),
-        default=default_slots
-    )
-    click.secho(f"Configuración de capital: {slots} posiciones de ~{base_size:.2f} USDT cada una.\n", fg='green')
-    time.sleep(1)
+    slots = get_input("Número máximo de posiciones (slots) por lado", int, default_slots)
+    print(f"\n✅ Configuración de capital: {slots} posiciones de ~{base_size:.2f} USDT cada una.")
+    time.sleep(1.5)
 
     # 3. Confirmación Final
-    print_header("Confirmación Final")
-    click.secho("Revisa la configuración de tu sesión:", bold=True)
-    click.echo(f"  - Símbolo:      {symbol}")
-    click.echo(f"  - Tamaño Base:  {base_size:.2f} USDT")
-    click.echo(f"  - Slots/Lado:   {slots}")
-    click.echo(f"  - Apalancamiento: {getattr(config, 'POSITION_LEVERAGE', 1.0)}x")
+    clear_screen()
+    print_tui_header("CONFIRMACIÓN FINAL")
+    print("\nRevisa la configuración de tu sesión:")
+    print(f"  - Símbolo:        {symbol}")
+    print(f"  - Tamaño Base:    {base_size:.2f} USDT")
+    print(f"  - Slots por Lado: {slots}")
+    print(f"  - Apalancamiento: {getattr(config, 'POSITION_LEVERAGE', 1.0)}x\n")
     
-    if not click.confirm("\n¿Es correcta esta configuración para iniciar el bot?", default=True):
-        click.secho("Inicio cancelado por el usuario.", fg='red')
+    confirm_menu = TerminalMenu(
+        ["[1] Iniciar Bot con esta Configuración", "[2] Cancelar y Salir"],
+        title="¿Es correcta esta configuración?",
+        menu_cursor_style=("fg_cyan", "bold"),
+        menu_highlight_style=("bg_cyan", "fg_black"),
+    )
+    choice_index = confirm_menu.show()
+
+    if choice_index == 0:
+        return base_size, slots
+    else:
+        clear_screen()
+        print("Inicio cancelado por el usuario.")
+        time.sleep(2)
         return None, None
 
-    return base_size, slots
-
 # ---
-# --- CLI de Intervención en Vivo (NUEVA VERSIÓN MEJORADA)
+# --- Menú de Intervención en Vivo (TUI) ---
 # ---
-@click.group(name="cli", invoke_without_command=True, chain=True)
-@click.pass_context
-def intervention_cli(ctx):
-    """Grupo de comandos para la intervención manual en el modo Live."""
-    if ctx.invoked_subcommand is None:
-        print_header("Asistente de Trading Interactivo")
-        click.echo("El bot está operando. Usa los siguientes comandos para gestionar la sesión:")
-        click.secho("\nESTADO Y CONTROL:", bold=True)
-        click.echo("  status              Muestra el estado completo de la sesión.")
-        click.echo("  set-mode            Cambia el modo de trading (long, short, neutral...).")
-        
-        click.secho("\nGESTIÓN DE RIESGO:", bold=True)
-        click.echo("  set-risk            Ajusta los parámetros de Stop Loss y Trailing Stop.")
-        click.echo("  set-limits          Ajusta los límites globales de ROI y Tiempo de la sesión.")
-        
-        click.secho("\nGESTIÓN DE CAPITAL:", bold=True)
-        click.echo("  set-capital         Ajusta el tamaño de posición y el número de slots.")
-        
-        click.secho("\nOPERACIONES:", bold=True)
-        click.echo("  close               Cierra una posición específica por índice.")
-        click.echo("  close-all           Cierra todas las posiciones de un lado (long/short).")
+def run_tui_menu_loop():
+    """Ejecuta el bucle del menú interactivo de intervención en vivo."""
+    if not TerminalMenu: return
 
-        click.secho("\nASISTENTES:", bold=True)
-        click.echo("  trail-roi           Inicia el asistente para ajustar el TP Global como un Trailing Stop.")
-        
-        click.secho("\nSISTEMA:", bold=True)
-        click.echo("  exit                Sale del menú y continúa la operación del bot.")
-        
-        click.echo("\nUsa '[comando] --help' para ver más detalles.")
+    while True:
+        summary = position_manager.get_position_summary()
+        manual_state = summary.get('manual_mode_status', {})
+        current_mode_str = f"Modo Actual: {manual_state.get('mode', 'N/A')}"
+        open_longs = summary.get('open_long_positions_count', 0)
+        open_shorts = summary.get('open_short_positions_count', 0)
+        status_line = f"Posiciones Abiertas -> LONG: {open_longs} | SHORT: {open_shorts}"
 
-@intervention_cli.command(name="status")
-def show_status():
-    """Muestra el estado detallado de la sesión y las posiciones."""
-    print_header("Estado Actual de la Sesión")
+        main_menu_items = [
+            " [s] Ver Estado Detallado de la Sesión",
+            " [m] Cambiar Modo de Trading",
+            " [r] Ajustar Parámetros de Riesgo",
+            " [c] Ajustar Capital (Slots / Tamaño)",
+            " [p] Gestionar Posiciones Abiertas",
+            None,
+            " [q] Salir del Menú (el bot sigue corriendo)"
+        ]
+        
+        terminal_menu = TerminalMenu(
+            main_menu_items,
+            title=f"Asistente de Trading Interactivo\n{current_mode_str}\n{status_line}",
+            menu_cursor="> ",
+            menu_cursor_style=("fg_yellow", "bold"),
+            menu_highlight_style=("bg_yellow", "fg_black"),
+            cycle_cursor=True,
+            clear_screen=True,
+        )
+        selected_index = terminal_menu.show()
+        
+        if selected_index is None or main_menu_items[selected_index].strip().startswith("[q]"):
+            break
+        
+        action = main_menu_items[selected_index].strip().split("]")[0][1:]
+        if action == "s": show_status_screen()
+        elif action == "m": show_mode_menu()
+        elif action == "r": show_risk_menu()
+        elif action == "c": show_capital_menu()
+        elif action == "p": show_positions_menu()
+
+def show_status_screen():
+    clear_screen()
+    print_tui_header("Estado Actual de la Sesión")
     summary = position_manager.get_position_summary()
     if not summary or summary.get('error'):
-        click.secho(f"Error al obtener estado: {summary.get('error', 'Desconocido')}", fg='red'); return
+        print(f"Error al obtener estado: {summary.get('error', 'Desconocido')}")
+        input("\nPresiona Enter para volver...")
+        return
+
+    # <<< INICIO DE LA CORRECCIÓN >>>
+    def print_section(title, data, is_account_balance=False):
+        print(f"\n--- {title} ---")
+        if not data:
+            print("  (No hay datos disponibles)")
+            return
+        
+        if is_account_balance:
+            for acc_name, balance_info in data.items():
+                if balance_info:
+                    equity = float(balance_info.get('totalEquity', 0))
+                    margin = float(balance_info.get('totalMarginBalance', 0)) # Capital en uso
+                    available = float(balance_info.get('totalAvailableBalance', 0)) # Capital disponible
+                    print(f"  Cuenta: {acc_name}")
+                    print(f"    - Equity Total:     {equity:.2f} USDT")
+                    print(f"    - Capital en Uso:   {margin:.2f} USDT")
+                    print(f"    - Capital Disponible: {available:.2f} USDT")
+                else:
+                    print(f"  Cuenta: {acc_name} (No se pudieron obtener datos)")
+        else:
+            max_key_len = max(len(k) for k in data.keys()) if data else 0
+            for key, value in data.items():
+                print(f"  {key:<{max_key_len + 2}}: {value}")
+
+    real_account_balances = summary.get('real_account_balances', {})
+    if real_account_balances:
+        print_section("Balances Reales de Cuentas (UTA)", real_account_balances, is_account_balance=True)
+    # <<< FIN DE LA CORRECCIÓN >>>
 
     manual_state = summary.get('manual_mode_status', {})
     limit_str = manual_state.get('limit') or 'Ilimitados'
@@ -156,186 +210,157 @@ def show_status():
     initial_capital = summary.get('initial_total_capital', 0.0)
     current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
 
-    session_status = {
-        "Modo Manual Actual": f"{manual_state.get('mode', 'N/A')} (Trades: {manual_state.get('executed', 0)}/{limit_str})",
+    print_section("Estado de la Sesión (Bot)", {
+        "Modo Manual Actual": f"{manual_state.get('mode', 'N/A')} ({manual_state.get('executed', 0)}/{limit_str})",
         "Precio Actual de Mercado": f"{current_price:.4f} USDT",
-    }
-    capital_status = {
-        "Tamaño Base (USDT)": f"{summary.get('initial_base_position_size_usdt', 0.0):.4f}",
-        "Slots Máximos / Lado": summary.get('max_logical_positions', 0),
-        "Apalancamiento": f"{summary.get('leverage', 0.0):.1f}x",
-    }
-    balances = summary.get('bm_balances', {})
-    perf_status = {
-        "Capital Inicial Total": f"{initial_capital:.2f} USDT",
+    })
+    print_section("Rendimiento Lógico (Sesión)", {
+        "Capital Lógico Inicial": f"{initial_capital:.2f} USDT",
         "PNL Realizado (Sesión)": f"{summary.get('total_realized_pnl_session', 0.0):+.4f} USDT",
         "PNL No Realizado (Actual)": f"{unrealized_pnl:+.4f} USDT",
         "PNL Total (Estimado)": f"{total_pnl:+.4f} USDT",
         "ROI Actual (Estimado)": f"{current_roi:+.2f}%",
-        "Balance Profit Acumulado": f"{balances.get('profit_balance', 0.0):.4f} USDT",
-    }
-    risk_status = {
+    })
+    print_section("Parámetros de Riesgo Actuales", {
         "Stop Loss Individual": f"{position_manager.pm_state.get_individual_stop_loss_pct() or 0.0:.2f}%",
-        "Trailing Stop Activación": f"{position_manager.pm_state.get_trailing_stop_params()['activation']:.2f}%",
-        "Trailing Stop Distancia": f"{position_manager.pm_state.get_trailing_stop_params()['distance']:.2f}%",
-        "SL Global (ROI)": f"-{position_manager.get_global_sl_pct() or 0.0:.2f}%",
-        "TP Global (ROI)": f"+{position_manager.pm_state.get_global_tp_pct() or 0.0:.2f}%",
-        "Límite de Tiempo": f"{position_manager.get_session_time_limit()['duration']} min (Acción: {position_manager.get_session_time_limit()['action']})",
-    }
-
-    print_status_section("Estado de la Sesión", session_status, color='cyan')
-    print_status_section("Configuración de Capital", capital_status, color='yellow')
-    print_status_section("Rendimiento y Balances", perf_status, color='green')
-    print_status_section("Parámetros de Riesgo Actuales", risk_status, color='magenta')
-
-    click.secho("\n--- Posiciones Lógicas Abiertas ---", fg='white', bold=True)
-    position_manager.display_logical_positions()
-
-@intervention_cli.command(name="set-mode")
-@click.option('--mode', type=click.Choice(['neutral', 'long_only', 'short_only', 'long_short'], case_sensitive=False), required=True)
-@click.option('--trades', type=int, default=0, help="Límite de trades (0 para ilimitado).")
-@click.option('--close-open', is_flag=True, help="Forzar cierre de posiciones del lado desactivado.")
-def set_mode(mode, trades, close_open):
-    """Cambia el modo de trading y opcionalmente el límite de trades."""
-    if close_open:
-        click.confirm(f"ADVERTENCIA: ¿Seguro que quieres cerrar posiciones abiertas al cambiar de modo?", abort=True)
-    success, message = position_manager.set_manual_trading_mode(mode.upper(), trades, close_open)
-    click.secho(message, fg='green' if success else 'red')
-
-@intervention_cli.command(name="set-capital")
-@click.option('--size', type=float, help="Nuevo tamaño base por posición en USDT.")
-@click.option('--slots', type=int, help="Nuevo número máximo de slots por lado.")
-def set_capital(size, slots):
-    """Ajusta el tamaño base de la posición y/o el número de slots."""
-    if not size and not slots:
-        click.echo("Debes proporcionar --size o --slots."); return
-    if size:
-        success, msg = position_manager.set_base_position_size(size)
-        click.secho(f"-> Tamaño Base: {msg}", fg='green' if success else 'red')
-    if slots:
-        current_slots = position_manager.get_position_summary().get('max_logical_positions', 0)
-        if slots > current_slots:
-            for _ in range(slots - current_slots): success, msg = position_manager.add_max_logical_position_slot()
-        elif slots < current_slots:
-            for _ in range(current_slots - slots): success, msg = position_manager.remove_max_logical_position_slot()
-        click.secho(f"-> Slots: {msg}", fg='green' if success else 'red')
-
-@intervention_cli.command(name="set-risk")
-@click.option('--sl-ind', type=float, help="Stop Loss Individual por posición en % (ej: 2.5).")
-@click.option('--ts-act', type=float, help="Activación del Trailing Stop en % (ej: 0.5).")
-@click.option('--ts-dist', type=float, help="Distancia del Trailing Stop en % (ej: 0.15).")
-def set_risk(sl_ind, ts_act, ts_dist):
-    """Ajusta los parámetros de riesgo por posición (SL y TS)."""
-    if all(arg is None for arg in [sl_ind, ts_act, ts_dist]):
-        click.echo("Debes proporcionar al menos una opción."); return
-    if sl_ind is not None:
-        success, msg = position_manager.set_individual_stop_loss_pct(sl_ind)
-        click.secho(f"-> SL Individual: {msg}", fg='green' if success else 'red')
-    if ts_act is not None or ts_dist is not None:
-        params = position_manager.pm_state.get_trailing_stop_params()
-        new_act = ts_act if ts_act is not None else params['activation']
-        new_dist = ts_dist if ts_dist is not None else params['distance']
-        success, msg = position_manager.set_trailing_stop_params(new_act, new_dist)
-        click.secho(f"-> Trailing Stop: {msg}", fg='green' if success else 'red')
-
-@intervention_cli.command(name="set-limits")
-@click.option('--sl-roi', type=float, help="Stop Loss Global por ROI % (ej: 2.5 para -2.5%). 0 para desactivar.")
-@click.option('--tp-roi', type=float, help="Take Profit Global por ROI % (ej: 5 para +5%). 0 para desactivar.")
-@click.option('--time-limit', type=int, help="Límite de tiempo de sesión en minutos. 0 para desactivar.")
-def set_limits(sl_roi, tp_roi, time_limit):
-    """Ajusta los límites globales de la sesión (ROI y Tiempo)."""
-    if all(arg is None for arg in [sl_roi, tp_roi, time_limit]):
-        click.echo("Debes proporcionar al menos una opción."); return
-    if sl_roi is not None:
-        success, msg = position_manager.set_global_stop_loss_pct(abs(sl_roi))
-        click.secho(f"-> Límite SL por ROI: {msg}", fg='green' if success else 'red')
-    if tp_roi is not None:
-        success, msg = position_manager.set_global_take_profit_pct(abs(tp_roi))
-        click.secho(f"-> Límite TP por ROI: {msg}", fg='green' if success else 'red')
-    if time_limit is not None:
-        action = "STOP" if time_limit > 0 and click.confirm("¿La acción al alcanzar el tiempo debe ser una parada de emergencia (STOP)?", default=False) else "NEUTRAL"
-        success, msg = position_manager.set_session_time_limit(time_limit, action)
-        click.secho(f"-> Límite por Tiempo: {msg}", fg='green' if success else 'red')
-
-@intervention_cli.command(name="close")
-@click.option('--side', type=click.Choice(['long', 'short']), required=True)
-@click.option('--index', type=int, required=True, help="Índice de la posición a cerrar (ver 'status').")
-def close_position(side, index):
-    """Cierra una posición lógica específica por su índice."""
-    click.confirm(f"¿Seguro que quieres cerrar la posición {side.upper()} en el índice {index}?", abort=True)
-    success, msg = position_manager.manual_close_logical_position_by_index(side, index)
-    click.secho(msg, fg='green' if success else 'red')
-
-@intervention_cli.command(name="close-all")
-@click.option('--side', type=click.Choice(['long', 'short']), required=True)
-def close_all_positions(side):
-    """Cierra TODAS las posiciones lógicas abiertas de un lado."""
-    count = position_manager.get_position_summary().get(f'open_{side}_positions_count', 0)
-    if count == 0:
-        click.echo(f"No hay posiciones {side.upper()} abiertas."); return
-    click.confirm(f"ADVERTENCIA: ¿Seguro que quieres cerrar {count} posición(es) {side.upper()}?", abort=True)
-    success = position_manager.close_all_logical_positions(side, reason="MANUAL_ALL")
-    click.secho(f"Órdenes de cierre enviadas.", fg='green' if success else 'red')
-
-@intervention_cli.command(name="trail-roi")
-def trail_roi_assistant():
-    """Asistente interactivo para ajustar el TP Global basado en el ROI actual."""
-    print_header("Asistente de Trailing ROI Global")
-    click.secho("Este modo te permite ajustar el Take Profit Global de la sesión dinámicamente.", fg='yellow')
-    click.secho("Presiona Enter para actualizar, escribe un nuevo % de TP para ajustarlo, o 'exit' para salir.", fg='yellow')
+        "Trailing Stop": f"Act: {position_manager.pm_state.get_trailing_stop_params()['activation']:.2f}% / Dist: {position_manager.pm_state.get_trailing_stop_params()['distance']:.2f}%",
+    })
     
+    print("\n--- Posiciones Lógicas Abiertas ---")
+    position_manager.display_logical_positions()
+    
+    input("\nPresiona Enter para volver al menú principal...")
+
+def show_mode_menu():
+    menu_items = ["[1] LONG_SHORT (Operar en ambos lados)", "[2] LONG_ONLY (Solo compras)", "[3] SHORT_ONLY (Solo ventas)", "[4] NEUTRAL (Detener nuevas entradas)", None, "[b] Volver al menú principal"]
+    terminal_menu = TerminalMenu(menu_items, title="Selecciona el nuevo modo de trading", clear_screen=True)
+    choice_index = terminal_menu.show()
+
+    if choice_index is not None and choice_index < 4:
+        modes = ["LONG_SHORT", "LONG_ONLY", "SHORT_ONLY", "NEUTRAL"]
+        new_mode = modes[choice_index]
+        
+        confirm_menu = TerminalMenu(["[s] Sí", "[n] No"], title=f"¿Deseas cerrar posiciones existentes que no coincidan con el modo '{new_mode}'?", clear_screen=True)
+        close_choice = confirm_menu.show()
+        close_open = (close_choice == 0)
+
+        success, message = position_manager.set_manual_trading_mode(new_mode, close_open=close_open)
+        print(f"\n{message}")
+        time.sleep(2)
+
+def show_risk_menu():
+    while True:
+        sl_ind = position_manager.pm_state.get_individual_stop_loss_pct()
+        ts_params = position_manager.pm_state.get_trailing_stop_params()
+        
+        menu_items = [
+            f"[1] Ajustar Stop Loss Individual (Actual: {sl_ind:.2f}%)",
+            f"[2] Ajustar Trailing Stop (Actual: Act {ts_params['activation']:.2f}% / Dist {ts_params['distance']:.2f}%)",
+            None,
+            "[b] Volver al menú principal"
+        ]
+        terminal_menu = TerminalMenu(menu_items, title="Ajustar Parámetros de Riesgo", clear_screen=True, cycle_cursor=True)
+        choice_index = terminal_menu.show()
+        
+        if choice_index == 0:
+            new_sl = get_input("\nNuevo % de Stop Loss Individual (para nuevas posiciones)", float, sl_ind)
+            success, msg = position_manager.set_individual_stop_loss_pct(new_sl)
+            print(f"\n{msg}"); time.sleep(1.5)
+        elif choice_index == 1:
+            print("\n--- Ajustar Trailing Stop (para todas las posiciones) ---")
+            new_act = get_input("Nuevo % de Activación", float, ts_params['activation'])
+            new_dist = get_input("Nuevo % de Distancia", float, ts_params['distance'])
+            success, msg = position_manager.set_trailing_stop_params(new_act, new_dist)
+            print(f"\n{msg}"); time.sleep(1.5)
+        else:
+            break
+
+def show_capital_menu():
     while True:
         summary = position_manager.get_position_summary()
-        current_price = position_manager.get_current_price_for_exit() or 0.0
-        unrealized_pnl = position_manager.get_unrealized_pnl(current_price)
-        realized_pnl = summary.get('total_realized_pnl_session', 0.0)
-        initial_capital = summary.get('initial_total_capital', 0.0)
-        current_roi = ((realized_pnl + unrealized_pnl) / initial_capital) * 100 if initial_capital > 0 else 0.0
-        current_tp_roi = position_manager.pm_state.get_global_tp_pct() or 0.0
-        
-        click.echo("\n" + "-"*50)
-        click.echo(f" PNL Realizado: {realized_pnl:+.4f} | PNL No Realizado: {unrealized_pnl:+.4f}")
-        click.secho(f" ROI Actual (Estimado): {current_roi:+.2f}%", bold=True, fg='cyan')
-        click.secho(f" TP Global Configurado: +{current_tp_roi:.2f}%", fg='yellow')
-        click.echo("-"*50)
+        slots = summary.get('max_logical_positions', 0)
+        base_size = summary.get('initial_base_position_size_usdt', 0.0)
 
-        user_input = click.prompt("Nuevo TP % (o Enter para refrescar, 'exit' para salir)", default="", show_default=False)
+        menu_items = [
+            f"[1] Ajustar Slots por Lado (Actual: {slots})",
+            f"[2] Ajustar Tamaño Base de Posición (Actual: {base_size:.2f} USDT)",
+            None,
+            "[b] Volver al menú principal"
+        ]
+        terminal_menu = TerminalMenu(menu_items, title="Ajustar Parámetros de Capital", clear_screen=True, cycle_cursor=True)
+        choice_index = terminal_menu.show()
 
-        if user_input.lower().strip() in ['exit', 'quit', 'q']:
+        if choice_index == 0:
+            new_slots = get_input("\nNuevo número de slots por lado", int, slots)
+            if new_slots > slots:
+                for _ in range(new_slots - slots): success, msg = position_manager.add_max_logical_position_slot()
+            elif new_slots < slots:
+                for _ in range(slots - new_slots): success, msg = position_manager.remove_max_logical_position_slot()
+            else:
+                success, msg = True, "El número de slots no ha cambiado."
+            print(f"\n{msg}"); time.sleep(1.5)
+        elif choice_index == 1:
+            new_size = get_input("\nNuevo tamaño base por posición (USDT)", float, base_size)
+            success, msg = position_manager.set_base_position_size(new_size)
+            print(f"\n{msg}"); time.sleep(1.5)
+        else:
             break
-        if user_input == "":
-            continue
-        try:
-            new_tp = float(user_input)
-            if new_tp < 0:
-                click.secho("El TP debe ser un número positivo.", fg='red'); continue
-            success, msg = position_manager.set_global_take_profit_pct(new_tp)
-            click.secho(msg, fg='green' if success else 'red')
-        except ValueError:
-            click.secho("Entrada inválida. Por favor, introduce un número o 'exit'.", fg='red')
 
-def run_cli_menu_loop():
-    """Ejecuta el bucle del menú interactivo de intervención."""
-    ctx = click.Context(intervention_cli, info_name='cli')
-    intervention_cli.invoke(ctx) # Muestra la ayuda la primera vez
+def _manage_side_positions(side: str):
     while True:
-        try:
-            command_str = input("\n(asistente) > ")
-            if command_str.lower().strip() in ['exit', 'quit', 'q', '0']:
-                break
-            if not command_str.strip():
-                continue
-            # Corregir la llamada para que el nombre del programa no aparezca en errores
-            args = command_str.split()
-            intervention_cli(args, standalone_mode=False, prog_name="")
-        except click.exceptions.UsageError as e:
-            click.secho(f"Error de uso: {e.message}", fg='red')
-        except click.exceptions.Abort:
-            click.secho("Operación cancelada.", fg='yellow')
-        except Exception as e:
-            click.secho(f"Error inesperado en el menú: {e}", fg='red')
+        summary = position_manager.get_position_summary()
+        if not summary or summary.get('error'):
+            print("Error obteniendo resumen de posiciones."); time.sleep(1.5)
+            return
 
-# --- Grupo principal de comandos para `main.py` (Mantenido para compatibilidad) ---
+        open_positions = summary.get(f'open_{side}_positions', [])
+        current_price = position_manager.get_current_price_for_exit() or 0.0
+        
+        if not open_positions:
+            print(f"\nNo hay posiciones {side.upper()} abiertas."); time.sleep(1.5)
+            return
+
+        # Calcular PNL No Realizado para cada posición
+        for pos in open_positions:
+            pnl = (current_price - pos['entry_price']) * pos['size_contracts'] if side == 'long' else (pos['entry_price'] - current_price) * pos['size_contracts']
+            pos['unrealized_pnl'] = pnl
+
+        menu_items = [f"[Idx {i}] Px: {p['entry_price']:.2f}, Qty: {p['size_contracts']:.4f}, PNL: {p.get('unrealized_pnl', 0):+.2f}" for i, p in enumerate(open_positions)]
+        menu_items.append(None)
+        menu_items.append(f"[TODAS] Cerrar TODAS las {len(open_positions)} posiciones {side.upper()}")
+        menu_items.append("[b] Volver")
+
+        terminal_menu = TerminalMenu(menu_items, title=f"Gestionar Posiciones {side.upper()}", clear_screen=True, cycle_cursor=True)
+        choice_index = terminal_menu.show()
+
+        if choice_index is None or choice_index >= len(menu_items) -1:
+             break
+        elif choice_index == len(menu_items) - 2:
+            confirm_menu = TerminalMenu(["[s] Sí, cerrar todas", "[n] No, cancelar"], title=f"¿Estás seguro de cerrar TODAS las posiciones {side.upper()}?", clear_screen=True)
+            if confirm_menu.show() == 0:
+                position_manager.close_all_logical_positions(side)
+                print(f"Enviando órdenes para cerrar todas las posiciones {side.upper()}..."); time.sleep(2)
+                break 
+        else:
+            success, msg = position_manager.manual_close_logical_position_by_index(side, choice_index)
+            print(f"\n{msg}"); time.sleep(2)
+
+def show_positions_menu():
+    while True:
+        menu_items = ["[1] Gestionar posiciones LONG", "[2] Gestionar posiciones SHORT", None, "[b] Volver al menú principal"]
+        terminal_menu = TerminalMenu(menu_items, title="Selecciona qué lado gestionar", clear_screen=True, cycle_cursor=True)
+        choice_index = terminal_menu.show()
+        
+        if choice_index == 0:
+            _manage_side_positions('long')
+        elif choice_index == 1:
+            _manage_side_positions('short')
+        else:
+            break
+
+# ---
+# --- Grupo principal de comandos para `main.py` ---
+# ---
 @click.group(name="main_cli")
 def main_cli():
     """Punto de entrada principal del Bot de Trading. Selecciona un modo para empezar."""
@@ -343,94 +368,22 @@ def main_cli():
 
 @main_cli.command(name="live")
 def run_live_interactive_command():
-    """Inicia el bot en modo Live Interactivo con el Asistente de Trading."""
     from main import run_selected_mode
     run_selected_mode("live_interactive")
 
 @main_cli.command(name="backtest")
 def run_backtest_interactive_command():
-    """Inicia el bot en modo Backtest Interactivo."""
     from main import run_selected_mode
     run_selected_mode("backtest_interactive")
 
 @main_cli.command(name="auto")
 def run_automatic_live_command():
-    """Inicia el bot en modo Automático (Live)."""
     from main import run_selected_mode
     run_selected_mode("automatic")
 
 @main_cli.command(name="backtest-auto")
 def run_automatic_backtest_command():
-    """Inicia el bot en modo Backtest Automático."""
     from main import run_selected_mode
     run_selected_mode("automatic_backtest")
-
-
-# --- CÓDIGO OBSOLETO COMENTADO (Para referencia) ---
-# Las siguientes funciones han sido reemplazadas por el `run_trading_assistant_wizard`
-# y el nuevo bucle de la CLI, pero se mantienen aquí comentadas por si se necesitaran
-# en otros contextos o para consulta histórica.
-"""
-def get_live_main_menu_choice() -> str:
-    # OBSOLETO: Reemplazado por el flujo del Asistente de Trading.
-    print_header("Modo Live - Menú Pre-Inicio")
-    click.echo("Seleccione una acción:\n")
-    click.echo("  1. Ver Estado Detallado de Cuentas (API)")
-    click.echo("  2. Iniciar el Bot (Modo Interactivo)")
-    click.echo("  3. Probar Ciclo Completo (Apertura/Cierre)")
-    click.echo("  4. Ver Tabla de Posiciones Lógicas (Si hay alguna)")
-    click.echo("-" * 85)
-    click.echo("  0. Salir del Modo Live")
-    click.echo("=" * 85)
-    return click.prompt("Seleccione una opción", type=str, default="2")
-
-def get_position_setup_interactively() -> Tuple[Optional[float], Optional[int]]:
-    # OBSOLETO: Reemplazado por `run_trading_assistant_wizard`.
-    print_header("Configuración de Capital para la Sesión")
-    base_size_usdt: Optional[float] = None
-    initial_slots: Optional[int] = None
-    default_base_size = float(getattr(config, 'POSITION_BASE_SIZE_USDT', 10.0))
-    default_slots = int(getattr(config, 'POSITION_MAX_LOGICAL_POSITIONS', 1))
-
-    base_size_usdt = click.prompt(
-        "Tamaño base por posición (USDT)", 
-        type=float, 
-        default=default_base_size
-    )
-    if base_size_usdt <= 0:
-        click.secho("Configuración cancelada.", fg='yellow')
-        return None, None
-        
-    initial_slots = click.prompt(
-        "Número inicial de slots por lado",
-        type=click.IntRange(1, 100), # Rango para evitar valores absurdos
-        default=default_slots
-    )
-    if initial_slots <= 0:
-        click.secho("Configuración cancelada.", fg='yellow')
-        return None, None
-        
-    return base_size_usdt, initial_slots
-
-def display_live_pre_start_overview(account_states: Dict[str, Any], symbol: Optional[str]):
-    # OBSOLETO: La información ahora se muestra en el comando `status` de forma más completa.
-    print_header(f"Resumen de Estado Real Pre-Inicio para {symbol}")
-    if not account_states:
-        click.secho("No se pudo obtener información del estado real de las cuentas.", fg='red')
-        return
     
-    for acc_name, state in account_states.items():
-        click.secho(f"\n--- Cuenta: {acc_name} ---", bold=True)
-        unified = state.get('unified_balance', {})
-        positions = state.get('positions', [])
-        if unified:
-             click.echo(f"  Equidad Total (USDT): {unified.get('totalEquity', 0.0):.2f}")
-        if positions:
-            click.secho(f"  Posiciones Abiertas para {symbol}: {len(positions)}", fg='yellow')
-        else:
-            click.echo(f"  Sin posiciones abiertas para {symbol}.")
-
-    click.echo("\n" + "=" * 85)
-    input("Presione Enter para continuar al menú...")
-"""
-# =============== FIN ARCHIVO: core/menu.py (CORREGIDO Y COMPLETO) ===============
+# =============== FIN ARCHIVO: core/menu.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============

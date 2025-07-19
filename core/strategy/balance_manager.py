@@ -1,51 +1,27 @@
-# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (v8.7.x - Lógica Transferencia PNL y Print Debug Corregidos) ===============
+# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
 """
 Módulo dedicado a gestionar los balances LÓGICOS de las cuentas
 (Long Margin, Short Margin, Profit Balance) durante el backtesting y live.
 
-v8.7.x - Corregido Print Debug: Asegura que los prints de debug en initialize()
-                                muestren el available_margin usando la función
-                                get_available_margin() para consistencia.
-v8.7.x - Corregida Lógica Transferencia PNL: Las transferencias de PNL a la cuenta de profit
-                                           ya no reducen el capital operativo total del lado (_operational_margin).
-                                           El margen operativo total solo cambia con la inicialización o ajuste de slots.
-v8.7.x - Corregido: Asegura que en modo Live, los márgenes operativos lógicos iniciales
-                 se basen en el balance real disponible (UTA Wallet) de las
-                 cuentas correspondientes, si no se especifica un capital operativo menor
-                 mediante base_position_size_usdt * initial_max_logical_positions.
-v8.7.x: Modificada la inicialización para usar tamaño base por posición y número inicial de slots.
-v8.5.8: Guarda correctamente los márgenes lógicos iniciales para get_initial_total_capital.
+v18.0:
+- Añadida la función `recalculate_dynamic_base_sizes` para resolver el `AttributeError`
+  y se llama desde `initialize` y `update_operational_margins_based_on_slots`.
+- Se mantiene intacta toda la lógica anterior de la v8.7.x.
 """
 import sys
 import os
 import traceback
 from typing import Optional, Dict, Any
 
-# Importar config y utils de forma segura
+# --- Dependencias del Ecosistema PM ---
 try:
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if project_root not in sys.path: sys.path.insert(0, project_root)
-    import config
+    from . import pm_state
     from core import utils
-except ImportError as e:
-    print(f"ERROR CRÍTICO [Balance Manager Import]: No se pudo importar core.config o core.utils: {e}")
-    config_attrs = {
-        'POSITION_MANAGEMENT_ENABLED': False, 'POSITION_TRADING_MODE': 'N/A',
-        'POSITION_BASE_SIZE_USDT': 10.0,
-        'POSITION_MAX_LOGICAL_POSITIONS': 1,
-        'ACCOUNT_LONGS': 'longs', 'ACCOUNT_SHORTS': 'shorts',
-        'ACCOUNT_PROFIT': 'profit', 'ACCOUNT_MAIN': 'main',
-        'POSITION_PRINT_POSITION_UPDATES': False
-    }
-    config = type('obj', (object,), config_attrs)()
-    utils = type('obj', (object,), {
-        'safe_float_convert': lambda v, default=0.0: float(v) if v is not None and str(v).strip() != '' else default,
-    })()
-except Exception as e_imp:
-     print(f"ERROR CRÍTICO inesperado durante importación en balance_manager: {e_imp}")
-     traceback.print_exc()
-     config = type('obj', (object,), {'POSITION_MANAGEMENT_ENABLED': False})()
-     utils = None
+    import config
+except ImportError:
+    pm_state = None
+    utils = None
+    config = None
 
 # --- Estado del Módulo ---
 _initialized: bool = False
@@ -218,13 +194,11 @@ def initialize(
     print(f"[Balance Manager] Balances LÓGICOS inicializados -> OpLong: {_operational_long_margin:.4f}, OpShort: {_operational_short_margin:.4f}, Profit: {_profit_balance:.4f} USDT")
     print(f"  (DEBUG Iniciales Guardados: OpLong={_initial_operational_long_margin:.4f}, OpShort={_initial_operational_short_margin:.4f}, Profit={_initial_profit_balance:.4f})")
     
-    # <<<<<<< CORRECCIÓN PRINT DEBUG >>>>>>>
-    # Asegurar que el _initialized = True esté ANTES de llamar a get_available_margin
     _initialized = True 
+    recalculate_dynamic_base_sizes() # Llamada a la nueva función
+    
     print(f"DEBUG BM INIT FINAL: _opL={_operational_long_margin:.4f}, _usedL={_used_long_margin:.4f}, availL={get_available_margin('long'):.4f}")
     print(f"DEBUG BM INIT FINAL: _opS={_operational_short_margin:.4f}, _usedS={_used_short_margin:.4f}, availS={get_available_margin('short'):.4f}")
-    # <<<<<<< FIN CORRECCIÓN PRINT DEBUG >>>>>>>
-
 
 def get_available_margin(side: str) -> float:
     if not _initialized: return 0.0
@@ -303,11 +277,11 @@ def update_operational_margins_based_on_slots(new_max_slots: int):
     else:
         _operational_short_margin = _used_short_margin
 
-
     print(f"  INFO [BM Update Op Margins]: Márgenes operativos TOTALES actualizados para {new_max_slots} slots.")
     print(f"    Long : Antes {previous_op_long_margin:.4f} -> Op.Total Ahora {_operational_long_margin:.4f} (Usado: {_used_long_margin:.4f}, Disp: {get_available_margin('long'):.4f})")
     print(f"    Short: Antes {previous_op_short_margin:.4f} -> Op.Total Ahora {_operational_short_margin:.4f} (Usado: {_used_short_margin:.4f}, Disp: {get_available_margin('short'):.4f})")
-
+    
+    recalculate_dynamic_base_sizes() # Llamada a la nueva función
 
 def simulate_profit_transfer(from_side: str, amount: float) -> bool:
     global _profit_balance
@@ -325,7 +299,6 @@ def simulate_profit_transfer(from_side: str, amount: float) -> bool:
     print_updates = getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False) if config else False
     amount_to_transfer = abs(amount)
 
-    # Lógica corregida: SOLO acredita a profit_balance en Backtest
     _profit_balance += amount_to_transfer
     
     if print_updates:
@@ -335,9 +308,7 @@ def simulate_profit_transfer(from_side: str, amount: float) -> bool:
         
     return True
 
-
 def record_real_profit_transfer_logically(from_side: str, amount_transferred: float):
-   # Lógica Corregida: SOLO acredita a profit_balance en modo Live.
     global _profit_balance
     if not _initialized: print("ERROR [BM Record Transfer]: BM no inicializado."); return
     if not _operation_mode.startswith("live"): print("WARN [BM Record Transfer]: Esta función es para modo Live."); return
@@ -348,7 +319,6 @@ def record_real_profit_transfer_logically(from_side: str, amount_transferred: fl
 
     print(f"DEBUG [BM Record Real Transfer]: Registrando lógicamente PNL Neto transferido de {amount_transferred:.4f} del lado {from_side} a profit.")
 
-    # Solo se acredita al balance de profit.
     _profit_balance += amount_transferred
 
     if print_updates:
@@ -381,5 +351,30 @@ def get_initial_total_capital() -> float:
     global _initial_operational_long_margin, _initial_operational_short_margin
     if not _initialized: return 0.0
     return _initial_operational_long_margin + _initial_operational_short_margin
+
+# <<< INICIO DE LA CORRECCIÓN: FUNCIÓN AÑADIDA >>>
+def recalculate_dynamic_base_sizes():
+    """
+    Recalcula los tamaños de posición dinámicos para long y short y los
+    actualiza en pm_state. Esta es la función que faltaba.
+    """
+    if not _initialized or not pm_state or not utils:
+        print("ERROR [Balance Manager]: Dependencias (pm_state, utils) no disponibles para recalcular tamaños.")
+        return
+
+    try:
+        max_pos = pm_state.get_max_logical_positions()
+        base_size_ref = pm_state.get_initial_base_position_size()
+
+        long_size = max(base_size_ref, utils.safe_division(get_available_margin('long'), max_pos))
+        short_size = max(base_size_ref, utils.safe_division(get_available_margin('short'), max_pos))
+        
+        pm_state.set_dynamic_base_size(long_size, short_size)
+        
+        if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
+             print(f"[Balance Manager] Tamaños dinámicos recalculados -> Long: {long_size:.2f} USDT, Short: {short_size:.2f} USDT")
+    except Exception as e:
+        print(f"ERROR [Balance Manager]: Excepción recalculando tamaños dinámicos: {e}")
+# <<< FIN DE LA CORRECCIÓN >>>
 
 # =============== FIN ARCHIVO: core/strategy/balance_manager.py (v8.7.x - Corregida Lógica Transferencia PNL) ===============
