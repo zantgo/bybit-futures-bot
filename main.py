@@ -1,23 +1,17 @@
-# =============== INICIO ARCHIVO: main.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
+# =============== INICIO ARCHIVO: main.py (MODIFICADO) ===============
 """
 Punto de Entrada Principal del Bot de Trading (v18.0 - Arquitectura Limpia).
 
 Este archivo es el lanzador de la aplicación. Utiliza la librería `click`
-a través del módulo `core.menu` para gestionar los modos de operación.
+a través del nuevo paquete `core.menu` para gestionar los modos de operación.
 
 v18.0:
-- Eliminado el archivo puente `live/live_runner.py`.
-- `main.py` ahora llama directamente a `runners/live_interactive_runner.py`
-  para el modo interactivo, simplificando el flujo de ejecución.
-
-Uso:
-- python main.py live: Inicia el modo Live Interactivo.
-- python main.py backtest: Inicia el modo Backtest Interactivo.
-- python main.py auto: Inicia el modo Automático en vivo.
-- python main.py backtest-auto: Inicia el modo Backtest Automático.
-- python main.py --help: Muestra todos los comandos disponibles.
+- Refactorizado para usar el nuevo paquete `core.menu` para toda la lógica de UI.
+- La importación de la CLI ahora apunta al nuevo paquete.
+- Modificado para presentar un menú de selección al ejecutar sin argumentos.
 """
 import sys
+import time
 import traceback
 import os
 
@@ -25,6 +19,7 @@ import os
 try:
     import config
     from core import utils
+    # La CLI se importa desde el paquete `core.menu`
     from core.menu import main_cli
 except ImportError as e:
     print(f"ERROR CRÍTICO: No se pudo importar un módulo de configuración esencial: {e}")
@@ -33,7 +28,6 @@ except ImportError as e:
 # --- Importaciones de Componentes Core y Strategy ---
 try:
     from core import live_operations
-    # La corrección del alias se mantiene para consistencia
     from core.logging import signal_logger, closed_position_logger, open_position_snapshot_logger as open_snapshot_logger
     from core.reporting import results_reporter
     from core.visualization import plotter
@@ -62,7 +56,6 @@ except ImportError as e:
 
 # --- Importaciones de Runners (Orquestadores de modo) ---
 try:
-    # from live import live_runner  # <<< LÍNEA ELIMINADA SEGÚN INSTRUCCIONES >>>
     from runners import live_interactive_runner, automatic_runner, automatic_backtest_runner
     from backtest import backtest_runner
 except ImportError as e:
@@ -92,16 +85,20 @@ def run_selected_mode(mode: str):
             if not live_connection_manager.get_initialized_accounts():
                 print("ERROR CRITICO: No se pudo inicializar ninguna cuenta API. Saliendo.")
                 return
+        
+        try:
+            from core import menu as menu_package_ref
+        except ImportError:
+            menu_package_ref = None
 
         # Selecciona el runner apropiado y le pasa todas las dependencias.
         if mode == "live_interactive":
-            # <<< MODIFICACIÓN DE LA LLAMADA SEGÚN INSTRUCCIONES >>>
             live_interactive_runner.run_live_interactive_mode(
                 final_summary=final_summary,
                 operation_mode=mode,
                 config_module=config,
                 utils_module=utils,
-                menu_module=sys.modules.get('core.menu'),
+                menu_module=menu_package_ref,
                 live_operations_module=live_operations,
                 position_manager_module=position_manager,
                 balance_manager_module=balance_manager,
@@ -111,22 +108,19 @@ def run_selected_mode(mode: str):
                 ta_manager_module=ta_manager
             )
         elif mode == "backtest_interactive":
-            # El runner de backtest interactivo no fue proporcionado, así que asumimos que es el backtest_runner general.
-            # Si tienes un archivo específico, ajusta el nombre de la función aquí.
             backtest_runner.run_backtest_mode(
                 final_summary=final_summary,
                 operation_mode=mode,
                 config_module=config,
                 utils_module=utils,
-                menu_module=sys.modules.get('core.menu'),
+                menu_module=menu_package_ref,
                 position_manager_module=position_manager,
                 event_processor_module=event_processor,
                 open_snapshot_logger_module=open_snapshot_logger,
                 results_reporter_module=results_reporter,
                 balance_manager_module=balance_manager,
                 position_state_module=position_state,
-                ta_manager_module=ta_manager,
-                plotter_module=plotter # Añadido para que el reporte pueda llamar al plotter
+                ta_manager_module=ta_manager
             )
         elif mode == "automatic":
             automatic_runner.run_automatic_mode(
@@ -134,7 +128,7 @@ def run_selected_mode(mode: str):
                 operation_mode=mode,
                 config_module=config,
                 utils_module=utils,
-                menu_module=sys.modules.get('core.menu'),
+                menu_module=menu_package_ref,
                 live_operations_module=live_operations,
                 position_manager_module=position_manager,
                 balance_manager_module=balance_manager,
@@ -153,7 +147,7 @@ def run_selected_mode(mode: str):
                 operation_mode=mode,
                 config_module=config,
                 utils_module=utils,
-                menu_module=sys.modules.get('core.menu'),
+                menu_module=menu_package_ref,
                 position_manager_module=position_manager,
                 balance_manager_module=balance_manager,
                 position_state_module=position_state,
@@ -181,15 +175,60 @@ def run_selected_mode(mode: str):
         print("El bot ha encontrado un error fatal y se detendrá.")
     finally:
         print("\n[main] La ejecución ha finalizado.")
-        # Usamos os._exit(0) para forzar la salida y terminar los hilos daemon.
-        # sys.exit(0) a veces puede dejar hilos colgados.
         os._exit(0)
 
+# <<< INICIO DE LA MODIFICACIÓN: Bloque de ejecución principal >>>
 if __name__ == "__main__":
-    # Este es el punto de entrada real de la aplicación.
-    # Llama al grupo de comandos 'main_cli' definido en `core/menu.py`.
-    # Click se encargará de parsear los argumentos de la línea de comandos
-    # y llamar a la función de comando correspondiente (ej: run_live_interactive_command),
-    # la cual a su vez llama a nuestra función `run_selected_mode` con el modo correcto.
-    main_cli()
-# =============== FIN ARCHIVO: main.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
+    # Si se pasan argumentos en la línea de comandos (ej: python main.py live),
+    # se usa la CLI de Click como antes.
+    if len(sys.argv) > 1:
+        if main_cli:
+            main_cli()
+        else:
+            print("ERROR CRITICO: La interfaz de línea de comandos (main_cli) no pudo ser cargada.")
+    else:
+        # Si NO se pasan argumentos, se muestra un menú de selección de modo.
+        try:
+            from simple_term_menu import TerminalMenu
+            from core.menu._helpers import clear_screen, print_tui_header, MENU_STYLE
+
+            clear_screen()
+            print_tui_header("Bienvenido al Asistente de Trading")
+
+            menu_items = [
+                "[1] Iniciar en Modo Live Interactivo",
+                None,
+                "[2] Modo Backtest (No funcional)",
+                "[3] Modo Automático (No funcional)",
+                None,
+                "[4] Salir"
+            ]
+            terminal_menu = TerminalMenu(
+                menu_items,
+                title="Por favor, selecciona un modo de operación:",
+                **MENU_STYLE
+            )
+            choice_index = terminal_menu.show()
+
+            if choice_index == 0:
+                # El usuario seleccionó Iniciar en Modo Live
+                run_selected_mode("live_interactive")
+            elif choice_index in [2, 3]:
+                # Opciones no funcionales
+                clear_screen()
+                print("\nEsta opción no está habilitada en la versión actual.")
+                print("El programa se cerrará.")
+                time.sleep(3)
+                sys.exit(0)
+            else:
+                # El usuario seleccionó Salir o presionó ESC
+                print("\nSaliendo del programa.")
+                sys.exit(0)
+
+        except ImportError:
+            print("ERROR: 'simple-term-menu' no está instalado. No se puede mostrar el menú.")
+            print("Por favor, ejecuta 'pip install simple-term-menu' o inicia con un argumento, ej: 'python main.py live'")
+            sys.exit(1)
+# <<< FIN DE LA MODIFICACIÓN >>>
+
+# =============== FIN ARCHIVO: main.py (MODIFICADO) ===============

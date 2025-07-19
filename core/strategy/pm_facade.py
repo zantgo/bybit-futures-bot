@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/pm_facade.py (CORREGIDO Y COMPLETO) ===============
+# =============== INICIO ARCHIVO: core/strategy/pm_facade.py (MODIFICADO) ===============
 """
 Fachada Pública y Orquestador de Alto Nivel para el Position Manager (v18.0).
 
@@ -9,6 +9,7 @@ acciones a `pm_actions`, manteniendo este archivo limpio y enfocado en la orques
 v18.0:
 - Eliminado el paso de `pm_state` al constructor de `PositionExecutor` para
   resolver el problema de orden de dependencias.
+- Modificado get_position_summary para incluir balances reales en modo live.
 """
 import datetime
 import time
@@ -62,17 +63,13 @@ def initialize(
     except ImportError:
         live_manager = None
     
-    # <<< INICIO DE LA MODIFICACIÓN >>>
-    # Crear executor sin pasar pm_state
     executor = PositionExecutor(
         is_live_mode=is_live, config=config, utils=utils,
         balance_manager=balance_manager, position_state=position_state,
         position_calculations=position_calculations, live_operations=live_operations,
         closed_position_logger=closed_position_logger, position_helpers=_position_helpers,
         live_manager=live_manager
-        # <<< El argumento pm_state ya no es necesario aquí >>>
     )
-    # <<< FIN DE LA MODIFICACIÓN >>>
 
     # Establecer el estado inicial en pm_state
     pm_state.set_initial_config(
@@ -275,7 +272,7 @@ def get_position_summary() -> dict:
     open_longs = position_state.get_open_logical_positions('long')
     open_shorts = position_state.get_open_logical_positions('short')
     
-    return {
+    summary_dict = {
         "initialized": True,
         "operation_mode": pm_state.get_operation_mode(),
         "manual_mode_status": pm_state.get_manual_state(),
@@ -292,7 +289,34 @@ def get_position_summary() -> dict:
         "open_short_positions": [_position_helpers.format_pos_for_summary(p, utils) for p in open_shorts],
         "total_realized_pnl_session": pm_state.get_total_pnl_realized(),
         "initial_total_capital": balance_manager.get_initial_total_capital(),
+        # Añadir un campo por defecto para los balances reales
+        "real_account_balances": {}
     }
+
+    # <<< INICIO DE LA MODIFICACIÓN >>>
+    # Si estamos en modo live, obtener y añadir los balances reales de las cuentas
+    if pm_state.is_live_mode():
+        try:
+            from live.connection import manager as live_manager
+            real_balances = {}
+            if live_manager:
+                accounts_to_check = [
+                    config.ACCOUNT_MAIN, config.ACCOUNT_LONGS,
+                    config.ACCOUNT_SHORTS, config.ACCOUNT_PROFIT
+                ]
+                # Usar un set para evitar duplicados si los nombres de cuenta son los mismos
+                for acc_name in sorted(list(set(accounts_to_check))):
+                    if acc_name in live_manager.get_initialized_accounts():
+                        balance_info = live_operations.get_unified_account_balance_info(acc_name)
+                        real_balances[acc_name] = balance_info if balance_info else "Error al obtener balance"
+            summary_dict["real_account_balances"] = real_balances
+        except ImportError:
+            summary_dict["real_account_balances"] = {"error": "live_manager no disponible"}
+        except Exception as e:
+            summary_dict["real_account_balances"] = {"error": f"Excepción obteniendo balances: {e}"}
+    # <<< FIN DE LA MODIFICACIÓN >>>
+
+    return summary_dict
 
 def display_logical_positions():
     if not pm_state.is_initialized(): return
@@ -329,4 +353,4 @@ def get_global_sl_pct() -> Optional[float]:
     if not pm_state.is_initialized(): return None
     return pm_state.get_global_sl_pct()
 
-# =============== FIN ARCHIVO: core/strategy/pm_facade.py (CORREGIDO Y COMPLETO) ===============
+# =============== FIN ARCHIVO: core/strategy/pm_facade.py (MODIFICADO) ===============
