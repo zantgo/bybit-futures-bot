@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/pm_actions.py (COMPLETO) ===============
+# =============== INICIO ARCHIVO: core/strategy/pm_actions.py (MODIFICADO) ===============
 """
 Módulo de Acciones del Position Manager.
 
@@ -38,8 +38,12 @@ def open_logical_position(side: str, entry_price: float, timestamp: datetime.dat
             
             if (side == 'long' and diff_pct > long_thresh) or \
                (side == 'short' and diff_pct < short_thresh):
-                if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
+                
+                # --- INICIO MODIFICACIÓN: Respetar LOG_LEVEL ---
+                # Comprobar si el nivel de log está configurado en DEBUG antes de imprimir.
+                if getattr(config, 'LOG_LEVEL', 'INFO').upper() == "DEBUG":
                     print(f"DEBUG [PM Actions]: Apertura ignorada por filtro de diferencia de precio ({diff_pct:.2f}%).")
+                # --- FIN MODIFICACIÓN ---
                 return
     
     margin_to_use = pm_state.get_dynamic_base_size(side)
@@ -96,4 +100,4 @@ def close_logical_position(side: str, position_index: int, exit_price: float, ti
                     balance_manager.record_real_profit_transfer_logically(side, transferred)
     
     return success
-# =============== FIN ARCHIVO: core/strategy/pm_actions.py (COMPLETO) ===============
+# =============== FIN ARCHIVO: core/strategy/pm_actions.py (MODIFICADO) ===============

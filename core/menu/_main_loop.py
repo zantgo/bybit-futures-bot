@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/menu/_main_loop.py (CORREGIDO FINAL V2) ===============
+# =============== INICIO ARCHIVO: core/menu/_main_loop.py (MODIFICADO) ===============
 """
 Módulo del Bucle Principal de la TUI (Terminal User Interface).
 
@@ -16,41 +16,52 @@ except ImportError:
 # --- Dependencias del Proyecto ---
 try:
     from core.strategy import pm_facade as position_manager
-    # --- INICIO MODIFICACIÓN: Eliminar add_menu_footer de la importación ---
     from ._helpers import MENU_STYLE
-    from ._screens import (
-        show_status_screen,
-        show_mode_menu,
-        show_risk_menu,
-        show_capital_menu,
-        show_positions_menu,
-        show_log_viewer
-    )
-    # --- FIN MODIFICACIÓN ---
+    # Importamos el módulo de screens completo para evitar ciclos de importación
+    # y poder llamar a las funciones de pantalla de forma segura.
+    from . import _screens 
 except ImportError as e:
     # Definir fallbacks si las importaciones fallan
     print(f"ERROR [TUI Main Loop]: Falló importación de dependencias: {e}")
     position_manager = None
     MENU_STYLE = {}
-    # Crear funciones dummy para evitar errores en tiempo de ejecución
-    def show_status_screen(): print("Función no disponible.")
-    def show_mode_menu(): print("Función no disponible.")
-    def show_risk_menu(): print("Función no disponible.")
-    def show_capital_menu(): print("Función no disponible.")
-    def show_positions_menu(): print("Función no disponible.")
-    def show_log_viewer(): print("Función no disponible.")
+    # Crear un objeto dummy para _screens
+    class ScreensFallback:
+        def show_status_screen(self): print("Función no disponible.")
+        def show_mode_menu(self): print("Función no disponible.")
+        def show_risk_menu(self): print("Función no disponible.")
+        def show_capital_menu(self): print("Función no disponible.")
+        def show_positions_menu(self): print("Función no disponible.")
+        def show_log_viewer(self): print("Función no disponible.")
+    _screens = ScreensFallback()
+
 
 def run_tui_menu_loop():
     """
-    Ejecuta el bucle del menú interactivo principal de intervención en vivo.
-    Esta función es bloqueante y mantiene al usuario dentro de la TUI hasta que
-    decide salir.
+    Ejecuta el bucle del menú interactivo principal.
+    Ahora alterna entre la vista del menú y el visor de logs, garantizando
+    una interfaz limpia.
     """
     if not TerminalMenu or not position_manager:
         print("ERROR CRITICO: TUI no puede funcionar sin 'simple-term-menu' o sin el Position Manager.")
         return
 
+    # --- Bucle principal que maneja los modos de vista ---
+    current_view = "MENU" # Puede ser "MENU" o "LOGS"
+
     while True:
+        if current_view == "LOGS":
+            # Si estamos en la vista de logs, cedemos el control a la pantalla del visor de logs.
+            # Esta función tendrá su propio bucle interno y se encargará de limpiar la pantalla.
+            _screens.show_log_viewer() 
+            
+            # Al salir de show_log_viewer (cuando el usuario presiona 'b' o ESC),
+            # siempre volvemos a la vista del menú.
+            current_view = "MENU"
+            continue # Volver al inicio del bucle para que se redibuje el menú.
+
+        # --- Lógica del Menú Principal (se ejecuta solo cuando current_view es "MENU") ---
+        
         # 1. Obtener datos frescos para el encabezado del menú
         summary = position_manager.get_position_summary()
         if not summary or summary.get('error'):
@@ -68,7 +79,6 @@ def run_tui_menu_loop():
         initial_capital = summary.get('initial_total_capital', 0.0)
         roi_estimated_pct = (total_pnl_estimated / initial_capital * 100) if initial_capital > 0 else 0.0
 
-        # --- INICIO MODIFICACIÓN: Integrar el pie de página en el título ---
         footer_text = "[s] Estado | [m] Modo | [p] Posiciones | [l] Logs | [q] Salir"
         title = (
             f"Asistente de Trading Interactivo\n"
@@ -79,31 +89,45 @@ def run_tui_menu_loop():
             f"----------------------------------------\n"
             f"{footer_text}"
         )
-        # --- FIN MODIFICACIÓN ---
 
         menu_items = [
-            (" [s] Ver Estado Detallado de la Sesión", show_status_screen),
-            (" [m] Cambiar Modo de Trading", show_mode_menu),
-            (" [r] Ajustar Parámetros de Riesgo", show_risk_menu),
-            (" [c] Ajustar Capital (Slots / Tamaño)", show_capital_menu),
-            (" [p] Gestionar Posiciones Abiertas", show_positions_menu),
+            (" [s] Ver Estado Detallado", _screens.show_status_screen),
+            (" [m] Cambiar Modo de Trading", _screens.show_mode_menu),
+            (" [r] Ajustar Parámetros de Riesgo", _screens.show_risk_menu),
+            (" [c] Ajustar Capital", _screens.show_capital_menu),
+            (" [p] Gestionar Posiciones Abiertas", _screens.show_positions_menu),
             None,
-            (" [l] Visor de Logs", show_log_viewer),
-            (" [q] Salir del Menú (el bot sigue corriendo)", None)
+            (" [l] Visor de Logs", "VIEW_LOGS"), # Usamos un string como señal para cambiar de vista
+            (" [q] Salir del Menú", "EXIT_TUI")
         ]
 
+        # --- INICIO MODIFICACIÓN: Comentar 'shortcuts' para compatibilidad con versiones antiguas ---
+        # El parámetro 'shortcuts' causa un error si la versión de simple-term-menu es antigua.
+        # Se comenta para asegurar la compatibilidad. La solución ideal es actualizar la librería.
         terminal_menu = TerminalMenu(
             [item[0] if item else None for item in menu_items],
             title=title,
-            **MENU_STYLE
+            **MENU_STYLE,
+            # # Añadimos atajos de teclado para una navegación más rápida
+            # shortcuts={
+            #     "s": 0, "m": 1, "r": 2, "c": 3, "p": 4, "l": 6, "q": 7
+            # }
         )
+        # --- FIN MODIFICACIÓN ---
         
         selected_index = terminal_menu.show()
-
-        if selected_index is None or menu_items[selected_index][1] is None:
-            break
         
-        action_function = menu_items[selected_index][1]
-        action_function()
+        if selected_index is None: # El usuario presionó ESC
+            continue # Simplemente redibujar el menú principal
 
-# =============== FIN ARCHIVO: core/menu/_main_loop.py (CORREGIDO FINAL V2) ===============
+        # Obtener la acción asociada al ítem seleccionado
+        selected_action = menu_items[selected_index][1]
+
+        if selected_action == "EXIT_TUI":
+            break # Salir del bucle while y terminar la TUI
+        elif selected_action == "VIEW_LOGS":
+            current_view = "LOGS" # Cambiar al modo de vista de logs para el siguiente ciclo
+        elif callable(selected_action):
+            selected_action() # Llamar a la función de pantalla (ej: show_status_screen)
+
+# =============== FIN ARCHIVO: core/menu/_main_loop.py (MODIFICADO) ===============

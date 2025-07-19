@@ -1,3 +1,4 @@
+# =============== INICIO ARCHIVO: config.py (MODIFICADO) ===============
 """
 Configuración Esencial (v15.0 - Estrategia de Régimen de Mercado).
 Parámetros para TA, Feeder, Logger, Plotter, conexiones Live y Gestión de Posiciones.
@@ -20,6 +21,17 @@ try:
 except NameError:
     PROJECT_ROOT = os.path.abspath(os.getcwd())
     print(f"Advertencia [config]: __file__ no definido, usando CWD como PROJECT_ROOT: {PROJECT_ROOT}")
+
+# --- INICIO MODIFICACIÓN ---
+# --- Log Level Configuration ---
+# Define el nivel de detalle de los logs que se mostrarán en la consola.
+# Opciones: "DEBUG", "INFO", "WARN", "ERROR"
+# "DEBUG": Muestra todo, muy detallado (aperturas ignoradas, actualizaciones de estado, etc.).
+# "INFO": Muestra operaciones importantes (aperturas, cierres, cambios de modo).
+# "WARN": Muestra solo advertencias y errores.
+# "ERROR": Muestra solo errores críticos.
+LOG_LEVEL = "INFO"
+# --- FIN MODIFICACIÓN ---
 
 # --- Account Configuration ---
 ACCOUNT_MAIN = "main"
@@ -231,3 +243,5 @@ def print_initial_config(operation_mode="unknown"):
 
 # Carga UIDs al importar el módulo
 _load_and_validate_uids()
+
+# =============== FIN ARCHIVO: config.py (MODIFICADO) ===============

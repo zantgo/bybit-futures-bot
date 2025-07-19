@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/position_state.py (Refactorizado con LPT v2) ===============
+# =============== INICIO ARCHIVO: core/strategy/position_state.py (CORREGIDO) ===============
 """
 Módulo para almacenar y gestionar el estado de las posiciones lógicas
 (delegado a LogicalPositionTable) y físicas (agregadas).
@@ -90,20 +90,22 @@ def initialize_state(
     if is_live_mode and not current_live_ops: print("WARN [PS Init]: Modo Live pero live_operations no disponible para LogicalPositionTable.")
 
     try:
+        # --- INICIO MODIFICACIÓN: Corregir el nombre del argumento ---
         _long_table = LogicalPositionTable(
             side='long',
             is_live_mode=is_live_mode,
-            config=current_config,
+            config_param=current_config, # Corregido de 'config' a 'config_param'
             utils=current_utils,
             live_operations=current_live_ops if is_live_mode else None
         )
         _short_table = LogicalPositionTable(
             side='short',
             is_live_mode=is_live_mode,
-            config=current_config,
+            config_param=current_config, # Corregido de 'config' a 'config_param'
             utils=current_utils,
             live_operations=current_live_ops if is_live_mode else None
         )
+        # --- FIN MODIFICACIÓN ---
         _initialized = True
         print("[Position State] Estado y Tablas Lógicas inicializados.")
 
@@ -221,4 +223,4 @@ def reset_physical_position_state(side: str):
     if side == 'long': global _physical_long_position; _physical_long_position = default_state.copy()
     elif side == 'short': global _physical_short_position; _physical_short_position = default_state.copy()
 
-# =============== FIN ARCHIVO: core/strategy/position_state.py (Refactorizado con LPT v2) ===============
+# =============== FIN ARCHIVO: core/strategy/position_state.py (CORREGIDO) ===============

@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/menu/_screens.py (CORREGIDO FINAL V2) ===============
+# =============== INICIO ARCHIVO: core/menu/_screens.py (MODIFICADO) ===============
 """
 Módulo de Pantallas de la TUI (Terminal User Interface).
 
@@ -8,6 +8,7 @@ Position Manager para obtener datos y presentarlos al usuario.
 """
 import time
 from typing import Dict, Any, Optional
+import os # Necesario para obtener el tamaño de la terminal
 
 try:
     from simple_term_menu import TerminalMenu
@@ -17,7 +18,6 @@ except ImportError:
 # --- Dependencias del Proyecto ---
 try:
     from core.strategy import pm_facade as position_manager
-    # --- INICIO MODIFICACIÓN: Eliminar add_menu_footer ---
     from ._helpers import (
         clear_screen,
         print_tui_header,
@@ -27,7 +27,6 @@ try:
         print_section
     )
     from core.logging import memory_logger
-    # --- FIN MODIFICACIÓN ---
 except ImportError as e:
     print(f"ERROR [TUI Screens]: Falló importación de dependencias: {e}")
     position_manager = None
@@ -41,7 +40,6 @@ except ImportError as e:
 
 
 # --- Pantallas del Menú Principal ---
-
 
 def show_status_screen():
     """Muestra una pantalla con el estado detallado de la sesión."""
@@ -107,14 +105,12 @@ def show_mode_menu():
         "[b] Volver al menú principal"
     ]
     
-    # --- INICIO MODIFICACIÓN: Integrar pie de página en el título ---
     title = (
         f"Selecciona el nuevo modo de trading\n"
         f"Modo actual: {current_mode}\n"
         f"----------------------------------------\n"
         f"[Enter] Seleccionar | [b] o [ESC] Volver"
     )
-    # --- FIN MODIFICACIÓN ---
     
     terminal_menu = TerminalMenu(menu_items, title=title, **MENU_STYLE)
     choice_index = terminal_menu.show()
@@ -295,42 +291,63 @@ def show_positions_menu():
         else: break
 
 def show_log_viewer():
-    """Muestra una pantalla con los últimos logs capturados en memoria."""
+    """
+    Muestra una pantalla con los últimos logs capturados en memoria.
+    Esta función ahora tiene su propio bucle para permitir refrescar la vista
+    sin volver al menú principal.
+    """
+    log_viewer_style = MENU_STYLE.copy()
+    log_viewer_style["clear_screen"] = False
+
     while True:
         clear_screen()
         print_tui_header("Visor de Logs en Tiempo Real")
         
+        try:
+            terminal_height = os.get_terminal_size().lines
+            lines_for_logs = max(5, terminal_height - 10)
+        except OSError:
+            lines_for_logs = 20
+
         logs = memory_logger.get_logs() if memory_logger else []
+        
         if not logs:
             print("\n  (No hay logs para mostrar)")
         else:
+            logs_to_show = logs[-lines_for_logs:]
             print("\n  --- Últimos Mensajes (más recientes al final) ---")
-            for timestamp, level, message in logs:
+            for timestamp, level, message in logs_to_show:
                 color_code = ""
                 if level == "ERROR": color_code = "\x1b[91m"
                 elif level == "WARN": color_code = "\x1b[93m"
+                elif level == "DEBUG": color_code = "\x1b[90m"
                 reset_code = "\x1b[0m"
-                print(f"  {timestamp} [{color_code}{level:<5}{reset_code}] {message}")
+                print(f"  {timestamp} [{color_code}{level:<5}{reset_code}] {message[:120]}")
 
-        is_verbose = memory_logger._is_verbose_mode if memory_logger and hasattr(memory_logger, '_is_verbose_mode') else False
-        verbose_status_text = "Activado (los logs se imprimen en consola)" if is_verbose else "Desactivado (solo se capturan)"
-
+        # --- INICIO MODIFICACIÓN: Eliminar 'shortcuts' del menú del visor de logs ---
+        # El código anterior fue renombrado en la respuesta anterior pero la causa raíz es la misma.
+        # Comentamos la sección 'shortcuts' para asegurar compatibilidad.
+        menu_items = ["[r] Refrescar", "[b] Volver al Menú Principal"]
+        
         title = (
-            f"Modo Verboso: {verbose_status_text}\n"
-            f"----------------------------------------\n"
-            f"[r] Refrescar | [v] Verboso | [b] Volver"
+            "\n"
+            "----------------------------------------\n"
+            "[r] Refrescar | [b] o [ESC] Volver"
         )
-
+        
         terminal_menu = TerminalMenu(
-            ["[r] Refrescar", "[v] Act/Desactivar Logs en Consola", "[b] Volver"],
+            menu_items,
             title=title,
-            **MENU_STYLE
+            **log_viewer_style,
+            # # Atajos de teclado para las acciones
+            # shortcuts={"r": 0, "b": 1} # COMENTADO PARA SOLUCIONAR EL ERROR
         )
         choice_index = terminal_menu.show()
 
-        if choice_index == 1 and memory_logger:
-             memory_logger.set_verbose_mode(not is_verbose)
-        elif choice_index is None or choice_index == 2:
+        if choice_index == 0:
+            continue
+        else:
             break
+        # --- FIN MODIFICACIÓN ---
 
-# =============== FIN ARCHIVO: core/menu/_screens.py (CORREGIDO FINAL V2) ===============
+# =============== FIN ARCHIVO: core/menu/_screens.py (MODIFICADO) ===============
