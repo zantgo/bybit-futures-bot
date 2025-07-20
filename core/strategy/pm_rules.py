@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/pm_rules.py (COMPLETO Y MODIFICADO) ===============
+# =============== INICIO ARCHIVO: core/strategy/pm_rules.py (ACTUALIZADO) ===============
 """
 Módulo para el motor de reglas del Position Manager.
 
@@ -22,10 +22,10 @@ def can_open_new_position(side: str) -> bool:
     """
     if not pm_state.is_initialized(): return False
     
-    # Justo al inicio de la función, después de la guarda de inicialización
+    # Regla Global 0: ¿Se alcanzó el TP/Límite de la sesión?
     if pm_state.is_session_tp_hit():
         if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
-            print(f"DEBUG [PM Rules]: Apertura bloqueada, TP global de la sesión ya fue alcanzado.")
+            print(f"DEBUG [PM Rules]: Apertura bloqueada, TP global/Límite de la sesión ya fue alcanzado.")
         return False
 
     operation_mode = pm_state.get_operation_mode()
@@ -35,22 +35,31 @@ def can_open_new_position(side: str) -> bool:
         manual_state = pm_state.get_manual_state()
         manual_mode = manual_state["mode"]
         
-        # Regla Manual 1: ¿El modo permite abrir en este lado?
+        # Regla Manual 1: ¿El modo de trading permite abrir en este lado?
         if manual_mode == 'NEUTRAL':
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
                 print(f"DEBUG [PM Rules]: Apertura bloqueada, modo manual en NEUTRAL.")
             return False
-        if side == 'long' and manual_mode == 'SHORT_ONLY': return False
-        if side == 'short' and manual_mode == 'LONG_ONLY': return False
+        if side == 'long' and manual_mode == 'SHORT_ONLY':
+            return False
+        if side == 'short' and manual_mode == 'LONG_ONLY':
+            return False
 
-        # Regla Manual 2: ¿Hemos alcanzado el límite de trades?
-        if manual_state["limit"] is not None:
-            if manual_state["executed"] >= manual_state["limit"]:
-                print(f"INFO [PM Rules]: Límite manual de trades ({manual_state['limit']}) alcanzado. No se abrirá posición.")
+        # <<< INICIO DE MODIFICACIÓN: Lógica de Límite de Trades de Sesión Unificada >>>
+        # Esta regla ahora se aplica aquí para el modo interactivo, leyendo el límite dinámico.
+        trade_limit = manual_state.get("limit")
+        if trade_limit is not None:
+            if manual_state["executed"] >= trade_limit:
+                # Usar el flag de sesión para detener futuras aperturas hasta que se resetee.
+                # Esto es más robusto que solo devolver False.
+                if not pm_state.is_session_tp_hit():
+                    print(f"INFO [PM Rules]: Límite de trades de sesión ({trade_limit}) alcanzado. No se abrirán más posiciones.")
+                    pm_state.set_session_tp_hit(True)
                 return False
+        # <<< FIN DE MODIFICACIÓN >>>
 
     # --- REGLAS PARA MODO AUTOMÁTICO ---
-    else:
+    else: # automatic o automatic_backtest
         trend_state = pm_state.get_trend_state()
         if trend_state["tp_hit"]:
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
@@ -77,14 +86,14 @@ def can_open_new_position(side: str) -> bool:
 
     # --- REGLAS COMUNES A AMBOS MODOS ---
     try:
-        # Regla Común 1: Límite de slots
+        # Regla Común 1: Límite de slots (posiciones simultáneas)
         open_positions = position_state.get_open_logical_positions(side)
         if len(open_positions) >= pm_state.get_max_logical_positions():
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
                 print(f"DEBUG [PM Rules]: Límite de slots ({pm_state.get_max_logical_positions()}) para {side.upper()} alcanzado.")
             return False
         
-        # Regla Común 2: Margen Lógico
+        # Regla Común 2: Margen Lógico disponible
         margin_needed = pm_state.get_dynamic_base_size(side)
         if balance_manager.get_available_margin(side) < margin_needed - 1e-6:
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
@@ -122,4 +131,4 @@ def can_open_new_position(side: str) -> bool:
 
     # Si todas las reglas pasan, se puede abrir la posición.
     return True
-# =============== FIN ARCHIVO: core/strategy/pm_rules.py (COMPLETO Y MODIFICADO) ===============
+# =============== FIN ARCHIVO: core/strategy/pm_rules.py (ACTUALIZADO) ===============

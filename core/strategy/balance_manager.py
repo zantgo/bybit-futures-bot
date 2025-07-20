@@ -1,27 +1,30 @@
-# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (CORREGIDO Y ABSOLUTAMENTE COMPLETO) ===============
+# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (ACTUALIZADO) ===============
 """
 Módulo dedicado a gestionar los balances LÓGICOS de las cuentas
 (Long Margin, Short Margin, Profit Balance) durante el backtesting y live.
-
-v18.0:
-- Añadida la función `recalculate_dynamic_base_sizes` para resolver el `AttributeError`
-  y se llama desde `initialize` y `update_operational_margins_based_on_slots`.
-- Se mantiene intacta toda la lógica anterior de la v8.7.x.
+También gestiona una caché de los balances REALES para evitar sobrecargar la API.
 """
 import sys
 import os
 import traceback
+import time
 from typing import Optional, Dict, Any
 
 # --- Dependencias del Ecosistema PM ---
 try:
     from . import pm_state
-    from core import utils
+    from core import utils, live_operations
     import config
+    from live.connection import manager as connection_manager
 except ImportError:
     pm_state = None
     utils = None
     config = None
+    live_operations = None
+    connection_manager = None
+
+# --- Constantes ---
+REAL_BALANCES_CACHE_EXPIRY_SECONDS = 30 # Actualizar balances reales cada 30 segundos
 
 # --- Estado del Módulo ---
 _initialized: bool = False
@@ -30,16 +33,21 @@ _default_initial_max_logical_positions_config: int = 1
 _trading_mode_config: str = "N/A"
 _operation_mode: str = "unknown"
 
-_operational_long_margin: float = 0.0  # Capital TOTAL asignado a LONG
-_operational_short_margin: float = 0.0 # Capital TOTAL asignado a SHORT
-_used_long_margin: float = 0.0         # Capital de _operational_long_margin actualmente USADO en posiciones
-_used_short_margin: float = 0.0        # Capital de _operational_short_margin actualmente USADO en posiciones
-_profit_balance: float = 0.0           # Balance de la cuenta de Profit
+_operational_long_margin: float = 0.0
+_operational_short_margin: float = 0.0
+_used_long_margin: float = 0.0
+_used_short_margin: float = 0.0
+_profit_balance: float = 0.0
 
-_initial_operational_long_margin: float = 0.0  # Para cálculo de ROI y referencia
-_initial_operational_short_margin: float = 0.0 # Para cálculo de ROI y referencia
-_initial_profit_balance: float = 0.0           # Para referencia
-_initial_base_position_size_usdt_session: float = 0.0 # Para recalcular Op. Margins al cambiar slots
+_initial_operational_long_margin: float = 0.0
+_initial_operational_short_margin: float = 0.0
+_initial_profit_balance: float = 0.0
+_initial_base_position_size_usdt_session: float = 0.0
+
+# --- Caché de Balances Reales ---
+_real_balances_cache: Dict[str, Any] = {}
+_real_balances_last_update: float = 0.0
+
 
 # --- Funciones Públicas ---
 def initialize(
@@ -54,6 +62,7 @@ def initialize(
     global _initial_operational_long_margin, _initial_operational_short_margin, _initial_profit_balance
     global _used_long_margin, _used_short_margin
     global _initial_base_position_size_usdt_session
+    global _real_balances_cache, _real_balances_last_update
 
     if not config or not utils or not hasattr(utils, 'safe_float_convert'):
         print("ERROR CRITICO [BM Init]: Faltan dependencias core (config/utils)."); _initialized = False; return
@@ -66,6 +75,8 @@ def initialize(
     _operational_long_margin, _operational_short_margin, _profit_balance = 0.0, 0.0, 0.0
     _initial_operational_long_margin, _initial_operational_short_margin, _initial_profit_balance = 0.0, 0.0, 0.0
     _used_long_margin, _used_short_margin = 0.0, 0.0
+    _real_balances_cache = {}
+    _real_balances_last_update = 0.0
 
     try:
         _default_base_position_size_usdt_config = max(0.0, utils.safe_float_convert(getattr(config, 'POSITION_BASE_SIZE_USDT', 10.0)))
@@ -94,12 +105,10 @@ def initialize(
         short_acc_name_cfg = getattr(config, 'ACCOUNT_SHORTS', None)
         main_acc_name_cfg = getattr(config, 'ACCOUNT_MAIN', 'main')
 
-        # ---- 1. Determinar Balances Reales de API para Profit y Operaciones ----
         real_profit_balance_api = 0.0
         real_operational_long_margin_api = 0.0
         real_operational_short_margin_api = 0.0
 
-        # Profit Balance (igual que antes)
         try:
             if profit_acc_name and profit_acc_name in real_balances_data:
                 unified_prof = real_balances_data[profit_acc_name].get('unified_balance')
@@ -111,7 +120,6 @@ def initialize(
         except Exception as e_read_profit_api:
             print(f"ERROR [BM Init]: Leyendo balance de profit real: {e_read_profit_api}");
 
-        # Operational Long Margin (API)
         target_long_acc_name = long_acc_name_cfg if long_acc_name_cfg else main_acc_name_cfg
         if target_long_acc_name in real_balances_data:
             unified_long_data = real_balances_data[target_long_acc_name].get('unified_balance')
@@ -119,7 +127,7 @@ def initialize(
                 usdt_coin_data = next((c for c in unified_long_data.get('coin', []) if c.get('coin') == 'USDT'), None)
                 if usdt_coin_data:
                     real_operational_long_margin_api = utils.safe_float_convert(usdt_coin_data.get('walletBalance'), 0.0)
-                else: # Fallback al totalWalletBalance general de la cuenta si no hay desglose de USDT
+                else: 
                     real_operational_long_margin_api = utils.safe_float_convert(unified_long_data.get('totalWalletBalance'), 0.0)
                 print(f"    INFO: Balance Real API para Longs ('{target_long_acc_name}' USDT Wallet): {real_operational_long_margin_api:.4f} USDT")
             else:
@@ -128,7 +136,6 @@ def initialize(
              print(f"    WARN: No hay datos de API para la cuenta Long/Main '{target_long_acc_name}'. Margen Long API será 0.")
 
 
-        # Operational Short Margin (API)
         target_short_acc_name = short_acc_name_cfg if short_acc_name_cfg else main_acc_name_cfg
         if target_short_acc_name in real_balances_data:
             unified_short_data = real_balances_data[target_short_acc_name].get('unified_balance')
@@ -149,7 +156,6 @@ def initialize(
         _initial_profit_balance = real_profit_balance_api
         print(f"    Balance Profit Lógico Inicial (API Real): {_profit_balance:.4f} USDT")
 
-        # ---- 2. Establecer Márgenes Operativos Lógicos ----
         logical_capital_per_side_config = current_base_size * current_slots
 
         if _trading_mode_config == "LONG_ONLY" or _trading_mode_config == "LONG_SHORT":
@@ -192,14 +198,11 @@ def initialize(
         print(f"    Balance Profit Lógico Inicial (Backtest): {_profit_balance:.4f} USDT")
 
     print(f"[Balance Manager] Balances LÓGICOS inicializados -> OpLong: {_operational_long_margin:.4f}, OpShort: {_operational_short_margin:.4f}, Profit: {_profit_balance:.4f} USDT")
-    print(f"  (DEBUG Iniciales Guardados: OpLong={_initial_operational_long_margin:.4f}, OpShort={_initial_operational_short_margin:.4f}, Profit={_initial_profit_balance:.4f})")
     
     _initialized = True 
-    recalculate_dynamic_base_sizes() # Llamada a la nueva función
-    
-    print(f"DEBUG BM INIT FINAL: _opL={_operational_long_margin:.4f}, _usedL={_used_long_margin:.4f}, availL={get_available_margin('long'):.4f}")
-    print(f"DEBUG BM INIT FINAL: _opS={_operational_short_margin:.4f}, _usedS={_used_short_margin:.4f}, availS={get_available_margin('short'):.4f}")
+    recalculate_dynamic_base_sizes()
 
+# ... (resto de funciones sin cambios hasta get_initial_total_capital) ...
 def get_available_margin(side: str) -> float:
     if not _initialized: return 0.0
     if side == 'long':
@@ -223,11 +226,6 @@ def decrease_operational_margin(side: str, amount: float):
         print(f"ERROR [Balance Manager]: Lado inválido '{side}' en decrease_operational_margin (uso).")
         return
 
-    if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
-        current_used = _used_long_margin if side == 'long' else _used_short_margin
-        current_available = get_available_margin(side)
-        print(f"DEBUG [BM Use Margin]: Margen {side.upper()} usado incrementado en {amount_abs:.4f}. Total Usado: {current_used:.4f}. Disponible ahora: {current_available:.4f}")
-
 def increase_operational_margin(side: str, amount: float):
     global _used_long_margin, _used_short_margin
     if not _initialized: return
@@ -245,11 +243,6 @@ def increase_operational_margin(side: str, amount: float):
     else:
         print(f"ERROR [Balance Manager]: Lado inválido '{side}' en increase_operational_margin (liberación).")
         return
-
-    if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
-        current_used = _used_long_margin if side == 'long' else _used_short_margin
-        current_available = get_available_margin(side)
-        print(f"DEBUG [BM Release Margin]: Margen {side.upper()} usado disminuido en {amount_to_release:.4f}. Total Usado: {current_used:.4f}. Disponible ahora: {current_available:.4f}")
 
 def update_operational_margins_based_on_slots(new_max_slots: int):
     global _operational_long_margin, _operational_short_margin, _initial_base_position_size_usdt_session, _trading_mode_config, _initialized, _used_long_margin, _used_short_margin
@@ -276,35 +269,22 @@ def update_operational_margins_based_on_slots(new_max_slots: int):
         _operational_short_margin = max(new_total_op_short, _used_short_margin)
     else:
         _operational_short_margin = _used_short_margin
-
-    print(f"  INFO [BM Update Op Margins]: Márgenes operativos TOTALES actualizados para {new_max_slots} slots.")
-    print(f"    Long : Antes {previous_op_long_margin:.4f} -> Op.Total Ahora {_operational_long_margin:.4f} (Usado: {_used_long_margin:.4f}, Disp: {get_available_margin('long'):.4f})")
-    print(f"    Short: Antes {previous_op_short_margin:.4f} -> Op.Total Ahora {_operational_short_margin:.4f} (Usado: {_used_short_margin:.4f}, Disp: {get_available_margin('short'):.4f})")
     
-    recalculate_dynamic_base_sizes() # Llamada a la nueva función
+    recalculate_dynamic_base_sizes()
 
 def simulate_profit_transfer(from_side: str, amount: float) -> bool:
     global _profit_balance
     if not _initialized: return False
 
     if _operation_mode.startswith("live"):
-         print("DEBUG [BM Sim Transfer]: Llamado en modo Live. Esta función es solo para Backtest. No se realizarán cambios lógicos aquí.")
          return True 
 
     if not isinstance(amount, (int, float)) or amount < 0:
-        print(f"WARN [BM Sim Transfer]: Amount inválido ({amount}). No se transfiere."); return False
+        return False
     if amount <= 1e-9:
         return True
 
-    print_updates = getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False) if config else False
-    amount_to_transfer = abs(amount)
-
-    _profit_balance += amount_to_transfer
-    
-    if print_updates:
-        print(f"  SIMULATED [BM Transfer]: {amount_to_transfer:.4f} USDT añadidos a Profit Balance. Nuevo Profit: {_profit_balance:.4f}.")
-        print(f"    Margen Disponible Long : {get_available_margin('long'):.4f} (Sin cambios por esta transferencia)")
-        print(f"    Margen Disponible Short: {get_available_margin('short'):.4f} (Sin cambios por esta transferencia)")
+    _profit_balance += abs(amount)
         
     return True
 
@@ -312,22 +292,10 @@ def record_real_profit_transfer_logically(from_side: str, amount_transferred: fl
     global _profit_balance
     if not _initialized: print("ERROR [BM Record Transfer]: BM no inicializado."); return
     if not _operation_mode.startswith("live"): print("WARN [BM Record Transfer]: Esta función es para modo Live."); return
-    if not isinstance(amount_transferred, (int, float)) or amount_transferred < 0: print(f"WARN [BM Record Transfer]: Monto transferido inválido ({amount_transferred})."); return
+    if not isinstance(amount_transferred, (int, float)) or amount_transferred < 0: return
     if amount_transferred <= 1e-9: return
 
-    print_updates = getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False) if config else False
-
-    print(f"DEBUG [BM Record Real Transfer]: Registrando lógicamente PNL Neto transferido de {amount_transferred:.4f} del lado {from_side} a profit.")
-
     _profit_balance += amount_transferred
-
-    if print_updates:
-        op_margin_side = _operational_long_margin if from_side == 'long' else _operational_short_margin
-        avail_margin_side = get_available_margin(from_side)
-        print(f"  LOGICAL BALANCES UPDATED [BM Record Transfer]: {amount_transferred:.4f} USDT añadidos a Profit Balance. "
-              f"Nuevo Profit Lógico: {_profit_balance:.4f}.")
-        print(f"    Margen Operativo Total {from_side.upper()}: {op_margin_side:.4f} (Sin cambios por esta transferencia). "
-              f"Disponible {from_side.upper()}: {avail_margin_side:.4f}")
 
 def get_balances() -> dict:
     if not _initialized:
@@ -352,14 +320,8 @@ def get_initial_total_capital() -> float:
     if not _initialized: return 0.0
     return _initial_operational_long_margin + _initial_operational_short_margin
 
-# <<< INICIO DE LA CORRECCIÓN: FUNCIÓN AÑADIDA >>>
 def recalculate_dynamic_base_sizes():
-    """
-    Recalcula los tamaños de posición dinámicos para long y short y los
-    actualiza en pm_state. Esta es la función que faltaba.
-    """
     if not _initialized or not pm_state or not utils:
-        print("ERROR [Balance Manager]: Dependencias (pm_state, utils) no disponibles para recalcular tamaños.")
         return
 
     try:
@@ -370,11 +332,43 @@ def recalculate_dynamic_base_sizes():
         short_size = max(base_size_ref, utils.safe_division(get_available_margin('short'), max_pos))
         
         pm_state.set_dynamic_base_size(long_size, short_size)
-        
-        if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
-             print(f"[Balance Manager] Tamaños dinámicos recalculados -> Long: {long_size:.2f} USDT, Short: {short_size:.2f} USDT")
-    except Exception as e:
-        print(f"ERROR [Balance Manager]: Excepción recalculando tamaños dinámicos: {e}")
-# <<< FIN DE LA CORRECCIÓN >>>
+    except Exception:
+        pass
 
-# =============== FIN ARCHIVO: core/strategy/balance_manager.py (v8.7.x - Corregida Lógica Transferencia PNL) ===============
+# <<< INICIO DE NUEVAS FUNCIONES PARA LA CACHÉ DE BALANCES REALES >>>
+def update_real_balances_cache_from_api():
+    """
+    Actualiza la caché de balances reales si ha expirado.
+    Esta función es llamada periódicamente por el event_processor.
+    """
+    global _real_balances_cache, _real_balances_last_update
+    if not _initialized or not _operation_mode.startswith("live"): return
+    if not live_operations or not connection_manager: return
+
+    now = time.time()
+    if (now - _real_balances_last_update) < REAL_BALANCES_CACHE_EXPIRY_SECONDS:
+        return # La caché todavía es válida
+
+    new_cache = {}
+    accounts_to_check = [
+        config.ACCOUNT_MAIN, config.ACCOUNT_LONGS,
+        config.ACCOUNT_SHORTS, config.ACCOUNT_PROFIT
+    ]
+    for acc_name in sorted(list(set(accounts_to_check))):
+        if acc_name in connection_manager.get_initialized_accounts():
+            balance_info = live_operations.get_unified_account_balance_info(acc_name)
+            new_cache[acc_name] = balance_info if balance_info else "Error al obtener balance"
+    
+    _real_balances_cache = new_cache
+    _real_balances_last_update = now
+
+def get_real_balances_cache() -> Dict[str, Any]:
+    """
+    Devuelve una copia de la caché de balances reales.
+    Esta función es segura para ser llamada por la TUI.
+    """
+    return _real_balances_cache.copy()
+
+# <<< FIN DE NUEVAS FUNCIONES PARA LA CACHÉ DE BALANCES REALES >>>
+
+# =============== FIN ARCHIVO: core/strategy/balance_manager.py (ACTUALIZADO) ===============

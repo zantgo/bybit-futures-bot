@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/logging/memory_logger.py ===============
+# =============== INICIO ARCHIVO: core/logging/memory_logger.py (ACTUALIZADO) ===============
 """
 Módulo para capturar y almacenar logs en memoria.
 
@@ -11,7 +11,8 @@ import datetime
 from typing import List, Tuple
 
 # --- Estado del Módulo ---
-_log_deque = collections.deque(maxlen=200) # Almacena los últimos 200 mensajes
+# Aumentado el tamaño máximo para tener más historial en la TUI
+_log_deque = collections.deque(maxlen=1000)
 _is_verbose_mode = False # Por defecto, no se imprimen logs informativos
 
 def set_verbose_mode(is_verbose: bool):
@@ -36,4 +37,4 @@ def get_logs() -> List[Tuple[str, str, str]]:
     """Devuelve una copia de todos los logs almacenados."""
     return list(_log_deque)
 
-# =============== FIN ARCHIVO: core/logging/memory_logger.py ===============
+# =============== FIN ARCHIVO: core/logging/memory_logger.py (ACTUALIZADO) ===============

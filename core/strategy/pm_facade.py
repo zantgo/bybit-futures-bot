@@ -1,4 +1,4 @@
-# =============== INICIO ARCHIVO: core/strategy/pm_facade.py (MODIFICADO) ===============
+# =============== INICIO ARCHIVO: core/strategy/pm_facade.py (CORREGIDO Y COMPLETO) ===============
 """
 Fachada Pública y Orquestador de Alto Nivel para el Position Manager (v18.0).
 
@@ -266,6 +266,199 @@ def get_unrealized_pnl(current_price: float) -> float:
             else: total_unrealized_pnl += (entry - current_price) * size
     return total_unrealized_pnl
 
+# <<< INICIO DE NUEVAS FUNCIONES PARA CONTROL AVANZADO >>>
+
+def set_leverage(new_leverage: float) -> Tuple[bool, str]:
+    """
+    Establece el apalancamiento para futuras operaciones y lo aplica en el exchange.
+    """
+    if not pm_state.is_initialized(): return False, "PM no está inicializado."
+    if not isinstance(new_leverage, (int, float)) or not (1 <= new_leverage <= 100):
+        return False, "Apalancamiento inválido. Debe ser un número entre 1 y 100."
+
+    pm_state.set_leverage(new_leverage)
+    
+    if pm_state.is_live_mode():
+        symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
+        success = live_operations.set_leverage(symbol, str(new_leverage), str(new_leverage))
+        if success:
+            return True, f"Apalancamiento actualizado a {new_leverage}x (afecta a nuevas posiciones)."
+        else:
+            return False, f"Error al aplicar apalancamiento de {new_leverage}x en el exchange."
+    
+    return True, f"Apalancamiento de backtest actualizado a {new_leverage}x (afecta a nuevas posiciones)."
+
+def set_manual_trade_limit(limit: Optional[int]) -> Tuple[bool, str]:
+    """
+    Establece un límite al número de trades para la sesión manual actual.
+    """
+    if not pm_state.is_initialized(): return False, "PM no está inicializado."
+    if limit is not None and (not isinstance(limit, int) or limit < 0):
+        return False, "Límite de trades inválido. Debe ser un número entero positivo o 0."
+    
+    new_limit = limit if limit is not None and limit > 0 else None
+    current_mode = pm_state.get_manual_state()["mode"]
+    # Re-aplica el modo para resetear el contador de trades con el nuevo límite
+    pm_state.set_manual_mode(current_mode, new_limit)
+    
+    limit_str = f"{new_limit} trades" if new_limit is not None else "ilimitados"
+    return True, f"Límite de sesión establecido a {limit_str}."
+
+def get_rrr_potential() -> Optional[float]:
+    """
+    Calcula el Risk/Reward Ratio Potencial hasta la activación del Trailing Stop.
+    """
+    if not pm_state.is_initialized(): return None
+    
+    sl_pct = pm_state.get_individual_stop_loss_pct()
+    ts_activation_pct = pm_state.get_trailing_stop_params()['activation']
+    
+    if sl_pct > 0 and ts_activation_pct > 0:
+        return utils.safe_division(ts_activation_pct, sl_pct)
+    return None
+
+def add_conditional_trigger(condition: Dict[str, Any], action: Dict[str, Any], one_shot: bool = True) -> Tuple[bool, str]:
+    """
+    Añade una nueva regla de trigger condicional.
+    """
+    if not pm_state.is_initialized(): return False, "PM no está inicializado."
+    
+    # Validación básica (se puede expandir)
+    if not all(k in condition for k in ["type", "value"]) or not all(k in action for k in ["type", "params"]):
+        return False, "Estructura de trigger inválida."
+        
+    trigger_id = f"trigger_{int(time.time() * 1000)}_{action['params'].get('mode', action.get('type', 'action'))}"
+    
+    trigger_data = {
+        "id": trigger_id,
+        "condition": condition,
+        "action": action,
+        "is_active": True,
+        "one_shot": one_shot
+    }
+    
+    pm_state.add_trigger(trigger_data)
+    return True, f"Trigger '{trigger_id}' añadido con éxito."
+
+def remove_conditional_trigger(trigger_id: str) -> Tuple[bool, str]:
+    """
+    Elimina un trigger condicional por su ID.
+    """
+    if not pm_state.is_initialized(): return False, "PM no está inicializado."
+    
+    success = pm_state.remove_trigger_by_id(trigger_id)
+    if success:
+        return True, f"Trigger '{trigger_id}' eliminado."
+    else:
+        return False, f"No se encontró el trigger con ID '{trigger_id}'."
+
+def get_active_triggers() -> list:
+    """
+    Obtiene la lista de todos los triggers condicionales.
+    """
+    if not pm_state.is_initialized(): return []
+    return pm_state.get_all_triggers()
+
+# <<< FIN DE NUEVAS FUNCIONES PARA CONTROL AVANZADO >>>
+
+# <<< INICIO DE MODIFICACIONES PARA CONTROL DE TENDENCIA >>>
+
+def set_trend_limits(
+    duration: Optional[int], 
+    tp_roi_pct: Optional[float], 
+    sl_roi_pct: Optional[float],
+    trade_limit: Optional[int] = None
+) -> Tuple[bool, str]:
+    """
+    Establece los límites (duración, TP/SL ROI, trades) para la PRÓXIMA tendencia manual.
+    """
+    if not pm_state.is_initialized(): return False, "PM no está inicializado."
+    
+    # El límite de trades se asocia al modo, así que se gestiona a través de set_manual_trade_limit.
+    if trade_limit is not None:
+        set_manual_trade_limit(trade_limit)
+
+    # La acción al finalizar se mantiene como "ASK", ya que el TUI lo gestionará.
+    pm_state.set_trend_limits(duration, tp_roi_pct, sl_roi_pct, "ASK")
+    
+    msg_parts = []
+    if duration: msg_parts.append(f"Duración: {duration} min")
+    if tp_roi_pct is not None and tp_roi_pct > 0: msg_parts.append(f"TP ROI: +{tp_roi_pct:.2f}%")
+    if sl_roi_pct is not None and sl_roi_pct < 0: msg_parts.append(f"SL ROI: {sl_roi_pct:.2f}%")
+    if trade_limit is not None: msg_parts.append(f"Trades: {trade_limit if trade_limit > 0 else 'Ilimitados'}")
+
+    if not msg_parts:
+        return True, "Límites de tendencia para la próxima sesión han sido desactivados."
+    
+    return True, f"Límites para la próxima tendencia establecidos: {', '.join(msg_parts)}."
+
+# --- CÓDIGO ANTERIOR (COMENTADO) ---
+# def set_trend_limits(duration: Optional[int], roi: Optional[float], action_on_end: str = "ASK") -> Tuple[bool, str]:
+#     """Establece los límites para la próxima tendencia que se active."""
+#     if not pm_state.is_initialized(): return False, "PM no está inicializado."
+#     
+#     pm_state.set_trend_limits(duration, roi, action_on_end)
+#     
+#     msg_parts = []
+#     if duration: msg_parts.append(f"Duración: {duration} min")
+#     if roi: msg_parts.append(f"ROI: {roi:.2f}%")
+#     if not msg_parts:
+#         return True, "Límites de tendencia desactivados."
+#     
+#     return True, f"Límites para la próxima tendencia establecidos: {', '.join(msg_parts)}."
+
+def start_manual_trend(
+    mode: str, 
+    trade_limit: Optional[int], 
+    duration_limit: Optional[int], 
+    tp_roi_limit: Optional[float],
+    sl_roi_limit: Optional[float]
+) -> Tuple[bool, str]:
+    """
+    Inicia una nueva tendencia manual con límites específicos.
+    Esta función está diseñada para ser llamada por un trigger.
+    """
+    if not pm_state.is_initialized() or pm_state.get_operation_mode() != "live_interactive":
+        return False, "Función solo disponible en modo live interactivo."
+    
+    # 1. Establecer los límites de duración y ROI para la tendencia que vamos a iniciar.
+    pm_state.set_trend_limits(duration_limit, tp_roi_limit, sl_roi_limit, "ASK")
+    
+    # 2. Cambiar al modo de trading deseado, aplicando el límite de trades.
+    success, msg = set_manual_trading_mode(mode, trade_limit=trade_limit, close_open=False)
+    
+    if success:
+        limit_parts = []
+        if trade_limit is not None: limit_parts.append(f"Trades: {trade_limit or 'inf'}")
+        if duration_limit is not None: limit_parts.append(f"Dur: {duration_limit}m")
+        if tp_roi_limit is not None: limit_parts.append(f"TP: +{tp_roi_limit}%")
+        if sl_roi_limit is not None: limit_parts.append(f"SL: {sl_roi_limit}%")
+        limit_str = f"({', '.join(limit_parts)})" if limit_parts else ""
+
+        return True, f"Tendencia manual '{mode}' iniciada con límites {limit_str}."
+    else:
+        return False, f"Fallo al iniciar tendencia manual: {msg}"
+
+def end_current_trend_and_ask():
+    """
+    Finaliza la tendencia actual, cambia el modo a NEUTRAL y pregunta al usuario
+    qué hacer con las posiciones abiertas.
+    NOTA: La "pregunta" se gestiona en la TUI, esta función prepara el estado.
+    """
+    if not pm_state.is_initialized() or pm_state.get_operation_mode() != "live_interactive":
+        return
+    
+    # 1. Cambiar el modo a NEUTRAL
+    # Usamos el setter de bajo nivel para no resetear los contadores de trades de la tendencia finalizada
+    pm_state._manual_mode = "NEUTRAL"
+    
+    # 2. La lógica de la pregunta se manejará en la TUI. Aquí simplemente dejamos
+    # las posiciones como están, que es el comportamiento por defecto. El usuario
+    # puede cerrarlas manualmente desde el menú si lo desea.
+    # El mensaje impreso en event_processor sirve como notificación.
+    
+# <<< FIN DE MODIFICACIONES PARA CONTROL DE TENDENCIA >>>
+
 def get_position_summary() -> dict:
     if not pm_state.is_initialized(): return {"error": "PM no inicializado"}
     
@@ -289,32 +482,20 @@ def get_position_summary() -> dict:
         "open_short_positions": [_position_helpers.format_pos_for_summary(p, utils) for p in open_shorts],
         "total_realized_pnl_session": pm_state.get_total_pnl_realized(),
         "initial_total_capital": balance_manager.get_initial_total_capital(),
-        # Añadir un campo por defecto para los balances reales
-        "real_account_balances": {}
+        "real_account_balances": {},
+        "session_limits": {
+            "time_limit": pm_state.get_session_time_limit(),
+            "trade_limit": pm_state.get_manual_state().get("limit"),
+            "trades_executed": pm_state.get_manual_state().get("executed")
+        },
+        "active_triggers": pm_state.get_active_triggers()
     }
 
-    # <<< INICIO DE LA MODIFICACIÓN >>>
-    # Si estamos en modo live, obtener y añadir los balances reales de las cuentas
     if pm_state.is_live_mode():
-        try:
-            from live.connection import manager as live_manager
-            real_balances = {}
-            if live_manager:
-                accounts_to_check = [
-                    config.ACCOUNT_MAIN, config.ACCOUNT_LONGS,
-                    config.ACCOUNT_SHORTS, config.ACCOUNT_PROFIT
-                ]
-                # Usar un set para evitar duplicados si los nombres de cuenta son los mismos
-                for acc_name in sorted(list(set(accounts_to_check))):
-                    if acc_name in live_manager.get_initialized_accounts():
-                        balance_info = live_operations.get_unified_account_balance_info(acc_name)
-                        real_balances[acc_name] = balance_info if balance_info else "Error al obtener balance"
-            summary_dict["real_account_balances"] = real_balances
-        except ImportError:
-            summary_dict["real_account_balances"] = {"error": "live_manager no disponible"}
-        except Exception as e:
-            summary_dict["real_account_balances"] = {"error": f"Excepción obteniendo balances: {e}"}
-    # <<< FIN DE LA MODIFICACIÓN >>>
+        if balance_manager:
+            summary_dict["real_account_balances"] = balance_manager.get_real_balances_cache()
+        else:
+            summary_dict["real_account_balances"] = {"error": "balance_manager no disponible"}
 
     return summary_dict
 
@@ -338,13 +519,13 @@ def close_all_logical_positions(side: str, reason: str = "MANUAL_ALL") -> bool:
         return False
     
     open_positions = position_state.get_open_logical_positions(side)
-    if not open_positions: return True # No hay nada que cerrar
+    if not open_positions: return True
 
     print(f"--- Solicitud de cierre forzoso de {len(open_positions)} posiciones {side.upper()} ---")
     
     for i in sorted(range(len(open_positions)), reverse=True):
         pm_actions.close_logical_position(side, i, price, datetime.datetime.now(), reason=reason)
-        time.sleep(0.1) # Pequeña pausa entre cierres
+        time.sleep(0.1)
         
     return len(position_state.get_open_logical_positions(side)) == 0
 
@@ -353,4 +534,4 @@ def get_global_sl_pct() -> Optional[float]:
     if not pm_state.is_initialized(): return None
     return pm_state.get_global_sl_pct()
 
-# =============== FIN ARCHIVO: core/strategy/pm_facade.py (MODIFICADO) ===============
+# =============== FIN ARCHIVO: core/strategy/pm_facade.py (CORREGIDO Y COMPLETO) ===============

@@ -1,4 +1,6 @@
-# =============== INICIO ARCHIVO: core/strategy/event_processor.py (COMPLETO Y MODIFICADO) ===============
+
+
+# =============== INICIO ARCHIVO: core/strategy/event_processor.py (CORREGIDO Y COMPLETO) ===============
 """
 Procesa un único evento de precio (tick).
 Calcula TA, genera señal y delega la gestión de posiciones al pm_facade.
@@ -28,8 +30,8 @@ try:
     from . import ta_manager
     from . import signal_generator
     from . import position_state
+    from . import balance_manager # Importar para actualizar caché
 
-    # <<< INICIO MODIFICACIÓN: Importar la fachada con el alias original >>>
     position_manager = None
     _pm_enabled_in_config = getattr(config, 'POSITION_MANAGEMENT_ENABLED', False)
     if _pm_enabled_in_config:
@@ -42,7 +44,6 @@ try:
             print(f"WARN [Event Proc Import]: Excepción inesperada cargando pm_facade: {e_pm_other}")
     else:
         print("INFO [Event Proc Import]: Position Management desactivado en config, PM no importado.")
-    # <<< FIN MODIFICACIÓN >>>
 
     signal_logger = None
     if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
@@ -56,11 +57,11 @@ try:
 
 except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación base (config/utils/core?): {e}")
-    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None
+    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None; balance_manager = None
     traceback.print_exc(); sys.exit(1)
 except Exception as e_imp:
     print(f"ERROR CRÍTICO [Event Proc Import]: Excepción inesperada durante imports: {e_imp}")
-    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None
+    config=None; utils=None; ta_manager=None; signal_generator=None; position_manager=None; signal_logger=None; position_state = None; balance_manager = None
     traceback.print_exc(); sys.exit(1)
 
 class GlobalStopLossException(Exception):
@@ -71,9 +72,10 @@ class GlobalStopLossException(Exception):
 _previous_raw_event_price = np.nan
 _is_first_event = True
 _operation_mode = "unknown"
-_market_regime_controller_instance: Optional[Any] = None # Renombrado para claridad
+_market_regime_controller_instance: Optional[Any] = None
 _global_stop_loss_event: Optional[threading.Event] = None
 _global_stop_loss_triggered: bool = False
+_trend_limit_hit_reported: bool = False
 
 # --- Inicialización ---
 def initialize(
@@ -81,12 +83,12 @@ def initialize(
     initial_real_state: Optional[Dict[str, Dict[str, Any]]] = None,
     base_position_size_usdt: Optional[float] = None,
     initial_max_logical_positions: Optional[int] = None,
-    ut_bot_controller_instance: Optional[Any] = None, # Mantenido por retrocompatibilidad de llamada
+    ut_bot_controller_instance: Optional[Any] = None,
     stop_loss_event: Optional[threading.Event] = None,
     global_stop_loss_event: Optional[threading.Event] = None
 ):
     global _previous_raw_event_price, _is_first_event, _operation_mode, _market_regime_controller_instance
-    global position_manager, _global_stop_loss_event, _global_stop_loss_triggered
+    global position_manager, _global_stop_loss_event, _global_stop_loss_triggered, _trend_limit_hit_reported
 
     if not config or not utils or not ta_manager or not signal_generator:
         raise RuntimeError("Event Processor no pudo inicializarse por dependencias faltantes.")
@@ -98,12 +100,82 @@ def initialize(
     _market_regime_controller_instance = ut_bot_controller_instance
     _global_stop_loss_event = global_stop_loss_event
     _global_stop_loss_triggered = False
+    _trend_limit_hit_reported = False
 
     if signal_logger and getattr(config, 'LOG_SIGNAL_OUTPUT', False) and hasattr(signal_logger, 'initialize_logger'):
         try: signal_logger.initialize_logger()
         except Exception as e: print(f"ERROR [Event Proc]: Inicializando signal_logger: {e}")
 
     print("[Event Processor] Inicializado.")
+
+
+# <<< INICIO DE LA MODIFICACIÓN: Lógica de Triggers actualizada >>>
+def _check_conditional_triggers(current_price: float, timestamp: datetime.datetime):
+    """
+    Comprueba y ejecuta los triggers condicionales activos.
+    """
+    if not position_manager or not position_manager.pm_state.is_initialized():
+        return
+
+    # Usar get_all_triggers para poder desactivarlos si son 'one_shot'
+    triggers_to_check = position_manager.pm_state.get_all_triggers()
+    if not triggers_to_check:
+        return
+
+    for trigger in triggers_to_check:
+        # Solo procesar triggers activos
+        if not trigger.get("is_active", False):
+            continue
+
+        try:
+            condition = trigger.get("condition", {})
+            action = trigger.get("action", {})
+            trigger_id = trigger.get("id")
+            one_shot = trigger.get("one_shot", True)
+
+            condition_met = False
+            cond_type = condition.get("type")
+            cond_value = condition.get("value")
+
+            if cond_type == "PRICE_ABOVE" and current_price >= cond_value:
+                condition_met = True
+            elif cond_type == "PRICE_BELOW" and current_price <= cond_value:
+                condition_met = True
+            
+            # Aquí se pueden añadir más tipos de condiciones en el futuro (ej. basedas en % de cambio)
+
+            if condition_met:
+                print("\n" + "*"*80)
+                print(f"!!!   TRIGGER CONDICIONAL ACTIVADO: {trigger_id}   !!!".center(80))
+                print(f"!!!   Condición '{cond_type}' ({cond_value}) cumplida con precio actual {current_price}   !!!".center(80))
+                
+                # Ejecutar la acción
+                action_type = action.get("type")
+                action_params = action.get("params", {})
+
+                if action_type == "SET_MODE":
+                    position_manager.set_manual_trading_mode(**action_params)
+                
+                # --- NUEVA ACCIÓN ---
+                elif action_type == "START_MANUAL_TREND":
+                    position_manager.start_manual_trend(**action_params)
+
+                elif action_type == "CLOSE_ALL_LONGS":
+                    position_manager.close_all_logical_positions('long', reason=f"TRIGGER_{trigger_id}")
+                elif action_type == "CLOSE_ALL_SHORTS":
+                    position_manager.close_all_logical_positions('short', reason=f"TRIGGER_{trigger_id}")
+                
+                print(f"!!!   Acción '{action_type}' ejecutada con parámetros: {action_params}   !!!".center(80))
+                print("*"*80 + "\n")
+
+                # Desactivar el trigger si es 'one_shot'
+                if one_shot:
+                    position_manager.pm_state.update_trigger_status(trigger_id, is_active=False)
+
+        except Exception as e:
+            print(f"ERROR [Event Processor]: Procesando trigger '{trigger.get('id')}': {e}")
+            traceback.print_exc()
+# <<< FIN DE LA MODIFICACIÓN >>>
 
 
 # --- Procesamiento Principal de Evento ---
@@ -120,11 +192,18 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
     if not final_price_info:
         print("WARN [EP Process]: Evento final vacío."); return
 
+    # --- INICIO MODIFICACIÓN: Actualizar caché de balances periódicamente ---
+    if balance_manager:
+        balance_manager.update_real_balances_cache_from_api()
+    # --- FIN MODIFICACIÓN ---
+
     current_timestamp = final_price_info.get("timestamp")
     current_price = utils.safe_float_convert(final_price_info.get("price"), default=np.nan)
 
     if not isinstance(current_timestamp, (datetime.datetime, pd.Timestamp)) or pd.isna(current_price) or current_price <= 0:
         print(f"WARN [EP Process]: Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}"); return
+
+    _check_conditional_triggers(current_price, current_timestamp)
 
     if _market_regime_controller_instance and hasattr(_market_regime_controller_instance, 'add_tick'):
         try:
@@ -198,7 +277,7 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         except Exception as pm_err:
             print(f"ERROR [PM Call from EP]: {pm_err}"); traceback.print_exc()
 
-    # Chequea si se han alcanzado los límites de la sesión (tiempo, TP, SL)
+    _check_trend_limits(current_price, current_timestamp)
     _check_session_limits(current_price, current_timestamp)
 
     if signal_data:
@@ -261,6 +340,82 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         except Exception as e_print: print(f"ERROR [Print Tick Status]: {e_print}"); traceback.print_exc()
 
 
+# <<< INICIO DE MODIFICACIÓN: Chequeo de Límites de Tendencia actualizado >>>
+def _check_trend_limits(current_price: float, current_timestamp: datetime.datetime):
+    """
+    Comprueba si se han alcanzado los límites de la tendencia manual actual (trades, duración, ROI TP/SL).
+    Si se alcanza un límite, revierte el modo a NEUTRAL.
+    """
+    global _trend_limit_hit_reported
+    if not position_manager or not position_manager.pm_state.is_initialized() or not utils: return
+    if _operation_mode != "live_interactive": return
+
+    manual_state = position_manager.pm_state.get_manual_state()
+    current_mode = manual_state.get("mode")
+    if current_mode == "NEUTRAL" or _trend_limit_hit_reported:
+        if current_mode == "NEUTRAL" and _trend_limit_hit_reported:
+            _trend_limit_hit_reported = False
+        return
+
+    trend_limits = position_manager.pm_state.get_trend_limits()
+    limit_reason = None
+
+    # 1. Chequeo por número de trades
+    trade_limit = manual_state.get("limit")
+    if trade_limit is not None and manual_state.get("executed", 0) >= trade_limit:
+        limit_reason = f"Límite de {trade_limit} trades alcanzado"
+
+    # 2. Chequeo por duración
+    duration_limit = trend_limits.get("duration_minutes")
+    if duration_limit and not limit_reason:
+        trend_start_time = trend_limits.get("start_time")
+        if trend_start_time:
+            elapsed_minutes = (current_timestamp - trend_start_time).total_seconds() / 60.0
+            if elapsed_minutes >= duration_limit:
+                limit_reason = f"Límite de duración de {duration_limit} min alcanzado"
+
+    # 3. Chequeo por ROI (TP y SL)
+    tp_roi_limit = trend_limits.get("tp_roi_pct")
+    sl_roi_limit = trend_limits.get("sl_roi_pct")
+    
+    if (tp_roi_limit is not None or sl_roi_limit is not None) and not limit_reason:
+        pnl_realized_since_trend_start = position_manager.pm_state.get_total_pnl_realized() - position_manager.pm_state.get_trend_state()["initial_pnl"]
+        
+        # Calcular PNL no realizado solo para la tendencia actual
+        unrealized_pnl_trend = 0.0
+        for side in ['long', 'short']:
+            for pos in position_state.get_open_logical_positions(side):
+                if pos.get('entry_timestamp') >= trend_limits.get("start_time", datetime.datetime.min):
+                    if side == 'long':
+                        unrealized_pnl_trend += (current_price - pos.get('entry_price', 0.0)) * pos.get('size_contracts', 0.0)
+                    else: # short
+                        unrealized_pnl_trend += (pos.get('entry_price', 0.0) - current_price) * pos.get('size_contracts', 0.0)
+
+        total_pnl_trend = pnl_realized_since_trend_start + unrealized_pnl_trend
+        initial_capital = position_manager.get_position_summary().get('initial_total_capital', 0.0)
+        
+        if initial_capital > 1e-9:
+            current_trend_roi = utils.safe_division(total_pnl_trend, initial_capital) * 100
+            
+            # Chequeo de Take Profit
+            if tp_roi_limit is not None and current_trend_roi >= tp_roi_limit:
+                limit_reason = f"Límite de TP por ROI de +{tp_roi_limit:.2f}% alcanzado (actual: {current_trend_roi:+.2f}%)"
+            
+            # Chequeo de Stop Loss
+            elif sl_roi_limit is not None and current_trend_roi <= sl_roi_limit:
+                limit_reason = f"Límite de SL por ROI de {sl_roi_limit:.2f}% alcanzado (actual: {current_trend_roi:+.2f}%)"
+
+    if limit_reason:
+        print("\n" + "*"*80)
+        print(f"!!!   LÍMITE DE TENDENCIA ALCANZADO: {limit_reason}   !!!".center(80))
+        print(f"!!!   Revirtiendo modo a NEUTRAL. No se abrirán más posiciones en esta tendencia.   !!!".center(80))
+        print("*"*80 + "\n")
+        
+        _trend_limit_hit_reported = True
+        position_manager.end_current_trend_and_ask()
+# <<< FIN DE MODIFICACIÓN >>>
+
+
 def _check_session_limits(current_price: float, current_timestamp: datetime.datetime):
     global _global_stop_loss_triggered
     if not position_manager or not position_state or not utils or not config:
@@ -272,7 +427,7 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
 
     # --- 1. CHEQUEO DEL LÍMITE DE TIEMPO DE LA SESIÓN ---
     start_time = position_manager.pm_state.get_session_start_time()
-    if not start_time: return # No hacer nada si la sesión no ha empezado formalmente
+    if not start_time: return
 
     time_limit_config = position_manager.pm_state.get_session_time_limit()
     max_minutes = time_limit_config.get("duration", 0)
@@ -282,7 +437,6 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
         elapsed_minutes = (current_timestamp - start_time).total_seconds() / 60.0
         if elapsed_minutes >= max_minutes:
             if time_limit_action == "STOP":
-                 # La acción es una parada de emergencia. Solo se ejecuta una vez.
                 if not _global_stop_loss_triggered:
                     print("\n" + "!"*80)
                     print("!!!   LÍMITE DE TIEMPO DE SESIÓN ALCANZADO (ACCIÓN: STOP)   !!!".center(80))
@@ -295,10 +449,9 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
                         _global_stop_loss_event.set()
                     if _operation_mode != "backtest":
                         raise GlobalStopLossException("Límite de tiempo de sesión alcanzado (STOP)")
-                return # Detener más chequeos en este tick.
+                return
 
             else: # NEUTRAL
-                # La acción es una parada suave, solo se ejecuta una vez.
                 if not position_manager.pm_state.is_session_tp_hit():
                     print("\n" + "*"*80)
                     print("!!!   LÍMITE DE TIEMPO DE SESIÓN ALCANZADO (ACCIÓN: NEUTRAL)   !!!".center(80))
@@ -332,7 +485,6 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
     
     current_roi_pct = utils.safe_division(total_realized_pnl + total_unrealized_pnl, initial_capital) * 100.0
     
-    # Lógica de Take Profit por ROI
     if tp_threshold_pct and tp_threshold_pct > 0 and not position_manager.pm_state.is_session_tp_hit():
         if current_roi_pct >= tp_threshold_pct:
             print("\n" + "*"*80)
@@ -343,7 +495,6 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
             if _operation_mode == "live_interactive":
                 position_manager.set_manual_trading_mode("NEUTRAL") 
             
-    # Lógica de Stop Loss por ROI
     stop_loss_comparison_pct = -abs(sl_threshold_pct) if sl_threshold_pct else 0.0
     if stop_loss_comparison_pct != 0 and current_roi_pct <= stop_loss_comparison_pct:
         _global_stop_loss_triggered = True
@@ -360,4 +511,4 @@ def _check_session_limits(current_price: float, current_timestamp: datetime.date
         if _operation_mode != "backtest":
             raise GlobalStopLossException(f"Global Stop Loss por ROI activado: {current_roi_pct:.2f}%")
 
-# =============== FIN ARCHIVO: core/strategy/event_processor.py (COMPLETO Y MODIFICADO) ===============
+# =============== FIN ARCHIVO: core/strategy/event_processor.py (ACTUALIZADO) ===============
