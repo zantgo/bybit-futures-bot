@@ -1,3 +1,5 @@
+# main.py
+
 """
 Punto de Entrada Principal del Bot de Trading.
 
@@ -23,15 +25,12 @@ except ImportError as e:
 
 # --- Importaciones de Componentes Core y Strategy ---
 try:
-    # --- SOLUCIÓN: Importación estandarizada ---
     from core import api as live_operations
-    # --- FIN DE LA SOLUCIÓN ---
     from core.logging import open_position_logger as open_snapshot_logger
     from core.strategy import pm as position_manager
     from core.strategy import ta
     from core.strategy import event_processor
     
-    # Módulos internos del PM (necesarios para la inyección de dependencias)
     from core.strategy.pm import _balance as balance_manager
     from core.strategy.pm import _position_state as position_state
     from core.strategy.pm import _helpers as position_helpers
@@ -50,12 +49,14 @@ except ImportError as e:
     print(f"ERROR CRÍTICO: No se pudo importar un módulo de CONEXIÓN: {e}")
     sys.exit(1)
 
-# --- Importación de Runner ---
+# --- SOLUCIÓN: La importación ahora funciona porque __init__.py es una fachada limpia ---
 try:
     from runner import run_live_interactive_mode
 except ImportError as e:
     print(f"ERROR CRÍTICO: No se pudo importar el RUNNER: {e}")
+    traceback.print_exc() # Añadido para más detalles si vuelve a fallar
     sys.exit(1)
+# --- FIN DE LA SOLUCIÓN ---
 
 def run_selected_mode(mode: str):
     """
@@ -77,7 +78,6 @@ def run_selected_mode(mode: str):
             print("ERROR CRITICO: No se pudo inicializar ninguna cuenta API. Saliendo.")
             return
 
-        # Selecciona el runner apropiado y le pasa todas las dependencias.
         if mode == "live_interactive":
             run_live_interactive_mode(
                 final_summary=final_summary,
@@ -109,11 +109,8 @@ def run_selected_mode(mode: str):
         print("El bot ha encontrado un error fatal y se detendrá.")
     finally:
         print("\n[main] La ejecución ha finalizado.")
-        # Usar _exit para forzar la salida, ya que pueden quedar hilos demonio corriendo
         os._exit(0)
 
 
 if __name__ == "__main__":
-    # En esta versión refactorizada, el bot siempre se inicia directamente
-    # en modo live interactivo llamando a la función de lanzamiento.
     launch_bot()
