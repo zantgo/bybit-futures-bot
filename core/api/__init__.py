@@ -1,7 +1,7 @@
 # core/api/__init__.py
 
 """
-Paquete de la Interfaz de la API de Trading.
+Paquete de la Interfaz de la API.
 
 Este paquete actúa como una fachada pública que abstrae y organiza todas las
 interacciones con la API del exchange (Bybit). Expone funciones para:
@@ -9,7 +9,7 @@ interacciones con la API del exchange (Bybit). Expone funciones para:
 - Consultar información de la cuenta.
 - Ejecutar operaciones de trading.
 
-La lógica interna está separada en módulos privados para mejorar la
+La lógica interna está separada en submódulos y sub-paquetes para mejorar la
 mantenibilidad y claridad del código.
 """
 
@@ -29,14 +29,11 @@ from ._account import (
     get_order_execution_history,
 )
 
-# Desde el módulo de operaciones de trading (_trading.py)
-from ._trading import (
-    set_leverage,
-    place_market_order,
-    cancel_order,
-    close_all_symbol_positions,
-    close_position_by_side,
-)
+# --- INICIO DE LA MODIFICACIÓN ---
+# Se actualiza la importación para apuntar al nuevo sub-paquete 'trading'.
+# La palabra clave 'trading' ahora representa la fachada 'core/api/trading/__init__.py'
+from . import trading
+# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Control de lo que se exporta con 'from core.api import *' ---
 # Es una buena práctica definir __all__ para una API pública limpia.
@@ -51,10 +48,24 @@ __all__ = [
     'get_active_position_details_api',
     'get_order_execution_history',
 
-    # Funciones de ejecución de trading
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se actualiza la lista __all__ para reflejar las funciones importadas
+    # desde el nuevo sub-paquete 'trading'. Los nombres de las funciones no cambian.
     'set_leverage',
     'place_market_order',
     'cancel_order',
     'close_all_symbol_positions',
     'close_position_by_side',
+    # --- FIN DE LA MODIFICACIÓN ---
 ]
+
+# --- MODIFICACIÓN ADICIONAL: Asignar funciones a variables locales ---
+# Para que el resto de la aplicación que hace `from core import api as live_operations`
+# y luego `live_operations.place_market_order` siga funcionando sin cambios,
+# asignamos explícitamente las funciones del módulo 'trading' a este nivel.
+set_leverage = trading.set_leverage
+place_market_order = trading.place_market_order
+cancel_order = trading.cancel_order
+close_all_symbol_positions = trading.close_all_symbol_positions
+close_position_by_side = trading.close_position_by_side
+# --- FIN DE LA MODIFICACIÓN ADICIONAL ---

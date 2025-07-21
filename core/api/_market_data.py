@@ -14,45 +14,27 @@ from typing import Optional, Dict, Any
 import time
 
 # --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
-
-# Ajustar sys.path para importaciones absolutas
+# (Esta sección se mantiene igual, es correcta)
 if __name__ != "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-# Importar dependencias con rutas absolutas desde la raíz del proyecto
 try:
     import config
     from connection import manager as connection_manager
     from core.logging import memory_logger
-    
-    # Importar funciones auxiliares compartidas desde el nuevo módulo _helpers
     from ._helpers import _handle_api_error_generic
-
-    try:
-        from pybit.exceptions import InvalidRequestError, FailedRequestError
-    except ImportError:
-        print("WARN [Market Data API Import]: pybit exceptions not found. Using fallback.")
-        class InvalidRequestError(Exception): pass
-        class FailedRequestError(Exception):
-             def __init__(self, message, status_code=None): super().__init__(message); self.status_code = status_code
+    from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError as e:
     print(f"ERROR [Market Data API Import]: No se pudo importar módulo necesario: {e}")
-    config = type('obj', (object,), {'ACCOUNT_MAIN': 'main', 'CATEGORY_LINEAR': 'linear'})()
+    config = type('obj', (object,), {})()
     connection_manager = None
-    class MemoryLoggerFallback:
-        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
-    memory_logger = MemoryLoggerFallback()
-    def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool:
-        if response and response.get('retCode') == 0: return False
-        print(f"  ERROR API [{operation_tag}]: Fallback - Error genérico.")
-        return True
+    memory_logger = type('obj', (object,), {'log': print})()
+    def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
-    class FailedRequestError(Exception):
-        def __init__(self, message, status_code=None): super().__init__(message); self.status_code = status_code
-
+    class FailedRequestError(Exception): pass
 # --- FIN DE CAMBIOS: Importaciones Adaptadas ---
 
 
@@ -67,7 +49,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
     """Obtiene información del instrumento (precisión, mínimos) desde la API o caché."""
     global _instrument_info_cache
     if not connection_manager or not config:
-        print("ERROR [Get Instrument Info]: Dependencias (connection_manager, config) no disponibles.")
+        print("ERROR [Get Instrument Info]: Dependencias no disponibles.")
         return None
         
     cache_key = f"{category}_{symbol}"
@@ -77,24 +59,15 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         if (now - cached_data.get('timestamp', 0)) < _INSTRUMENT_INFO_CACHE_EXPIRY_SECONDS:
             return cached_data.get('data')
 
-    session = None
-    account_used = None
-    main_account_fallback = getattr(config, 'ACCOUNT_MAIN', 'main')
-    
-    session = connection_manager.get_client(main_account_fallback)
-    if session:
-        account_used = main_account_fallback
-    else:
-        initialized_accounts = connection_manager.get_initialized_accounts()
-        if not initialized_accounts:
-            print("ERROR [Get Instrument Info]: No hay sesiones API inicializadas.")
-            return None
-        account_used = initialized_accounts[0]
-        session = connection_manager.get_client(account_used)
-        if not session:
-            print("ERROR [Get Instrument Info]: Falló al obtener sesión API alternativa.")
-            return None
-        print(f"WARN [Get Instrument Info]: Usando sesión de '{account_used}' (fallback).")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se reemplaza la lógica de selección de cuenta manual con la llamada centralizada.
+    session, account_used = connection_manager.get_session_for_operation(
+        purpose='market_data'
+    )
+    if not session:
+        print("ERROR [Get Instrument Info]: No se pudo obtener una sesión API válida.")
+        return None
+    # --- FIN DE LA MODIFICACIÓN ---
         
     memory_logger.log(f"Consultando API para info de {symbol} ({category}) usando '{account_used}'...", level="DEBUG")
     params = {"category": category, "symbol": symbol}
