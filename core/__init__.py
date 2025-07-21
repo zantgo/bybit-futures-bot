@@ -1,5 +1,3 @@
-# core/__init__.py
-
 """
 Paquete Core del Bot.
 

@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: core/strategy/position_calculations.py (CORREGIDO Y COMPLETO) ===============
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
@@ -185,5 +184,3 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
         'total_size_contracts': float(total_contracts),
         'total_margin_usdt': float(total_margin)
     }
-
-# =============== FIN ARCHIVO: core/strategy/position_calculations.py (CORREGIDO Y COMPLETO) ===============

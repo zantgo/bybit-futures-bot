@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: core/strategy/pm_rules.py (ACTUALIZADO) ===============
 """
 Módulo para el motor de reglas del Position Manager.
 
@@ -13,7 +12,10 @@ from . import _state
 from . import _balance
 from . import _position_state
 from . import _helpers
-from core import _utils, live_operations
+from core import utils
+# --- SOLUCIÓN: Corregir la importación de 'api' ---
+from core import api as live_operations
+# --- FIN DE LA SOLUCIÓN ---
 import config as config
 
 def can_open_new_position(side: str) -> bool:
@@ -45,21 +47,16 @@ def can_open_new_position(side: str) -> bool:
         if side == 'short' and manual_mode == 'LONG_ONLY':
             return False
 
-        # <<< INICIO DE MODIFICACIÓN: Lógica de Límite de Trades de Sesión Unificada >>>
-        # Esta regla ahora se aplica aquí para el modo interactivo, leyendo el límite dinámico.
         trade_limit = manual_state.get("limit")
         if trade_limit is not None:
             if manual_state["executed"] >= trade_limit:
-                # Usar el flag de sesión para detener futuras aperturas hasta que se resetee.
-                # Esto es más robusto que solo devolver False.
                 if not _state.is_session_tp_hit():
                     print(f"INFO [PM Rules]: Límite de trades de sesión ({trade_limit}) alcanzado. No se abrirán más posiciones.")
                     _state.set_session_tp_hit(True)
                 return False
-        # <<< FIN DE MODIFICACIÓN >>>
 
-    # --- REGLAS PARA MODO AUTOMÁTICO ---
-    else: # automatic o automatic_backtest
+    # --- REGLAS PARA MODO AUTOMÁTICO (Mantenidas por si se reactivan) ---
+    else: 
         trend_state = _state.get_trend_state()
         if trend_state["tp_hit"]:
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
@@ -102,23 +99,23 @@ def can_open_new_position(side: str) -> bool:
         
         # Regla Común 3: Chequeo de Sincronización Real (si es modo live)
         if _state.is_live_mode() and getattr(config, 'POSITION_PRE_OPEN_SYNC_CHECK', True):
-            from live.connection import manager as live_manager # Importación local
+            from connection import manager as live_manager # Importación local
             
             symbol = getattr(config, 'TICKER_SYMBOL', '')
             target_account = getattr(config, f'ACCOUNT_{side.upper()}S', None) or getattr(config, 'ACCOUNT_MAIN', 'main')
             
             if target_account in live_manager.get_initialized_accounts():
                 balance_info = live_operations.get_unified_account_balance_info(target_account)
-                real_balance = _utils.safe_float_convert(balance_info.get('usdt_balance')) if balance_info else 0.0
+                real_balance = utils.safe_float_convert(balance_info.get('usdt_balance')) if balance_info else 0.0
                 
                 if real_balance < margin_needed - 1e-6:
                     print(f"WARN [PM Rules]: Chequeo Pre-Apertura falló: Margen REAL en '{target_account}' ({real_balance:.4f}) es insuficiente.")
                     return False
                 
                 physical_raw = live_operations.get_active_position_details_api(symbol, target_account)
-                physical_state = _helpers.extract_physical_state_from_api(physical_raw, symbol, side, _utils)
+                physical_state = _helpers.extract_physical_state_from_api(physical_raw, symbol, side, utils)
                 physical_size = physical_state['total_size_contracts'] if physical_state else 0.0
-                logical_size = sum(_utils.safe_float_convert(p.get('size_contracts'), 0.0) for p in open_positions)
+                logical_size = sum(utils.safe_float_convert(p.get('size_contracts'), 0.0) for p in open_positions)
 
                 if abs(physical_size - logical_size) > 1e-9:
                     print(f"WARN [PM Rules]: Chequeo Pre-Apertura falló: Desincronización de tamaño en '{target_account}'.")
@@ -131,4 +128,3 @@ def can_open_new_position(side: str) -> bool:
 
     # Si todas las reglas pasan, se puede abrir la posición.
     return True
-# =============== FIN ARCHIVO: core/strategy/pm_rules.py (ACTUALIZADO) ===============

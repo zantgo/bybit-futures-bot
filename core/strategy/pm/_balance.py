@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: core/strategy/balance_manager.py (ACTUALIZADO) ===============
 """
 Módulo dedicado a gestionar los balances LÓGICOS de las cuentas
 (Long Margin, Short Margin, Profit Balance) durante el backtesting y live.
@@ -14,12 +13,12 @@ from core import _utils
 
 # --- Dependencias del Ecosistema PM ---
 try:
-    from .. import pm_state
+    from .. import _state
     from core import live_operations
     import config as config
-    from live.connection import manager as connection_manager
+    from connection import manager as connection_manager
 except ImportError:
-    pm_state = None
+    _state = None
     _utils = None
     config = None
     live_operations = None
@@ -323,17 +322,17 @@ def get_initial_total_capital() -> float:
     return _initial_operational_long_margin + _initial_operational_short_margin
 
 def recalculate_dynamic_base_sizes():
-    if not _initialized or not pm_state or not _utils:
+    if not _initialized or not _state or not _utils:
         return
 
     try:
-        max_pos = pm_state.get_max_logical_positions()
-        base_size_ref = pm_state.get_initial_base_position_size()
+        max_pos = _state.get_max_logical_positions()
+        base_size_ref = _state.get_initial_base_position_size()
 
         long_size = max(base_size_ref, _utils.safe_division(get_available_margin('long'), max_pos))
         short_size = max(base_size_ref, _utils.safe_division(get_available_margin('short'), max_pos))
         
-        pm_state.set_dynamic_base_size(long_size, short_size)
+        _state.set_dynamic_base_size(long_size, short_size)
     except Exception:
         pass
 
@@ -370,7 +369,3 @@ def get_real_balances_cache() -> Dict[str, Any]:
     Esta función es segura para ser llamada por la TUI.
     """
     return _real_balances_cache.copy()
-
-# <<< FIN DE NUEVAS FUNCIONES PARA LA CACHÉ DE BALANCES REALES >>>
-
-# =============== FIN ARCHIVO: core/strategy/balance_manager.py (ACTUALIZADO) ===============

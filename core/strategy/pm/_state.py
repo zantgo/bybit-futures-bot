@@ -1,5 +1,4 @@
 
-# =============== INICIO ARCHIVO: core/strategy/pm_state.py (CORREGIDO Y COMPLETO) ===============
 """
 Módulo para gestionar y encapsular TODO el estado interno del Position Manager.
 
@@ -352,16 +351,8 @@ def reset_all_states():
     _trailing_stop_distance_pct = 0.0
 
     _conditional_triggers = []
-    
-    # <<< INICIO MODIFICACIÓN: Resetear nuevas variables de tendencia >>>
     _trend_start_time = None
     _trend_limit_duration_minutes = None
-    # --- CÓDIGO ANTERIOR (COMENTADO) ---
-    # _trend_limit_roi_pct = None
-    # --- NUEVAS VARIABLES DE RESETEO ---
     _trend_limit_tp_roi_pct = None
     _trend_limit_sl_roi_pct = None
     _trend_limit_action_on_end = "ASK"
-    # <<< FIN MODIFICACIÓN >>>
-
-# =============== FIN ARCHIVO: core/strategy/pm_state.py (CORREGIDO Y COMPLETO) ===============

@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: core/strategy/logical_position_table.py (MODIFICADO) ===============
 """
 Módulo que define la clase LogicalPositionTable para gestionar una lista de
 posiciones lógicas abiertas para un lado específico (long/short).
@@ -21,18 +20,11 @@ if TYPE_CHECKING:
     from core import _utils as ut_mod
     from core import live_operations as lo_mod
     
-# --- INICIO MODIFICACIÓN: Importar config para acceso a LOG_LEVEL ---
-try:
-    import config as config
-except ImportError:
-    # Fallback si config no se puede importar, para evitar que el programa se rompa.
     class ConfigFallback:
         LOG_LEVEL = "INFO"
         PRICE_PRECISION = 4
         DEFAULT_QTY_PRECISION = 3
     config = ConfigFallback()
-# --- FIN MODIFICACIÓN ---
-
 
 class LogicalPositionTable:
     """
@@ -186,5 +178,3 @@ class LogicalPositionTable:
                  print("-" * (len(table_string.split('\n')[0]) if table_string else 60))
              else: print("(Tabla vacía)"); print("-" * 60)
         except Exception as e_df: print(f"ERROR [LPT Display]: Creando DataFrame: {e_df}"); print("-" * 60)
-
-# =============== FIN ARCHIVO: core/strategy/logical_position_table.py (MODIFICADO) ===============

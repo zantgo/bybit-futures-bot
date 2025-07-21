@@ -1,4 +1,3 @@
-# =============== INICIO ARCHIVO: core/strategy/_position_helpers.py (v1.0.1 - Añadido est_liq_price a summary) ===============
 """
 Funciones auxiliares para Position Manager y sus ejecutores.
 Incluye formateo, redondeo de cantidades y extracción de datos API.
@@ -6,7 +5,7 @@ v1.0.1: Añadido 'est_liq_price' al diccionario devuelto por format_pos_for_summ
 """
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 import datetime
-import numpy as np # Importar numpy para np.isfinite y otros usos
+import numpy as np
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 # Dependencias (se establecerán mediante funciones set_... desde la fachada)
@@ -15,9 +14,9 @@ _utils: Optional[Any] = None
 _live_operations: Optional[Any] = None
 
 if TYPE_CHECKING:
-    import config as cfg_mod # pyright: ignore [reportUnusedImport]
-    from core import _utils as ut_mod # pyright: ignore [reportUnusedImport]
-    from core import live_operations as lo_mod # pyright: ignore [reportUnusedImport]
+    import config as cfg_mod
+    from core import utils as ut_mod
+    from core import api as lo_mod
 
 def set_config_dependency(config_module: Any):
     """Establece la dependencia del módulo config."""
@@ -29,7 +28,9 @@ def set_utils_dependency(utils_module: Any):
     """Establece la dependencia del módulo utils."""
     global _utils
     _utils = utils_module
+    # --- SOLUCIÓN: Corregir el nombre de la variable de '_u' a '_utils' ---
     print(f"DEBUG [Helper]: Dependencia Utils establecida: {'Sí' if _utils else 'No'}")
+    # --- FIN DE LA SOLUCIÓN ---
 
 def set_live_operations_dependency(live_ops_module: Optional[Any]):
     """Establece la dependencia del módulo live_operations (puede ser None)."""
@@ -40,7 +41,7 @@ def set_live_operations_dependency(live_ops_module: Optional[Any]):
 
 # --- Funciones Auxiliares ---
 
-def format_pos_for_summary(pos: Dict[str, Any], utils_module: Any) -> Dict[str, Any]: # Renombrado utils a utils_module para evitar conflicto
+def format_pos_for_summary(pos: Dict[str, Any], utils_module: Any) -> Dict[str, Any]:
     """Formatea un diccionario de posición lógica para el resumen JSON."""
     if not utils_module: 
          print("WARN [Helper Format Summary]: Módulo utils no disponible.")
@@ -50,13 +51,11 @@ def format_pos_for_summary(pos: Dict[str, Any], utils_module: Any) -> Dict[str, 
         entry_ts_str = utils_module.format_datetime(pos.get('entry_timestamp')) if pos.get('entry_timestamp') else "N/A"
         size_contracts = utils_module.safe_float_convert(pos.get('size_contracts'), default=0.0)
         
-        # Usar _config si está disponible, sino un default razonable para price_prec_summary
         price_prec_summary = getattr(_config, 'PRICE_PRECISION', 4) if _config else 4
         
-        est_liq_price_val = utils_module.safe_float_convert(pos.get('est_liq_price')) # Puede ser None
+        est_liq_price_val = utils_module.safe_float_convert(pos.get('est_liq_price'))
         est_liq_price_formatted = round(est_liq_price_val, price_prec_summary) if est_liq_price_val is not None and np.isfinite(est_liq_price_val) else None
         
-        # Asegurar que el ID siempre sea un string antes de hacer slicing
         pos_id_raw = pos.get('id', 'N/A')
         pos_id_str = str(pos_id_raw)
 
@@ -65,8 +64,8 @@ def format_pos_for_summary(pos: Dict[str, Any], utils_module: Any) -> Dict[str, 
             'entry_timestamp': entry_ts_str,
             'entry_price': round(utils_module.safe_float_convert(pos.get('entry_price'), 0.0), price_prec_summary),
             'margin_usdt': round(utils_module.safe_float_convert(pos.get('margin_usdt'), 0.0), 4),
-            'size_contracts': round(size_contracts, getattr(_config, 'DEFAULT_QTY_PRECISION', 8) if _config else 8), # Usar config para qty_prec
-            'take_profit_price': round(utils_module.safe_float_convert(pos.get('take_profit_price'), 0.0), price_prec_summary),
+            'size_contracts': round(size_contracts, getattr(_config, 'DEFAULT_QTY_PRECISION', 8) if _config else 8),
+            'take_profit_price': round(utils_module.safe_float_convert(pos.get('take_profit_price'), 0.0), price_prec_summary) if pos.get('take_profit_price') else None,
             'est_liq_price': est_liq_price_formatted, 
             'leverage': pos.get('leverage'), 
             'api_order_id': pos.get('api_order_id') 
@@ -121,23 +120,17 @@ def calculate_and_round_quantity(
              if instrument_info:
                  qty_step_str = instrument_info.get('qtyStep')
                  min_qty_str = instrument_info.get('minOrderQty')
-                 if qty_step_str and hasattr(_live_operations, '_get_qty_precision_from_step'):
+                 
+                 # Extraer precisión del qtyStep
+                 if qty_step_str:
                      try:
-                         qty_precision = _live_operations._get_qty_precision_from_step(qty_step_str)
-                     except Exception as prec_err: print(f"WARN [Helper Qty]: Error calculando precisión desde qtyStep '{qty_step_str}': {prec_err}")
-                 elif qty_step_str:
-                      try:
-                          step_val = float(qty_step_str)
-                          if step_val > 0 and step_val < 1:
-                              if 'e-' in qty_step_str.lower():
-                                   precision_e = int(qty_step_str.lower().split('e-')[-1])
-                                   qty_precision = precision_e
-                              elif '.' in qty_step_str:
-                                   qty_precision = len(qty_step_str.split('.')[-1].rstrip('0'))
-                              else: qty_precision = 0 
-                          else: qty_precision = 0 
-                      except Exception as manual_prec_err:
-                           print(f"WARN [Helper Qty]: Error calculando precisión manual desde qtyStep '{qty_step_str}': {manual_prec_err}")
+                         # Usar Decimal para manejar notación científica y precisión
+                         step_decimal = Decimal(qty_step_str)
+                         if step_decimal.is_finite() and step_decimal > 0:
+                             qty_precision = abs(step_decimal.as_tuple().exponent)
+                     except (InvalidOperation, TypeError):
+                         print(f"WARN [Helper Qty]: No se pudo procesar qtyStep '{qty_step_str}'. Usando default.")
+                 
                  if min_qty_str:
                      min_order_qty = _utils.safe_float_convert(min_qty_str, min_order_qty)
          except Exception as api_info_err:
@@ -194,18 +187,13 @@ def format_quantity_for_api(
             instrument_info = _live_operations.get_instrument_info(symbol)
             if instrument_info:
                 qty_step_str = instrument_info.get('qtyStep')
-                if qty_step_str and hasattr(_live_operations, '_get_qty_precision_from_step'):
-                    try: qty_precision = _live_operations._get_qty_precision_from_step(qty_step_str)
-                    except Exception as prec_err: print(f"WARN [Helper Format Qty]: Error calculando precisión desde qtyStep '{qty_step_str}': {prec_err}")
-                elif qty_step_str:
-                     try: 
-                         step_val = float(qty_step_str)
-                         if step_val > 0 and step_val < 1:
-                              if 'e-' in qty_step_str.lower(): qty_precision = int(qty_step_str.lower().split('e-')[-1])
-                              elif '.' in qty_step_str: qty_precision = len(qty_step_str.split('.')[-1].rstrip('0'))
-                              else: qty_precision = 0
-                         else: qty_precision = 0
-                     except Exception as manual_prec_err: print(f"WARN [Helper Format Qty]: Error calculando precisión manual desde qtyStep '{qty_step_str}': {manual_prec_err}")
+                if qty_step_str:
+                    try:
+                        step_decimal = Decimal(qty_step_str)
+                        if step_decimal.is_finite() and step_decimal > 0:
+                            qty_precision = abs(step_decimal.as_tuple().exponent)
+                    except (InvalidOperation, TypeError):
+                        print(f"WARN [Helper Format Qty]: No se pudo procesar qtyStep '{qty_step_str}'. Usando default.")
         except Exception as api_info_err:
             print(f"WARN [Helper Format Qty]: Error obteniendo info instrumento API: {api_info_err}")
 
@@ -215,6 +203,7 @@ def format_quantity_for_api(
         quantity_decimal = Decimal(str(quantity_float))
         rounding_factor = Decimal('1e-' + str(qty_precision))
         quantity_rounded = quantity_decimal.quantize(rounding_factor, rounding=ROUND_DOWN)
+        # Formatear a string con la cantidad exacta de decimales, incluso si son ceros
         quantity_str_api = format(quantity_rounded, f'.{qty_precision}f')
 
         result['success'] = True
@@ -232,7 +221,7 @@ def extract_physical_state_from_api(
     positions_raw: List[Dict[str, Any]],
     symbol: str,
     side: str,
-    utils_module: Any # Renombrado utils a utils_module
+    utils_module: Any
 ) -> Optional[Dict[str, Any]]:
     """
     Extrae y calcula el estado físico agregado (tamaño, precio prom, margen, liq)
@@ -243,8 +232,8 @@ def extract_physical_state_from_api(
         print("ERROR [Helper Extract API]: Módulo utils no disponible.")
         return None
 
+    # Lógica para Hedge Mode (posición 1 para Long, 2 para Short)
     pos_idx_target_hedge = 1 if side == 'long' else 2
-
     physical_positions_side = [
         p for p in positions_raw
         if p.get('symbol') == symbol and
@@ -252,6 +241,7 @@ def extract_physical_state_from_api(
            utils_module.safe_float_convert(p.get('size'), 0.0) > 1e-12
     ]
 
+    # Fallback para One-Way Mode si no se encontró en Hedge Mode
     if not physical_positions_side and positions_raw:
         side_target_oneway = 'Buy' if side == 'long' else 'Sell'
         physical_positions_side = [
@@ -289,6 +279,3 @@ def extract_physical_state_from_api(
          import traceback
          traceback.print_exc()
          return None
-
-
-# =============== FIN ARCHIVO: core/strategy/_position_helpers.py (v1.0.1 - Añadido est_liq_price a summary) ===============

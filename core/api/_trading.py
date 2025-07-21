@@ -1,5 +1,3 @@
-# core/api/_trading.py
-
 """
 Módulo para ejecutar acciones de trading a través de la API de Bybit.
 
@@ -32,8 +30,12 @@ try:
     # Importar dependencias relativas dentro del mismo paquete `api`
     from ._helpers import _handle_api_error_generic, _get_qty_precision_from_step
     
-    # Importar el paquete api completo para usar su fachada en llamadas internas
-    from core import api
+    # --- SOLUCIÓN: INICIO DEL CAMBIO ---
+    # Se elimina la importación circular `from core import api` y se reemplaza
+    # con importaciones directas de los módulos "hermanos".
+    from ._market_data import get_instrument_info
+    from ._account import get_active_position_details_api
+    # --- SOLUCIÓN: FIN DEL CAMBIO ---
 
     try:
         from pybit.exceptions import InvalidRequestError, FailedRequestError
@@ -51,7 +53,10 @@ except ImportError as e:
     memory_logger = MemoryLoggerFallback()
     def _get_qty_precision_from_step(step_str): return 3
     def _handle_api_error_generic(response, tag): return True
-    api = None
+    # --- SOLUCIÓN: Se definen fallbacks para las nuevas importaciones directas ---
+    get_instrument_info = None
+    get_active_position_details_api = None
+    # --- FIN ---
     class InvalidRequestError(Exception): pass
     class FailedRequestError(Exception):
         def __init__(self, message, status_code=None): super().__init__(message); self.status_code = status_code
@@ -153,14 +158,16 @@ def place_market_order(
     Coloca una orden de mercado en Bybit (v5 API).
     Obtiene precisión y mínimo de la API y redondea/valida la cantidad.
     """
-    if not connection_manager or not config or not api:
+    # --- SOLUCIÓN: Se elimina la comprobación de la variable `api` ---
+    if not connection_manager or not config or not get_instrument_info:
         print("ERROR [Place Order]: Dependencias no disponibles.")
         return None
     if side not in ["Buy", "Sell"]:
         print(f"ERROR [Place Order]: Lado inválido '{side}'.")
         return None
 
-    instrument_info = api.get_instrument_info(symbol)
+    # --- SOLUCIÓN: Se reemplaza la llamada a través de `api` por la función importada directamente ---
+    instrument_info = get_instrument_info(symbol)
     qty_precision = getattr(config, 'DEFAULT_QTY_PRECISION', 3)
     min_qty = getattr(config, 'DEFAULT_MIN_ORDER_QTY', 0.001)
     
@@ -305,7 +312,8 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
     Intenta cerrar todas las posiciones activas (Long y Short) para un símbolo específico
     en una cuenta determinada.
     """
-    if not connection_manager or not config or not api:
+    # --- SOLUCIÓN: Se elimina la comprobación de la variable `api` ---
+    if not connection_manager or not config or not get_active_position_details_api:
         print("ERROR [Close All Positions]: Dependencias no disponibles.")
         return False
         
@@ -317,7 +325,8 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
         
     memory_logger.log(f"Intentando cerrar TODAS las posiciones para {symbol} en cuenta '{target_account}'...", level="INFO")
 
-    active_positions = api.get_active_position_details_api(symbol=symbol, account_name=target_account)
+    # --- SOLUCIÓN: Se reemplaza la llamada a través de `api` por la función importada directamente ---
+    active_positions = get_active_position_details_api(symbol=symbol, account_name=target_account)
     if active_positions is None:
         print(f"  ERROR [Close All Positions]: No se pudieron obtener posiciones.")
         return False
@@ -360,7 +369,8 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
     """
     Intenta cerrar la posición activa para un lado específico (Buy para Long, Sell para Short).
     """
-    if not connection_manager or not config or not api:
+    # --- SOLUCIÓN: Se elimina la comprobación de la variable `api` ---
+    if not connection_manager or not config or not get_active_position_details_api:
         print("ERROR [Close Position By Side]: Dependencias no disponibles.")
         return False
     if side_to_close not in ["Buy", "Sell"]:
@@ -375,7 +385,8 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
         
     memory_logger.log(f"Buscando posición {side_to_close} para {symbol} en cuenta '{target_account}'...", level="INFO")
 
-    active_positions = api.get_active_position_details_api(symbol=symbol, account_name=target_account)
+    # --- SOLUCIÓN: Se reemplaza la llamada a través de `api` por la función importada directamente ---
+    active_positions = get_active_position_details_api(symbol=symbol, account_name=target_account)
     if active_positions is None:
         print(f"  ERROR [Close Position By Side]: No se pudieron obtener posiciones.")
         return False

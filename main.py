@@ -1,5 +1,3 @@
-# main.py
-
 """
 Punto de Entrada Principal del Bot de Trading.
 
@@ -13,14 +11,10 @@ import time
 import traceback
 import os
 
-# --- INICIO DE CAMBIOS: Importaciones Adaptadas y Limpieza ---
-
 # --- Importaciones de Configuración y Utilidades ---
 try:
     import config
     from core import utils
-    # --- CORRECCIÓN CLAVE ---
-    # Importamos el paquete 'menu' en sí mismo y la función 'launch_bot'.
     from core import menu
     from core.menu import launch_bot
 except ImportError as e:
@@ -29,8 +23,9 @@ except ImportError as e:
 
 # --- Importaciones de Componentes Core y Strategy ---
 try:
-    # Paquetes refactorizados con sus nuevas rutas
+    # --- SOLUCIÓN: Importación estandarizada ---
     from core import api as live_operations
+    # --- FIN DE LA SOLUCIÓN ---
     from core.logging import open_position_logger as open_snapshot_logger
     from core.strategy import pm as position_manager
     from core.strategy import ta
@@ -62,9 +57,6 @@ except ImportError as e:
     print(f"ERROR CRÍTICO: No se pudo importar el RUNNER: {e}")
     sys.exit(1)
 
-# --- FIN DE CAMBIOS: Importaciones Adaptadas y Limpieza ---
-
-
 def run_selected_mode(mode: str):
     """
     Función central que es llamada para ejecutar el modo de operación
@@ -92,8 +84,6 @@ def run_selected_mode(mode: str):
                 operation_mode=mode,
                 config_module=config,
                 utils_module=utils,
-                # --- CORRECCIÓN CLAVE ---
-                # Pasamos el paquete 'menu' completo como dependencia.
                 menu_module=menu,
                 live_operations_module=live_operations,
                 position_manager_module=position_manager,
@@ -119,6 +109,7 @@ def run_selected_mode(mode: str):
         print("El bot ha encontrado un error fatal y se detendrá.")
     finally:
         print("\n[main] La ejecución ha finalizado.")
+        # Usar _exit para forzar la salida, ya que pueden quedar hilos demonio corriendo
         os._exit(0)
 
 
