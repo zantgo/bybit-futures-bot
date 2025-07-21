@@ -13,10 +13,10 @@ from typing import Dict, Any, Optional, Callable
 
 # --- Dependencias del Proyecto (importaciones seguras) ---
 try:
-    from core import utils
+    from core import _utils
 except ImportError:
     # Fallback si el módulo no está disponible
-    utils = None
+    _utils = None
 
 # --- Estilo Visual Consistente para simple-term-menu ---
 # Inspirado en la paleta de colores del instalador de Debian (alto contraste)
@@ -39,8 +39,8 @@ def print_tui_header(title: str, width: int = 80):
     Imprime una cabecera estilizada y consistente para cada pantalla de la TUI.
     """
     timestamp_str = ""
-    if utils and hasattr(utils, 'format_datetime'):
-        timestamp_str = utils.format_datetime(datetime.datetime.now())
+    if _utils and hasattr(_utils, 'format_datetime'):
+        timestamp_str = _utils.format_datetime(datetime.datetime.now())
 
     print("=" * width)
     print(f"|{' ' * (width - 2)}|")

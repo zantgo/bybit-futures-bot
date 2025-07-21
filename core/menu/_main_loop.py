@@ -1,4 +1,5 @@
-# =============== INICIO ARCHIVO: core/menu/_main_loop.py (ACTUALIZADO) ===============
+# core/menu/_main_loop.py
+
 """
 Módulo del Bucle Principal de la TUI (Terminal User Interface).
 
@@ -6,6 +7,8 @@ Contiene la función `run_tui_menu_loop`, que es el centro de navegación
 principal del asistente interactivo en vivo. Desde aquí, el usuario puede
 acceder a todas las pantallas de monitorización y gestión del bot.
 """
+import sys
+import os
 from typing import Optional
 
 try:
@@ -13,19 +16,32 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- Dependencias del Proyecto ---
+# --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
+
+# Ajustar sys.path para importaciones absolutas
+if __name__ != "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+# Importar dependencias con las rutas corregidas
 try:
-    from core.strategy import pm_facade as position_manager
+    from core.strategy import pm as position_manager
     from ._helpers import MENU_STYLE
-    # Importamos el módulo de screens completo para evitar ciclos de importación
-    # y poder llamar a las funciones de pantalla de forma segura.
-    from . import _screens 
+    
+    # --- CORRECCIÓN CLAVE ---
+    # Importamos el paquete `screens` completo, que a su vez expone todas las
+    # funciones de pantalla a través de su propio __init__.py.
+    # Esto rompe el ciclo de importación.
+    from . import screens
+
 except ImportError as e:
     # Definir fallbacks si las importaciones fallan
     print(f"ERROR [TUI Main Loop]: Falló importación de dependencias: {e}")
     position_manager = None
     MENU_STYLE = {}
-    # Crear un objeto dummy para _screens
+    # Crear un objeto dummy para screens
     class ScreensFallback:
         def show_status_screen(self): print("Función no disponible.")
         def show_mode_menu(self): print("Función no disponible.")
@@ -33,10 +49,10 @@ except ImportError as e:
         def show_capital_menu(self): print("Función no disponible.")
         def show_positions_menu(self): print("Función no disponible.")
         def show_log_viewer(self): print("Función no disponible.")
-        # <<< INICIO MODIFICACIÓN: Añadir fallback para la nueva pantalla >>>
         def show_automation_menu(self): print("Función no disponible.")
-        # <<< FIN MODIFICACIÓN >>>
-    _screens = ScreensFallback()
+    screens = ScreensFallback()
+
+# --- FIN DE CAMBIOS: Importaciones Adaptadas ---
 
 
 def run_tui_menu_loop():
@@ -45,8 +61,8 @@ def run_tui_menu_loop():
     Ahora alterna entre la vista del menú y el visor de logs, garantizando
     una interfaz limpia.
     """
-    if not TerminalMenu or not position_manager:
-        print("ERROR CRITICO: TUI no puede funcionar sin 'simple-term-menu' o sin el Position Manager.")
+    if not TerminalMenu or not position_manager or not screens:
+        print("ERROR CRITICO: TUI no puede funcionar sin 'simple-term-menu', el Position Manager o el paquete de pantallas.")
         return
 
     # --- Bucle principal que maneja los modos de vista ---
@@ -54,9 +70,9 @@ def run_tui_menu_loop():
 
     while True:
         if current_view == "LOGS":
-            # Si estamos en la vista de logs, cedemos el control a la pantalla del visor de logs.
-            # Esta función tendrá su propio bucle interno y se encargará de limpiar la pantalla.
-            _screens.show_log_viewer() 
+            # --- CORRECCIÓN CLAVE ---
+            # Llamamos a la función a través del paquete `screens`.
+            screens.show_log_viewer() 
             
             # Al salir de show_log_viewer (cuando el usuario presiona 'b' o ESC),
             # siempre volvemos a la vista del menú.
@@ -82,9 +98,7 @@ def run_tui_menu_loop():
         initial_capital = summary.get('initial_total_capital', 0.0)
         roi_estimated_pct = (total_pnl_estimated / initial_capital * 100) if initial_capital > 0 else 0.0
 
-        # <<< INICIO MODIFICACIÓN: Actualizar pie de página del menú >>>
         footer_text = "[s] Estado | [m] Modo | [r] Riesgo | [c] Capital | [p] Posiciones | [a] Auto | [l] Logs | [q] Salir"
-        # <<< FIN MODIFICACIÓN >>>
         title = (
             f"Asistente de Trading Interactivo\n"
             f"----------------------------------------\n"
@@ -95,20 +109,20 @@ def run_tui_menu_loop():
             f"{footer_text}"
         )
 
-        # <<< INICIO MODIFICACIÓN: Añadir nueva entrada de menú >>>
+        # --- CORRECCIÓN CLAVE ---
+        # Las acciones del menú ahora llaman a las funciones a través del paquete `screens`.
         menu_items = [
-            (" [s] Ver Estado Detallado", _screens.show_status_screen),
-            (" [m] Cambiar Modo de Trading", _screens.show_mode_menu),
-            (" [r] Ajustar Parámetros de Riesgo", _screens.show_risk_menu),
-            (" [c] Ajustar Capital", _screens.show_capital_menu),
-            (" [p] Gestionar Posiciones Abiertas", _screens.show_positions_menu),
+            (" [s] Ver Estado Detallado", screens.show_status_screen),
+            (" [m] Cambiar Modo de Trading", screens.show_mode_menu),
+            (" [r] Ajustar Parámetros de Riesgo", screens.show_risk_menu),
+            (" [c] Ajustar Capital", screens.show_capital_menu),
+            (" [p] Gestionar Posiciones Abiertas", screens.show_positions_menu),
             None,
-            (" [a] Automatización y Triggers", _screens.show_automation_menu), # NUEVA ENTRADA
+            (" [a] Automatización y Triggers", screens.show_automation_menu),
             None,
             (" [l] Visor de Logs", "VIEW_LOGS"),
             (" [q] Salir del Menú", "EXIT_TUI")
         ]
-        # <<< FIN MODIFICACIÓN >>>
 
         terminal_menu = TerminalMenu(
             [item[0] if item else None for item in menu_items],
@@ -129,5 +143,3 @@ def run_tui_menu_loop():
             current_view = "LOGS"
         elif callable(selected_action):
             selected_action()
-
-# =============== FIN ARCHIVO: core/menu/_main_loop.py (ACTUALIZADO) ===============

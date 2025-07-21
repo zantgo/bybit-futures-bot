@@ -18,7 +18,7 @@ except ImportError:
 
 # --- Dependencias del Proyecto ---
 try:
-    import config
+    import config as config
     # Importar helpers del mismo paquete
     from ._helpers import clear_screen, print_tui_header, get_input, MENU_STYLE, press_enter_to_continue
 except ImportError:

@@ -1,4 +1,4 @@
-# Bybit Futures Bot - Versión 13 (Modo Automático y Gestión de Riesgo Mejorada)
+# Bybit Futures Bot - Versión 25 (Modo Automático y Gestión de Riesgo Mejorada)
 
 !!! IMPORTANTE: LEE ESTO ANTES DE CADA EJECUCIÓN !!!
 
