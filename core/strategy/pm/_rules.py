@@ -1,3 +1,5 @@
+# core/strategy/pm/_rules.py
+
 """
 Módulo para el motor de reglas del Position Manager.
 
@@ -13,10 +15,8 @@ from . import _balance
 from . import _position_state
 from . import _helpers
 from core import utils
-# --- SOLUCIÓN: Corregir la importación de 'api' ---
 from core import api as live_operations
-# --- FIN DE LA SOLUCIÓN ---
-import config as config
+import config
 
 def can_open_new_position(side: str) -> bool:
     """
@@ -96,30 +96,6 @@ def can_open_new_position(side: str) -> bool:
             if getattr(config, 'POSITION_PRINT_POSITION_UPDATES', False):
                 print(f"DEBUG [PM Rules]: Margen lógico insuficiente para {side.upper()}.")
             return False
-        
-        # Regla Común 3: Chequeo de Sincronización Real (si es modo live)
-        if _state.is_live_mode() and getattr(config, 'POSITION_PRE_OPEN_SYNC_CHECK', True):
-            from connection import manager as live_manager # Importación local
-            
-            symbol = getattr(config, 'TICKER_SYMBOL', '')
-            target_account = getattr(config, f'ACCOUNT_{side.upper()}S', None) or getattr(config, 'ACCOUNT_MAIN', 'main')
-            
-            if target_account in live_manager.get_initialized_accounts():
-                balance_info = live_operations.get_unified_account_balance_info(target_account)
-                real_balance = utils.safe_float_convert(balance_info.get('usdt_balance')) if balance_info else 0.0
-                
-                if real_balance < margin_needed - 1e-6:
-                    print(f"WARN [PM Rules]: Chequeo Pre-Apertura falló: Margen REAL en '{target_account}' ({real_balance:.4f}) es insuficiente.")
-                    return False
-                
-                physical_raw = live_operations.get_active_position_details_api(symbol, target_account)
-                physical_state = _helpers.extract_physical_state_from_api(physical_raw, symbol, side, utils)
-                physical_size = physical_state['total_size_contracts'] if physical_state else 0.0
-                logical_size = sum(utils.safe_float_convert(p.get('size_contracts'), 0.0) for p in open_positions)
-
-                if abs(physical_size - logical_size) > 1e-9:
-                    print(f"WARN [PM Rules]: Chequeo Pre-Apertura falló: Desincronización de tamaño en '{target_account}'.")
-                    return False
             
     except Exception as e:
         print(f"ERROR [PM Rules]: Excepción en `can_open_new_position`: {e}")

@@ -3,9 +3,8 @@
 """
 Configuración Esencial para el Bot de Trading.
 
-Este archivo centraliza todos los parámetros configurables. Las secciones
-no utilizadas por el modo Live Interactivo han sido comentadas para una
-futura limpieza, manteniendo la estructura original para referencia.
+Este archivo centraliza todos los parámetros configurables. Ha sido refactorizado
+para eliminar redundancias y mejorar la claridad de los nombres de las variables.
 """
 import os
 import sys
@@ -52,7 +51,6 @@ DEFAULT_RECV_WINDOW = 30000
 TICKER_SYMBOL = "BTCUSDT" # Símbolo por defecto, se puede cambiar en el wizard
 TICKER_INTERVAL_SECONDS = 1
 TICKER_SOURCE_ACCOUNT = ACCOUNT_PROFIT
-RAW_PRICE_TICK_INTERVAL = 1 # Cada cuántos ticks del ticker se procesa un evento
 
 # --- Technical Analysis Configuration (Estrategia de Bajo Nivel) ---
 TA_WINDOW_SIZE = 100
@@ -72,7 +70,7 @@ STRATEGY_INCREMENT_THRESHOLD = 0.45
 POSITION_MANAGEMENT_ENABLED = True
 POSITION_TRADING_MODE = "LONG_SHORT" # Modo inicial por defecto
 POSITION_BASE_SIZE_USDT = 10.0 # Tamaño por defecto, se puede cambiar en el wizard
-POSITION_SLOT_COUNT = 5 # Slots por defecto, se puede cambiar en el wizard
+POSITION_MAX_LOGICAL_POSITIONS = 5 # [REFACTORIZADO] Renombrado desde POSITION_SLOT_COUNT para mayor claridad.
 POSITION_LEVERAGE = 10.0
 POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.25
 POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.25
@@ -80,29 +78,16 @@ POSITION_REINVEST_PROFIT_PCT = 10.0
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 POSITION_COMMISSION_RATE = 0.001
 
-# --- Stop Loss & Trailing Stop ---
-INDIVIDUAL_POSITION_STOP_LOSS_PCT = 10.0 # SL por defecto, se cambia en el wizard
-INDIVIDUAL_POSITION_TRAILING_STOP_ACTIVATION_PCT = 1.0 # TS por defecto, se cambia en el wizard
-INDIVIDUAL_POSITION_TRAILING_STOP_DISTANCE_PCT = 0.5 # TS por defecto, se cambia en el wizard
+# --- Risk Management: Stop Loss & Trailing Stop ---
+POSITION_INDIVIDUAL_STOP_LOSS_PCT = 10.0 # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_STOP_LOSS_PCT
+TRAILING_STOP_ACTIVATION_PCT = 1.0 # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_TRAILING_STOP_ACTIVATION_PCT
+TRAILING_STOP_DISTANCE_PCT = 0.5   # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_TRAILING_STOP_DISTANCE_PCT
 
-# --- Trend ---
-TREND_STOP_LOSS_ROI_PCT = 10.0 # SL Global por defecto (ej: -10%)
-TREND_TAKE_PROFIT_ROI_PCT = 5.0 # TP Global por defecto (ej: +5%)
-TREND_DURATION_MINUTES = 0 # 0 para desactivar límite de tiempo
-TREND_TIME_LIMIT_ACTION = "NEUTRAL" # "NEUTRAL" o "STOP"
-TREND_MAX_TRADES = 0 # 0 para desactivar
-
-# --- Global Account Stop-Loss & Take-Profit (Disyuntores de Sesión) ---
-GLOBAL_STOP_LOSS_ROI_PCT = 10.0 # SL Global por defecto (ej: -10%)
-GLOBAL_TAKE_PROFIT_ROI_PCT = 5.0 # TP Global por defecto (ej: +5%)
-GLOBAL_DURATION_MINUTES = 0 # 0 para desactivar límite de tiempo
-GLOBAL_TIME_LIMIT_ACTION = "NEUTRAL" # "NEUTRAL" o "STOP"
-GLOBAL_MAX_TRADES = 0 # 0 para desactivar
-
-# --- Sync---
-POSITION_PRE_OPEN_SYNC_CHECK = True
-POST_ORDER_CONFIRMATION_DELAY_SECONDS = 0.1
-POST_CLOSE_SYNC_DELAY_SECONDS = 0.1
+SESSION_MAX_TRADES = 0
+SESSION_STOP_LOSS_ROI_PCT = 10.0
+SESSION_TAKE_PROFIT_ROI_PCT = 5.0
+SESSION_MAX_DURATION_MINUTES = 0
+SESSION_TIME_LIMIT_ACTION = "NEUTRAL" # "NEUTRAL" o "STOP"
 
 # --- Printing / Logging Configuration ---
 POSITION_LOG_CLOSED_POSITIONS = True
@@ -116,6 +101,7 @@ DEFAULT_MIN_ORDER_QTY = 0.001
 PRICE_PRECISION = 4
 PNL_PRECISION = 4
 CATEGORY_LINEAR = "linear"
+BYBIT_HEDGE_MODE_ENABLED = True
 UNIVERSAL_TRANSFER_FROM_TYPE = "UNIFIED"
 UNIVERSAL_TRANSFER_TO_TYPE = "UNIFIED"
 
@@ -169,16 +155,17 @@ def print_initial_config(operation_mode="unknown"):
     print(f"Configuración Base Cargada (Modo: {operation_mode})".center(70))
     print(f"  Modo Testnet API        : {UNIVERSAL_TESTNET_MODE}")
     print(f"  Ticker Símbolo (Default): {TICKER_SYMBOL}")
+    print(f"  Intervalo de Estrategia : {TICKER_INTERVAL_SECONDS} segundos")
     print("-" * 70)
     pos_enabled = POSITION_MANAGEMENT_ENABLED
     print(f"  Gestión Posiciones      : {'Activada' if pos_enabled else 'Desactivada'}")
     if pos_enabled:
-        print(f"    Stop Loss Individual    : {INDIVIDUAL_POSITION_STOP_LOSS_PCT}% (Default)")
-        print(f"    Trailing Stop           : Act {INDIVIDUAL_POSITION_TRAILING_STOP_ACTIVATION_PCT}% / Dist {INDIVIDUAL_POSITION_TRAILING_STOP_DISTANCE_PCT}% (Default)")
-        print(f"    Stop Loss Global (% ROI): {'Desactivado' if GLOBAL_STOP_LOSS_ROI_PCT <= 0 else f'-{GLOBAL_STOP_LOSS_ROI_PCT}%'}")
-        print(f"    Take Profit Global (% ROI): {'Desactivado' if GLOBAL_TAKE_PROFIT_ROI_PCT <= 0 else f'+{GLOBAL_TAKE_PROFIT_ROI_PCT}%'}")
+        print(f"    Stop Loss Individual    : {POSITION_INDIVIDUAL_STOP_LOSS_PCT}% (Default)")
+        print(f"    Trailing Stop           : Act {TRAILING_STOP_ACTIVATION_PCT}% / Dist {TRAILING_STOP_DISTANCE_PCT}% (Default)")
+        print(f"    Stop Loss de Sesión     : {'Desactivado' if SESSION_STOP_LOSS_ROI_PCT <= 0 else f'-{SESSION_STOP_LOSS_ROI_PCT}%'}")
+        print(f"    Take Profit de Sesión   : {'Desactivado' if SESSION_TAKE_PROFIT_ROI_PCT <= 0 else f'+{SESSION_TAKE_PROFIT_ROI_PCT}%'}")
         print(f"    Apalancamiento          : {POSITION_LEVERAGE:.1f}x")
     print("-" * 70)
 
 # Carga UIDs al importar el módulo
-_load_and_validate_uids()
+_load_and_validate_uids()   

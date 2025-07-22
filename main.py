@@ -4,113 +4,115 @@
 Punto de Entrada Principal del Bot de Trading.
 
 Este archivo es el lanzador de la aplicación. Su responsabilidad es:
-1. Importar todos los componentes necesarios del bot.
-2. Llamar al lanzador del menú para iniciar el bot.
-3. Orquestar la ejecución del modo de operación, inyectando las dependencias.
+1. Importar todos los componentes y dependencias necesarios del bot.
+2. Inyectar estas dependencias en el orquestador principal de la TUI.
+3. Ceder el control total del ciclo de vida de la aplicación al paquete 'core.menu'.
 """
 import sys
-import time
-import traceback
 import os
+import traceback
 
-# --- Importaciones de Configuración y Utilidades ---
+# --- Importaciones de Componentes y Dependencias ---
 try:
+    # Configuración y Utilidades
     import config
     from core import utils
-    from core import menu
+    
+    # Paquete del Menú (TUI)
+    # --- INICIO DE LA SOLUCIÓN ---
+    # Se importa 'launch_bot' que es la única función necesaria.
+    # La importación de '__init__LEGACY' se elimina por ser incorrecta y obsoleta.
     from core.menu import launch_bot
-except ImportError as e:
-    print(f"ERROR CRÍTICO: No se pudo importar un módulo de configuración esencial: {e}")
-    sys.exit(1)
-
-# --- Importaciones de Componentes Core y Strategy ---
-try:
+    # --- FIN DE LA SOLUCIÓN ---
+    
+    # Paquete de la API
     from core import api as live_operations
-    from core.logging import open_position_logger as open_snapshot_logger
+    
+    # Paquete de Logging
+    from core.logging import open_position_logger, closed_position_logger, signal_logger, memory_logger
+    
+    # Componentes de Estrategia
     from core.strategy import pm as position_manager
     from core.strategy import ta
     from core.strategy import event_processor
     
+    # Módulos internos del PM para inyección de dependencias
     from core.strategy.pm import _balance as balance_manager
     from core.strategy.pm import _position_state as position_state
     from core.strategy.pm import _helpers as position_helpers
+    from core.strategy.pm import _calculations as position_calculations
+    from core.strategy.pm._executor import PositionExecutor
 
-except ImportError as e:
-    print(f"ERROR CRÍTICO: No se pudo importar un componente CORE o STRATEGY: {e}")
-    traceback.print_exc()
-    sys.exit(1)
-
-# --- Importaciones de Conexión ---
-try:
+    # Paquete de Conexión
     from connection import manager as connection_manager
     from connection import ticker as connection_ticker
     
+    # Paquete Runner
+    from runner import initialize_bot_backend, shutdown_bot_backend
+
 except ImportError as e:
-    print(f"ERROR CRÍTICO: No se pudo importar un módulo de CONEXIÓN: {e}")
+    print("="*80)
+    print("!!! ERROR CRÍTICO DE IMPORTACIÓN !!!")
+    print(f"No se pudo importar un módulo esencial: {e}")
+    print("Asegúrate de haber instalado todas las dependencias (pip install -r requirements.txt)")
+    print("y de que la estructura de directorios del proyecto es correcta.")
+    print("="*80)
+    traceback.print_exc()
     sys.exit(1)
 
-# --- SOLUCIÓN: La importación ahora funciona porque __init__.py es una fachada limpia ---
-try:
-    from runner import run_live_interactive_mode
-except ImportError as e:
-    print(f"ERROR CRÍTICO: No se pudo importar el RUNNER: {e}")
-    traceback.print_exc() # Añadido para más detalles si vuelve a fallar
-    sys.exit(1)
-# --- FIN DE LA SOLUCIÓN ---
 
-def run_selected_mode(mode: str):
+# --- Punto de Entrada Principal ---
+if __name__ == "__main__":
     """
-    Función central que es llamada para ejecutar el modo de operación
-    correspondiente, inyectando todas las dependencias.
+    Ensambla el diccionario de dependencias y lanza el controlador principal de la TUI.
     """
-    final_summary = {}
+    
+    # 1. Crear un diccionario que contenga todos los módulos y componentes importados.
+    dependencies = {
+        # Módulos base
+        "config": config,
+        "utils": utils,
+        
+        # Módulos de bajo nivel
+        "connection_manager": connection_manager,
+        "connection_ticker": connection_ticker,
+        "live_operations": live_operations,
+        
+        # Módulos de logging
+        "memory_logger": memory_logger,
+        "open_snapshot_logger": open_position_logger,
+        "closed_position_logger": closed_position_logger,
+        "signal_logger": signal_logger,
+        
+        # Módulos de estrategia y PM
+        "position_manager": position_manager,
+        "ta_manager": ta,
+        "event_processor": event_processor,
+        
+        # Módulos internos del PM (para inyección más profunda)
+        "pm_balance_manager": balance_manager,
+        "pm_position_state": position_state,
+        "pm_helpers": position_helpers,
+        "pm_calculations": position_calculations,
+        "pm_executor_class": PositionExecutor,
+
+        # Funciones del Runner
+        "initialize_bot_backend": initialize_bot_backend,
+        "shutdown_bot_backend": shutdown_bot_backend,
+    }
 
     try:
-        config.print_initial_config(operation_mode=mode)
-        
-        position_helpers.set_config_dependency(config)
-        position_helpers.set_utils_dependency(utils)
-        position_helpers.set_live_operations_dependency(live_operations)
-        
-        print("\nInicializando conexiones en vivo...")
-        connection_manager.initialize_all_clients()
-        if not connection_manager.get_initialized_accounts():
-            print("ERROR CRITICO: No se pudo inicializar ninguna cuenta API. Saliendo.")
-            return
-
-        if mode == "live_interactive":
-            run_live_interactive_mode(
-                final_summary=final_summary,
-                operation_mode=mode,
-                config_module=config,
-                utils_module=utils,
-                menu_module=menu,
-                live_operations_module=live_operations,
-                position_manager_module=position_manager,
-                balance_manager_module=balance_manager,
-                position_state_module=position_state,
-                open_snapshot_logger_module=open_snapshot_logger,
-                event_processor_module=event_processor,
-                ta_manager_module=ta
-            )
-        else:
-            print(f"Error: Modo '{mode}' no reconocido.")
-
-    except KeyboardInterrupt:
-        print("\n\nINFO: Proceso interrumpido por el usuario (Ctrl+C). Saliendo de forma ordenada.")
+        # 2. Ceder el control total al lanzador del menú, inyectando todas las dependencias.
+        # El módulo 'menu' no se pasa como dependencia porque es el que está controlando el flujo.
+        launch_bot(dependencies)
     except Exception as e:
+        # Captura de errores catastróficos que puedan ocurrir antes de que el menú se inicie
         print("\n" + "="*80)
-        print("!!! ERROR CRÍTICO INESPERADO EN LA EJECUCIÓN PRINCIPAL !!!")
+        print("!!! ERROR FATAL EN EL LANZADOR PRINCIPAL !!!")
         print(f"  Tipo de Error: {type(e).__name__}")
         print(f"  Mensaje: {e}")
         print("-" * 80)
         traceback.print_exc()
         print("=" * 80)
-        print("El bot ha encontrado un error fatal y se detendrá.")
-    finally:
-        print("\n[main] La ejecución ha finalizado.")
-        os._exit(0)
-
-
-if __name__ == "__main__":
-    launch_bot()
+        print("El bot no pudo iniciarse. Saliendo.")
+        sys.exit(1)

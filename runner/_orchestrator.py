@@ -13,6 +13,8 @@ import time
 import traceback
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
+from core.menu import __init__LEGACY
+
 # Módulos internos del runner para SRP
 # ...
 from . import _initializer
@@ -21,7 +23,7 @@ from . import _shutdown
 # Type Hinting para las dependencias inyectadas por main.py
 if TYPE_CHECKING:
     import config
-    from core import utils, menu
+    from core import utils
     from core.strategy import pm as position_manager
     from core.strategy import ta as ta_manager
     from core.strategy import _event_processor as event_processor_module
