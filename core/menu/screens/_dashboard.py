@@ -1,5 +1,3 @@
-# core/menu/screens/_dashboard.py
-
 """
 Módulo para la Pantalla del Dashboard Principal.
 
@@ -16,11 +14,16 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- Dependencias del Menú ---
-from .._helpers import clear_screen, print_tui_header, press_enter_to_continue, print_section, MENU_STYLE
+from .._helpers import (
+    clear_screen, 
+    print_tui_header, 
+    press_enter_to_continue, 
+    print_section, 
+    MENU_STYLE,
+    show_help_popup
+)
 from . import _config_editor, _manual_mode, _auto_mode, _position_viewer, _log_viewer
 
-# --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
@@ -28,20 +31,21 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- Lógica de la Pantalla ---
-
 def show_dashboard_screen():
     """
-    Muestra el dashboard principal en un bucle. El bucle solo termina cuando
-    el usuario elige salir del programa.
+    Muestra el dashboard principal en un bucle.
     """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado.")
         time.sleep(2)
         return
 
-    # Extraer el position_manager de las dependencias para un acceso más fácil
-    pm_api = _deps.get("position_manager").api
+    # Se obtiene la fachada de la API del PM usando la clave correcta del diccionario de dependencias.
+    pm_api = _deps.get("position_manager_api_module")
+    if not pm_api:
+        print("ERROR CRÍTICO: La API del Position Manager no fue inyectada en el Dashboard.")
+        time.sleep(3)
+        return
 
     while True:
         clear_screen()
@@ -53,7 +57,7 @@ def show_dashboard_screen():
                 print(f"\nError al obtener el estado del bot: {summary.get('error', 'Desconocido')}")
                 press_enter_to_continue()
                 continue
-
+            
             current_price = pm_api.get_current_price_for_exit() or 0.0
             unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
             realized_pnl = summary.get('total_realized_pnl_session', 0.0)
@@ -74,16 +78,12 @@ def show_dashboard_screen():
             time_limit_cfg = session_limits.get('time_limit', {})
             duration_limit_mins = time_limit_cfg.get('duration', 0)
             
-            # Formatear strings para visualización
             duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
             trade_limit_str = f"{trades_executed}/{trade_limit}" if trade_limit else f"{trades_executed}/Ilimitados"
             time_remaining_str = "N/A"
             if duration_limit_mins > 0:
                 secs_remaining = (duration_limit_mins * 60) - duration_seconds
-                if secs_remaining > 0:
-                    time_remaining_str = str(datetime.timedelta(seconds=int(secs_remaining)))
-                else:
-                    time_remaining_str = "Límite alcanzado"
+                time_remaining_str = str(datetime.timedelta(seconds=int(secs_remaining))) if secs_remaining > 0 else "Límite alcanzado"
             
             sl_roi_pct = pm_api.get_global_sl_pct()
             tp_roi_pct = pm_api.get_global_tp_pct()
@@ -93,59 +93,42 @@ def show_dashboard_screen():
             time.sleep(2)
             continue
         
-        # --- Renderizado del Dashboard ---
         print_tui_header("Dashboard de Sesión")
         
         status_data = {
-            "Tiempo de Operación": duration_str,
-            "Precio Actual": f"{current_price:.4f} USDT",
+            "Tiempo de Operación": duration_str, "Precio Actual": f"{current_price:.4f} USDT",
             "Capital Inicial Total": f"{initial_capital:.2f} USDT",
             "PNL Total (Realizado + No Realizado)": f"{total_pnl:+.4f} USDT",
-            "ROI Actual (Estimado)": f"{current_roi:+.2f}%",
-            "ROI Promedio por Hora": f"{roi_per_hour:+.2f}%/h",
-            "Trades de Sesión": trade_limit_str,
-            "Tiempo Restante de Sesión": time_remaining_str,
+            "ROI Actual (Estimado)": f"{current_roi:+.2f}%", "ROI Promedio por Hora": f"{roi_per_hour:+.2f}%/h",
+            "Trades de Sesión": trade_limit_str, "Tiempo Restante de Sesión": time_remaining_str,
             "Límite SL de Sesión (ROI)": f"-{sl_roi_pct:.2f}%" if sl_roi_pct else "N/A",
             "Límite TP de Sesión (ROI)": f"+{tp_roi_pct:.2f}%" if tp_roi_pct else "N/A",
         }
         print_section("Estado General de la Sesión", status_data)
         
-        # --- Menú de Acciones ---
         menu_items = [
-            "[1] Refrescar Dashboard",
-            "[2] Ver/Gestionar Posiciones Lógicas",
+            "[1] Refrescar Dashboard", "[2] Ver/Gestionar Posiciones Lógicas",
             None,
-            "[3] Modo Manual Guiado",
-            "[4] Modo Automático (Árbol de Decisiones)",
+            "[3] Modo Manual Guiado", "[4] Modo Automático (Árbol de Decisiones)",
             None,
-            "[5] Editar Configuración de la Sesión",
-            "[6] Ver Logs en Tiempo Real",
+            "[5] Editar Configuración de la Sesión", "[6] Ver Logs en Tiempo Real",
             None,
-            "[q] Salir del Bot (Apagado Completo)"
+            "[h] Ayuda", None, "[q] Salir del Bot (Apagado Completo)"
         ]
         
-        menu = TerminalMenu(
-            menu_items,
-            title="\nMenú Principal de Acciones",
-            menu_cursor_style=("fg_cyan", "bold"),
-            clear_screen=False # No limpiar para que el dashboard permanezca visible
-        )
+        menu = TerminalMenu(menu_items, title="\nMenú Principal de Acciones", menu_cursor_style=("fg_cyan", "bold"), clear_screen=False)
         choice = menu.show()
         
-        if choice == 0:
-            continue # Simplemente refresca el bucle
-        elif choice == 1:
-            _position_viewer.show_position_viewer_screen(pm_api)
-        elif choice == 2:
-            _manual_mode.show_manual_mode_screen(pm_api)
-        elif choice == 3:
-            _auto_mode.show_auto_mode_screen(pm_api)
-        elif choice == 4:
-            _config_editor.show_config_editor_screen(_deps["config"])
-        elif choice == 5:
-            _log_viewer.show_log_viewer()
-        elif choice == 7 or choice is None:
-            # Preguntar confirmación antes de salir
+        action_map = {0: 'refresh', 1: 'view_positions', 3: 'manual_mode', 4: 'auto_mode', 6: 'edit_config', 7: 'view_logs', 9: 'help', 11: 'exit'}
+        action = action_map.get(choice)
+        
+        if action == 'refresh': continue
+        elif action == 'view_positions': _position_viewer.show_position_viewer_screen(pm_api)
+        elif action == 'manual_mode': _manual_mode.show_manual_mode_screen(pm_api)
+        elif action == 'auto_mode': _auto_mode.show_auto_mode_screen(pm_api)
+        elif action == 'edit_config': _config_editor.show_config_editor_screen(_deps["config_module"])
+        elif action == 'view_logs': _log_viewer.show_log_viewer()
+        elif action == 'help': show_help_popup("dashboard_main")
+        elif action == 'exit' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, salir y apagar el bot", "[2] No, continuar operando"], title="¿Estás seguro de que deseas salir?", **MENU_STYLE)
-            if confirm_menu.show() == 0:
-                break # Rompe el bucle while y permite que el controlador principal apague el bot
+            if confirm_menu.show() == 0: break

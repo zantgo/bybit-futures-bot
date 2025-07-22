@@ -2,16 +2,16 @@
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución de
 operaciones de mercado (apertura/cierre) y sincronización de estado.
 
-v19.0 (SRP Refactor):
-- Eliminada la lógica de transferencia de fondos a su propio módulo (_transfer_executor).
-- La responsabilidad de esta clase se centra ahora en operaciones de mercado.
+v20.0 (Clean Architecture Refactor):
+- Adaptado para recibir instancias de BalanceManager y PositionState.
+- Eliminada la lógica de backtesting para enfocarse en el modo 'live'.
 """
 import datetime
 import uuid
 import time
 import traceback
 import json
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 
 try:
     from core.logging import memory_logger
@@ -26,338 +26,227 @@ class PositionExecutor:
     y de la sincronización del estado físico con la API.
     """
     def __init__(self,
-                 is_live_mode: bool,
-                 config: Optional[Any] = None,
-                 utils: Optional[Any] = None,
-                 balance_manager: Optional[Any] = None,
-                 position_state: Optional[Any] = None,
-                 position_calculations: Optional[Any] = None,
-                 live_operations: Optional[Any] = None,
-                 closed_position_logger: Optional[Any] = None,
-                 position_helpers: Optional[Any] = None,
-                 live_manager: Optional[Any] = None
+                 config: Any,
+                 utils: Any,
+                 balance_manager: Any,      # Ahora es una instancia de BalanceManager
+                 position_state: Any,       # Ahora es una instancia de PositionState
+                 state_manager: Any,        # La nueva clase que contendrá el estado general
+                 calculations: Any,
+                 helpers: Any,
+                 live_operations: Any,
+                 connection_manager: Any,
+                 closed_position_logger: Optional[Any] = None
                  ):
-        self._is_live_mode = is_live_mode
+        """
+        Inicializa el ejecutor con todas sus dependencias inyectadas.
+        """
+        # --- Inyección de Dependencias ---
         self._config = config
         self._utils = utils
         self._balance_manager = balance_manager
         self._position_state = position_state
-        self._position_calculations = position_calculations
+        self._state_manager = state_manager
+        self._calculations = calculations
+        self._helpers = helpers
         self._live_operations = live_operations
+        self._connection_manager = connection_manager
         self._closed_position_logger = closed_position_logger
-        self._position_helpers = position_helpers
-        self._live_manager = live_manager
-
-        essential_deps = [self._config, self._utils, self._balance_manager, self._position_state, self._position_calculations, self._position_helpers]
-        dep_names = ['Config', 'Utils', 'BalanceMgr', 'PositionState', 'Calculations', 'Helpers']
-        if not all(essential_deps):
-            missing = [name for name, mod in zip(dep_names, essential_deps) if not mod]
-            raise ValueError(f"PositionExecutor: Faltan dependencias esenciales: {missing}")
-
-        try:
-            from . import _state
-            self._state = _state
-        except ImportError:
-            self._state = None
-            memory_logger.log("ERROR CRITICO [PositionExecutor]: No se pudo importar _state.", level="ERROR")
-            raise
-
-        if self._is_live_mode and not self._live_operations: raise ValueError("PositionExecutor: Modo Live requiere 'live_operations'.")
-        if self._is_live_mode and not self._live_manager: 
-            memory_logger.log("WARN [PositionExecutor Init]: Modo Live pero 'live_manager' no proporcionado.", level="WARN")
         
-        # Cachear configuraciones para acceso rápido
-        self._leverage = 1.0; self._symbol = "N/A"; self._print_updates = False; self._price_prec = 4; self._qty_prec = 3; self._pnl_prec = 2
-        try:
-            self._leverage = float(getattr(self._config, 'POSITION_LEVERAGE', 1.0)); self._symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-            self._print_updates = getattr(self._config, 'POSITION_PRINT_POSITION_UPDATES', False); self._price_prec = int(getattr(self._config, 'PRICE_PRECISION', 4)); self._qty_prec = int(getattr(self._config, 'DEFAULT_QTY_PRECISION', 3)); self._pnl_prec = int(getattr(self._config, 'PNL_PRECISION', 2))
-        except Exception as e: 
-            memory_logger.log(f"WARN [PositionExecutor Init]: Error cacheando config: {e}. Usando defaults.", level="WARN")
+        # --- Cacheo de configuraciones para acceso rápido ---
+        self._symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
+        self._price_prec = int(getattr(config, 'PRICE_PRECISION', 4))
+        self._pnl_prec = int(getattr(config, 'PNL_PRECISION', 2))
         
-        memory_logger.log(f"[PositionExecutor] Inicializado. Modo Live: {self._is_live_mode}", level="INFO")
+        memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
-    def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: Optional[float] = None, size_contracts_str_api: Optional[str] = None ) -> Dict[str, Any]:
-        """Orquesta la apertura de una posición (Live o Backtest) sin delays."""
+    def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float) -> Dict[str, Any]:
+        """Orquesta la apertura de una posición en modo live."""
         result = {'success': False, 'api_order_id': None, 'logical_position_id': None, 'message': 'Error no especificado'}
+        leverage = self._state_manager.get_leverage()
+
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
-        
-        if side not in ['long', 'short']: result['message'] = f"Lado inválido '{side}'."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-        if not isinstance(entry_price, (int, float)) or entry_price <= 0: result['message'] = f"Precio entrada inválido {entry_price}."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-        if margin_to_use is None and size_contracts_str_api is None: result['message'] = "Debe proveer 'margin_to_use' o 'size_contracts_str_api'."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-        if not all([self._position_state, self._balance_manager, self._position_calculations, self._position_helpers, self._utils, self._state]): result['message'] = "Faltan dependencias internas."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
 
-        size_contracts_final_float = 0.0; margin_used_final = 0.0; qty_precision_used = self._qty_prec
+        # --- 1. Calcular Tamaño y Validar ---
         try:
-            if size_contracts_str_api is None:
-                if not isinstance(margin_to_use, (int, float)) or margin_to_use <= 1e-6: result['message'] = f"Margen a usar inválido ({margin_to_use})."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-                margin_used_final = margin_to_use
-                memory_logger.log(f"  Calculando tamaño desde Margen: {margin_used_final:.4f} USDT", level="DEBUG")
-                calc_qty_result = self._position_helpers.calculate_and_round_quantity(margin_usdt=margin_used_final, entry_price=entry_price, leverage=self._leverage, symbol=self._symbol, is_live=self._is_live_mode)
-                if not calc_qty_result['success']: result['message'] = calc_qty_result['error']; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-                size_contracts_final_float = calc_qty_result['qty_float']; size_contracts_str_api = calc_qty_result['qty_str']; qty_precision_used = calc_qty_result['precision']
-            else:
-                memory_logger.log(f"  Usando tamaño pre-calculado: {size_contracts_str_api}", level="DEBUG")
-                size_contracts_final_float = self._utils.safe_float_convert(size_contracts_str_api, 0.0)
-                if size_contracts_final_float <= 1e-12: result['message'] = f"Tamaño provisto inválido ({size_contracts_str_api})."; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); return result
-                margin_used_final = self._utils.safe_division(size_contracts_final_float * entry_price, self._leverage, default=0.0)
-                if margin_used_final <= 0: memory_logger.log(f"WARN [Exec Open]: Margen recalculado para tamaño provisto es {margin_used_final}.", level="WARN")
-            memory_logger.log(f"  Tamaño Final: {size_contracts_final_float:.{qty_precision_used}f} ({size_contracts_str_api} API), Margen: {margin_used_final:.4f} USDT", level="DEBUG")
-        except Exception as e: result['message'] = f"Excepción calculando tamaño/margen: {e}"; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); traceback.print_exc(); return result
+            calc_qty_result = self._helpers.calculate_and_round_quantity(
+                margin_usdt=margin_to_use, 
+                entry_price=entry_price, 
+                leverage=leverage, 
+                symbol=self._symbol, 
+                is_live=True
+            )
+            if not calc_qty_result['success']:
+                result['message'] = calc_qty_result['error']
+                memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR")
+                return result
+                
+            size_contracts_float = calc_qty_result['qty_float']
+            size_contracts_str = calc_qty_result['qty_str']
+            qty_precision = calc_qty_result['precision']
+            memory_logger.log(f"  Tamaño Calculado: {size_contracts_float:.{qty_precision}f} ({size_contracts_str} API), Margen: {margin_to_use:.4f} USDT", level="DEBUG")
 
+        except Exception as e:
+            result['message'] = f"Excepción calculando tamaño/margen: {e}"
+            memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR")
+            traceback.print_exc()
+            return result
+        
+        # --- 2. Crear Datos de la Posición Lógica ---
         logical_position_id = str(uuid.uuid4())
+        sl_pct = self._state_manager.get_individual_stop_loss_pct()
+        stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
+        est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
-        individual_sl_pct = self._state.get_individual_stop_loss_pct()
-        stop_loss_price = self._position_calculations.calculate_stop_loss(side, entry_price, individual_sl_pct)
-        
-        est_liq_price_individual = self._position_calculations.calculate_liquidation_price(
-            side=side, avg_entry_price=entry_price, leverage=self._leverage
-        )
         new_position_data = {
             'id': logical_position_id, 'entry_timestamp': timestamp, 'entry_price': entry_price,
-            'margin_usdt': margin_used_final, 'size_contracts': size_contracts_final_float,
-            'leverage': self._leverage, 'stop_loss_price': stop_loss_price,
-            'est_liq_price': est_liq_price_individual, 'ts_is_active': False,
-            'ts_peak_price': None, 'ts_stop_price': None, 'api_order_id': None,
-            'api_avg_fill_price': None, 'api_filled_qty': None
+            'margin_usdt': margin_to_use, 'size_contracts': size_contracts_float,
+            'leverage': leverage, 'stop_loss_price': stop_loss_price,
+            'est_liq_price': est_liq_price, 'ts_is_active': False,
+            'ts_peak_price': None, 'ts_stop_price': None, 'api_order_id': None
         }
         result['logical_position_id'] = logical_position_id
 
-        execution_success = False; api_order_id = None
+        # --- 3. Ejecutar Orden en el Exchange ---
+        execution_success = False
+        api_order_id = None
         try:
-            if self._is_live_mode:
-                memory_logger.log(f"  Ejecutando Apertura LIVE API...", level="DEBUG")
-                if not self._live_operations: raise RuntimeError("Live Operations no disponible")
-                target_account = getattr(self._config, 'ACCOUNT_LONGS' if side == 'long' else 'ACCOUNT_SHORTS', None); main_account = getattr(self._config, 'ACCOUNT_MAIN', 'main'); account_to_use = target_account if target_account and target_account in self._live_manager.get_initialized_accounts() else main_account
-                if account_to_use not in self._live_manager.get_initialized_accounts(): raise RuntimeError(f"Cuenta operativa '{account_to_use}' no inicializada.")
-                order_side_api = "Buy" if side == 'long' else "Sell"; pos_idx = 1 if side == 'long' else 2
-                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=order_side_api, quantity=size_contracts_str_api, reduce_only=False, position_idx=pos_idx, account_name=account_to_use)
-                if api_response and api_response.get('retCode') == 0:
-                    execution_success = True; api_order_id = api_response.get('result', {}).get('orderId', 'N/A'); memory_logger.log(f"  -> ÉXITO API: Orden Market {order_side_api} aceptada. OrderID: {api_order_id}")
-                else:
-                    ret_code = api_response.get('retCode', -1) if api_response else -1; ret_msg = api_response.get('retMsg', 'N/A') if api_response else 'N/A'; result['message'] = f"Fallo API orden Market {order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; memory_logger.log(f"  -> ERROR API: {result['message']}", level="ERROR")
-            else:
-                memory_logger.log(f"  Ejecutando Apertura BACKTEST (Simulada)...", level="DEBUG")
-                execution_success = True; api_order_id = None
-                memory_logger.log(f"  -> ÉXITO Simulado.", level="DEBUG")
+            account_to_use, _ = self._connection_manager.get_session_for_operation('trading', side=side)
+            order_side_api = "Buy" if side == 'long' else "Sell"
+            pos_idx = 1 if side == 'long' else 2
+
+            api_response = self._live_operations.place_market_order(
+                symbol=self._symbol, side=order_side_api, quantity=size_contracts_str,
+                reduce_only=False, position_idx=pos_idx, account_name=account_to_use
+            )
             
-            if execution_success:
-                self._balance_manager.decrease_operational_margin(side, margin_used_final)
-        except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR"); traceback.print_exc(); execution_success = False
+            if api_response and api_response.get('retCode') == 0:
+                execution_success = True
+                api_order_id = api_response.get('result', {}).get('orderId', 'N/A')
+                memory_logger.log(f"  -> ÉXITO API: Orden Market aceptada. OrderID: {api_order_id}")
+                self._balance_manager.decrease_used_margin(side, margin_to_use)
+            else:
+                ret_msg = api_response.get('retMsg', 'N/A') if api_response else 'No Response'
+                result['message'] = f"Fallo API en orden Market: {ret_msg}"
+                memory_logger.log(f"  -> ERROR API: {result['message']}", level="ERROR")
+        except Exception as exec_err:
+            result['message'] = f"Excepción durante ejecución: {exec_err}"
+            memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR")
 
-        add_ok = False
+        # --- 4. Actualizar Estado Interno ---
         if execution_success:
-            try:
-                new_position_data['api_order_id'] = api_order_id
-                add_ok = self._position_state.add_logical_position(side, new_position_data)
-                if not add_ok:
-                    result['message'] = f"Ejecución OK pero falló añadir a PS pos ID {logical_position_id}."
-                    memory_logger.log(f"ERROR SEVERE [Exec Open]: {result['message']}", level="ERROR")
-                    result['success'] = False
-                    return result
-
-                memory_logger.log(f"  Position State: Posición lógica ...{logical_position_id[-6:]} añadida (datos estimados).", level="DEBUG")
-                
-                memory_logger.log(f"  Actualizando estado físico agregado...", level="DEBUG")
-                open_positions_now = self._position_state.get_open_logical_positions(side)
-                aggregates = self._position_calculations.calculate_physical_aggregates(open_positions_now)
-                liq_price_aggregate = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
-                self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price_aggregate, timestamp)
-                memory_logger.log(f"  -> Estado físico agregado {side.upper()} recalculado.", level="DEBUG")
-
-            except Exception as state_err: result['message'] = f"Ejecución OK pero falló post-proceso: {state_err}"; memory_logger.log(f"ERROR SEVERE [Exec Open]: {result['message']}", level="ERROR"); traceback.print_exc(); result['success'] = False; return result
-
-        result['success'] = execution_success and add_ok
+            new_position_data['api_order_id'] = api_order_id
+            add_ok = self._position_state.add_logical_position(side, new_position_data)
+            if add_ok:
+                open_positions = self._position_state.get_open_logical_positions(side)
+                aggregates = self._calculations.calculate_physical_aggregates(open_positions)
+                liq_agg = self._calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], leverage)
+                self._position_state.update_physical_position_state(
+                    side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0),
+                    aggregates.get('total_margin_usdt', 0.0), liq_agg, timestamp
+                )
+                result['success'] = True
+                result['message'] = f"Apertura {side.upper()} exitosa."
+            else:
+                result['message'] = "Ejecución OK pero falló al añadir posición lógicamente."
+                memory_logger.log(f"ERROR SEVERE [Exec Open]: {result['message']}", level="ERROR")
+                # Aquí se debería implementar lógica de compensación (cerrar la posición real)
+        
         result['api_order_id'] = api_order_id
-        if result['success']:
-            result['message'] = f"Apertura {side.upper()} exitosa."
-
-        if result['success']:
-            memory_logger.log(f"OPEN [{side.upper()}] -> ÉXITO. Tamaño: {size_contracts_final_float:.{qty_precision_used}f}, Margen: {margin_used_final:.2f} USDT", level="INFO")
-        else:
-            memory_logger.log(f"OPEN [{side.upper()}] -> FALLO. Razón: {result['message']}", level="ERROR")
-
         return result
 
-    def execute_close(self, side: str, position_index: int, exit_price: float,
-                      timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
-        result = {
-            'success': False, 'pnl_net_usdt': 0.0, 'amount_reinvested_in_operational_margin': 0.0,
-            'amount_transferable_to_profit': 0.0, 'log_data': {}, 'message': 'Error no especificado',
-            'closed_position_id': None
-        }
-        
+    def execute_close(self, side: str, position_index: int, exit_price: float, timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
+        """Orquesta el cierre de una posición en modo live."""
+        result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
         memory_logger.log(f"CLOSE [{side.upper()} Idx:{position_index}] -> Solicitud para cerrar @ {exit_price:.{self._price_prec}f} (Razón: {exit_reason})", level="INFO")
 
-        if side not in ['long', 'short']: result['message'] = "Lado inválido."; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); return result
-        if not isinstance(exit_price, (int, float)) or exit_price <= 0: result['message'] = "Precio salida inválido."; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); return result
-        if not all([self._position_state, self._balance_manager, self._position_calculations, self._position_helpers, self._utils]): result['message'] = "Faltan dependencias internas."; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); return result
-
-        pos_to_close_data = None; log_data_partial = {}; size_contracts_str_api = "0.0";
-        pos_id_for_log = 'N/A_PreValid'; entry_price_for_calc = 0.0; initial_margin_for_calc = 0.0; size_contracts_for_calc = 0.0; entry_ts_for_calc = None; leverage_for_calc = self._leverage
-        try:
-            open_positions = self._position_state.get_open_logical_positions(side)
-            if not (0 <= position_index < len(open_positions)): result['message'] = f"Índice {position_index} fuera de rango."; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); return result
-            pos_to_close_data = open_positions[position_index]
-            pos_id_for_log = pos_to_close_data.get('id', 'N/A_DataErr'); log_data_partial = {'id': pos_id_for_log, 'side': side, 'index_closed': position_index}
-            result['log_data'] = log_data_partial; result['closed_position_id'] = pos_id_for_log
-
-            size_contracts_for_calc = self._utils.safe_float_convert(pos_to_close_data.get('size_contracts'), 0.0)
-            entry_price_for_calc = self._utils.safe_float_convert(pos_to_close_data.get('entry_price'), 0.0)
-            initial_margin_for_calc = self._utils.safe_float_convert(pos_to_close_data.get('margin_usdt'), 0.0)
-            entry_ts_for_calc = pos_to_close_data.get('entry_timestamp')
-            leverage_for_calc = self._utils.safe_float_convert(pos_to_close_data.get('leverage'), self._leverage)
-
-            if size_contracts_for_calc <= 1e-12: result['message'] = f"Tamaño lógico <= 0 para pos ID ...{pos_id_for_log[-6:]}. Considerado ya cerrado."; memory_logger.log(f"WARN [Exec Close]: {result['message']}", level="WARN"); result['success'] = True; return result
-
-            format_qty_result = self._position_helpers.format_quantity_for_api(quantity_float=size_contracts_for_calc, symbol=self._symbol, is_live=self._is_live_mode)
-            if not format_qty_result['success']: result['message'] = f"Error formateando Qty para API ({format_qty_result['error']}) Pos ID ...{pos_id_for_log[-6:]}."; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); return result
-            size_contracts_str_api = format_qty_result['qty_str']
-        except Exception as data_err: result['message'] = f"Excepción obteniendo datos/formateando: {data_err}"; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); traceback.print_exc(); return result
-
-        execution_success = False; api_order_id_close = None; ret_code: Optional[int] = None; ret_msg: Optional[str] = None
-        try:
-            if self._is_live_mode:
-                memory_logger.log(f"  Ejecutando Cierre LIVE API (ReduceOnly)...", level="DEBUG")
-                if not self._live_operations: raise RuntimeError("Live Operations no disponible")
-                target_account = getattr(self._config, 'ACCOUNT_LONGS' if side == 'long' else 'ACCOUNT_SHORTS', None); main_account = getattr(self._config, 'ACCOUNT_MAIN', 'main'); account_to_use = target_account if target_account and target_account in self._live_manager.get_initialized_accounts() else main_account
-                if account_to_use not in self._live_manager.get_initialized_accounts(): raise RuntimeError(f"Cuenta operativa '{account_to_use}' no inicializada.")
-                close_order_side_api = "Sell" if side == 'long' else "Buy"; pos_idx = 1 if side == 'long' else 2
-                api_response = self._live_operations.place_market_order(symbol=self._symbol, side=close_order_side_api, quantity=size_contracts_str_api, reduce_only=True, position_idx=pos_idx, account_name=account_to_use)
-                if api_response and api_response.get('retCode') == 0:
-                    execution_success = True; api_order_id_close = api_response.get('result', {}).get('orderId', 'N/A'); memory_logger.log(f"  -> ÉXITO API: Orden Cierre Market {close_order_side_api} aceptada. OrderID: {api_order_id_close}")
-                else:
-                    if api_response: ret_code = api_response.get('retCode', -1); ret_msg = api_response.get('retMsg', 'N/A')
-                    else: ret_code = -1; ret_msg = 'No API Response'
-                    result['message'] = f"Fallo API orden Cierre Market {close_order_side_api}. Code={ret_code}, Msg='{ret_msg}'"; memory_logger.log(f"  -> ERROR API: {result['message']}", level="ERROR")
-                    if ret_code == 110001: execution_success = True; memory_logger.log("  WARN [Exec Close]: Orden/Posición no encontrada (110001). Permitiendo limpieza lógica.", level="WARN")
-            else:
-                memory_logger.log(f"  Ejecutando Cierre BACKTEST (Simulado)...", level="DEBUG")
-                execution_success = True; api_order_id_close = None
-                memory_logger.log(f"  -> ÉXITO Simulado.", level="DEBUG")
-        except Exception as exec_err: result['message'] = f"Excepción durante ejecución: {exec_err}"; memory_logger.log(f"ERROR [Exec Close]: {result['message']}", level="ERROR"); traceback.print_exc(); execution_success = False
-
-        remove_ok = False; log_data_final = {}
-        if execution_success:
-            try:
-                removed_pos_data = self._position_state.remove_logical_position(side, position_index)
-                if removed_pos_data:
-                    remove_ok = True
-                    pos_id_for_log = removed_pos_data.get('id', pos_id_for_log)
-                    entry_price_for_calc = self._utils.safe_float_convert(removed_pos_data.get('entry_price'), 0.0)
-                    initial_margin_for_calc = self._utils.safe_float_convert(removed_pos_data.get('margin_usdt'), 0.0)
-                    size_contracts_for_calc = self._utils.safe_float_convert(removed_pos_data.get('size_contracts'), 0.0)
-                    entry_ts_for_calc = removed_pos_data.get('entry_timestamp')
-                    leverage_for_calc = self._utils.safe_float_convert(removed_pos_data.get('leverage'), self._leverage)
-                    memory_logger.log(f"  Position State: Posición lógica ...{pos_id_for_log[-6:]} removida.", level="DEBUG")
-                elif ret_code == 110001:
-                    remove_ok = True; memory_logger.log(f"  INFO [Exec Close]: Pos lógica idx {position_index} (ID: ...{pos_id_for_log[-6:]}) no encontrada, consistente con API 110001.")
-                else:
-                    result['message'] = f"Ejecución OK pero falló remover pos lógica idx {position_index} (ID: ...{pos_id_for_log[-6:]})."; memory_logger.log(f"ERROR SEVERE [Exec Close]: {result['message']}", level="ERROR"); result['success'] = False; return result
-
-                calc_results = self._position_calculations.calculate_pnl_commission_reinvestment(side, entry_price_for_calc, exit_price, size_contracts_for_calc)
-                pnl_gross_usdt, commission_usdt, pnl_net_usdt = calc_results['pnl_gross_usdt'], calc_results['commission_usdt'], calc_results['pnl_net_usdt']
-                amount_reinvested_op_margin, amount_transferable_profit = calc_results['amount_reinvested_in_operational_margin'], calc_results['amount_transferable_to_profit']
-
-                result.update({
-                    'pnl_net_usdt': pnl_net_usdt, 'amount_reinvested_in_operational_margin': amount_reinvested_op_margin,
-                    'amount_transferable_to_profit': amount_transferable_profit
-                })
-                memory_logger.log(f"  Cálculos PNL: Neto={pnl_net_usdt:+.{self._pnl_prec}f}, Reinv={amount_reinvested_op_margin:.{self._pnl_prec}f}, Transf={amount_transferable_profit:.{self._pnl_prec}f}", level="DEBUG")
-
-                if remove_ok and removed_pos_data:
-                    margin_to_return_to_op = initial_margin_for_calc + amount_reinvested_op_margin
-                    self._balance_manager.increase_operational_margin(side, margin_to_return_to_op)
-                elif remove_ok and ret_code == 110001:
-                    memory_logger.log("  Balance Manager: No se modifica margen operativo (posición no encontrada).", level="DEBUG")
-
-                memory_logger.log(f"  Actualizando estado físico agregado post-remoción...", level="DEBUG")
-                open_positions_now = self._position_state.get_open_logical_positions(side);
-                if open_positions_now:
-                    aggregates = self._position_calculations.calculate_physical_aggregates(open_positions_now)
-                    liq_price = self._position_calculations.calculate_liquidation_price(side, aggregates['avg_entry_price'], self._leverage)
-                    self._position_state.update_physical_position_state(side, aggregates.get('avg_entry_price', 0.0), aggregates.get('total_size_contracts', 0.0), aggregates.get('total_margin_usdt', 0.0), liq_price, timestamp)
-                    memory_logger.log(f"  -> Estado físico {side.upper()} recalculado (pos restantes: {len(open_positions_now)}).", level="DEBUG")
-                else:
-                    self._position_state.reset_physical_position_state(side)
-                    memory_logger.log(f"  -> Estado físico {side.upper()} reseteado (no quedan pos lógicas).", level="DEBUG")
-
-                log_entry_ts_str = self._utils.format_datetime(entry_ts_for_calc) if entry_ts_for_calc else "N/A"; log_exit_ts_str = self._utils.format_datetime(timestamp); duration = (timestamp - entry_ts_for_calc).total_seconds() if isinstance(entry_ts_for_calc, datetime.datetime) else None
-                
-                log_data_final = {
-                    "id": pos_id_for_log, "side": side, "entry_timestamp": log_entry_ts_str,
-                    "exit_timestamp": log_exit_ts_str, "duration_seconds": duration, "entry_price": entry_price_for_calc,
-                    "exit_price": exit_price, "size_contracts": size_contracts_for_calc, "margin_usdt": initial_margin_for_calc,
-                    "leverage": leverage_for_calc, "pnl_gross_usdt": pnl_gross_usdt, "commission_usdt": commission_usdt,
-                    "pnl_net_usdt": pnl_net_usdt, "reinvest_usdt": amount_reinvested_op_margin, "transfer_usdt": amount_transferable_profit,
-                    "api_close_order_id": api_order_id_close, "api_ret_code_close": ret_code, "api_ret_msg_close": ret_msg,
-                    "exit_reason": exit_reason
-                }
-                
-                result['log_data'] = log_data_final
-
-                if self._closed_position_logger and hasattr(self._closed_position_logger, 'log_closed_position'):
-                    try: self._closed_position_logger.log_closed_position(log_data_final)
-                    except Exception as log_e: 
-                        memory_logger.log(f"ERROR [Exec Close]: Fallo log pos cerrada ID {pos_id_for_log}: {log_e}", level="ERROR")
-
-            except Exception as state_err: result['message'] = f"Ejecución OK pero falló post-proceso: {state_err}"; memory_logger.log(f"ERROR SEVERE [Exec Close]: {result['message']}", level="ERROR"); traceback.print_exc(); result['success'] = False; return result
-
-        result['success'] = execution_success and remove_ok
-        if not result['success'] and not result['message']: result['message'] = "Fallo en cierre por razón desconocida."
-        elif result['success']: result['message'] = f"Cierre {side.upper()} idx {position_index} exitoso."
+        # --- 1. Obtener Datos de la Posición a Cerrar ---
+        open_positions = self._position_state.get_open_logical_positions(side)
+        if not (0 <= position_index < len(open_positions)):
+            result['message'] = f"Índice {position_index} fuera de rango."
+            return result
         
-        if result['success']:
-            pnl_net = result.get('pnl_net_usdt', 0.0)
-            log_level = "INFO" if pnl_net >= 0 else "WARN"
-            memory_logger.log(f"CLOSE [{side.upper()} Idx:{position_index}] -> ÉXITO. PNL Neto: {pnl_net:+.{self._pnl_prec}f} USDT", level=log_level)
-        else:
-            memory_logger.log(f"CLOSE [{side.upper()} Idx:{position_index}] -> FALLO. Razón: {result['message']}", level="ERROR")
+        pos_to_close = open_positions[position_index]
+        size_to_close = self._utils.safe_float_convert(pos_to_close.get('size_contracts'), 0.0)
+        
+        format_qty_result = self._helpers.format_quantity_for_api(size_to_close, self._symbol, is_live=True)
+        if not format_qty_result['success']:
+            result['message'] = f"Error formateando cantidad para API: {format_qty_result['error']}"
+            return result
+        size_contracts_str = format_qty_result['qty_str']
+        
+        # --- 2. Ejecutar Orden en el Exchange ---
+        execution_success = False
+        api_ret_code = None
+        try:
+            account_to_use, _ = self._connection_manager.get_session_for_operation('trading', side=side)
+            close_side_api = "Sell" if side == 'long' else "Buy"
+            pos_idx = 1 if side == 'long' else 2
 
+            api_response = self._live_operations.place_market_order(
+                symbol=self._symbol, side=close_side_api, quantity=size_contracts_str,
+                reduce_only=True, position_idx=pos_idx, account_name=account_to_use
+            )
+            
+            if api_response: api_ret_code = api_response.get('retCode')
+            if api_ret_code == 0:
+                execution_success = True
+            elif api_ret_code == 110001: # Posición no encontrada
+                execution_success = True # Consideramos éxito para poder limpiar el estado lógico
+                memory_logger.log("WARN [Exec Close]: Posición no encontrada en API (110001).", level="WARN")
+            else:
+                result['message'] = f"Fallo API en orden de cierre: {api_response.get('retMsg', 'N/A')}"
+        except Exception as e:
+            result['message'] = f"Excepción durante ejecución de cierre: {e}"
+
+        # --- 3. Actualizar Estado Interno y Loguear ---
+        if execution_success:
+            removed_pos = self._position_state.remove_logical_position(side, position_index)
+            if not removed_pos and api_ret_code != 110001:
+                result['message'] = "Ejecución OK pero falló al remover posición lógica."
+                memory_logger.log(f"ERROR SEVERE [Exec Close]: {result['message']}", level="ERROR")
+                return result
+
+            # Calcular PNL y reinversión
+            calc_res = self._calculations.calculate_pnl_commission_reinvestment(
+                side, removed_pos['entry_price'], exit_price, removed_pos['size_contracts']
+            )
+            result.update(calc_res) # Añade PNL, reinversión, etc.
+            
+            # Devolver margen al balance manager
+            margin_to_return = removed_pos['margin_usdt'] + calc_res.get('amount_reinvested_in_operational_margin', 0.0)
+            self._balance_manager.increase_available_margin(side, margin_to_return)
+
+            # Recalcular estado físico
+            open_positions_now = self._position_state.get_open_logical_positions(side)
+            if open_positions_now:
+                aggs = self._calculations.calculate_physical_aggregates(open_positions_now)
+                leverage = self._state_manager.get_leverage()
+                liq = self._calculations.calculate_liquidation_price(side, aggs['avg_entry_price'], leverage)
+                self._position_state.update_physical_position_state(side, **aggs, liq_price=liq, timestamp=timestamp)
+            else:
+                self._position_state.reset_physical_position_state(side)
+            
+            # Loguear posición cerrada
+            if self._closed_position_logger and removed_pos:
+                log_data = {**removed_pos, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
+                self._closed_position_logger.log_closed_position(log_data)
+            
+            result['success'] = True
+            result['message'] = f"Cierre {side.upper()} idx {position_index} exitoso."
+        
         return result
 
     def sync_physical_state(self, side: str):
-        if not self._is_live_mode: 
-            memory_logger.log("WARN [Sync State]: Solo aplicable en modo Live.", level="WARN")
-            return
-        if not all([self._position_state, self._live_operations, self._config, self._utils, self._position_helpers, self._live_manager]):
-            memory_logger.log("WARN [Sync State]: Faltan dependencias.", level="WARN")
-            return
-        if getattr(self._config, 'LOG_LEVEL', 'INFO') == "DEBUG": 
-            memory_logger.log(f"  ... Sincronizando estado físico {side.upper()} con API ...", level="DEBUG")
-        
+        """Sincroniza el estado físico interno con el real de la API."""
         try:
-            target_account = getattr(self._config, 'ACCOUNT_LONGS' if side == 'long' else 'ACCOUNT_SHORTS', None); main_acc = getattr(self._config, 'ACCOUNT_MAIN', 'main'); account_to_use = target_account if target_account and target_account in self._live_manager.get_initialized_accounts() else main_acc
-            
-            if account_to_use not in self._live_manager.get_initialized_accounts(): 
-                memory_logger.log(f"    ERROR SYNC: Cuenta '{account_to_use}' no inicializada.", level="ERROR")
-                return
+            account_to_use, _ = self._connection_manager.get_session_for_operation('trading', side=side)
+            raw_positions = self._live_operations.get_active_position_details_api(self._symbol, account_to_use)
+            if raw_positions is None: return
 
-            physical_pos_raw = self._live_operations.get_active_position_details_api(self._symbol, account_to_use)
-            if physical_pos_raw is None:
-                memory_logger.log(f"    WARN [Sync State]: No se recibieron datos de posición desde API para {side.upper()}. No se puede sincronizar.", level="WARN")
-                return
-
-            physical_state_data = self._position_helpers.extract_physical_state_from_api(physical_pos_raw, self._symbol, side, self._utils)
-            if physical_state_data:
-                self._position_state.update_physical_position_state(side, physical_state_data['avg_entry_price'], physical_state_data['total_size_contracts'], physical_state_data['total_margin_usdt'], physical_state_data.get('liquidation_price'), physical_state_data.get('timestamp', datetime.datetime.now()))
-                if getattr(self._config, 'LOG_LEVEL', 'INFO') == "DEBUG": 
-                    memory_logger.log(f"    SYNC OK: Estado físico {side.upper()} actualizado desde API.", level="DEBUG")
+            state_data = self._helpers.extract_physical_state_from_api(raw_positions, self._symbol, side, self._utils)
+            if state_data:
+                self._position_state.update_physical_position_state(side=side, **state_data)
             else:
                 self._position_state.reset_physical_position_state(side)
-                if getattr(self._config, 'LOG_LEVEL', 'INFO') == "DEBUG": 
-                    memory_logger.log(f"    SYNC OK: No hay posición física {side.upper()} en API. Estado reseteado.", level="DEBUG")
-            
-            current_physical_state = self._position_state.get_physical_position_state(side)
-            if self._print_updates and getattr(self._config, 'LOG_LEVEL', 'INFO') == "DEBUG":
-                memory_logger.log(f"    --- Estado Físico {side.upper()} Actualizado (JSON): ---", level="DEBUG")
-                try:
-                    state_to_print = current_physical_state.copy(); ts_val = state_to_print.get('last_update_ts')
-                    if isinstance(ts_val, datetime.datetime): state_to_print['last_update_ts'] = self._utils.format_datetime(ts_val)
-                    elif ts_val is not None: state_to_print['last_update_ts'] = str(ts_val)
-                    memory_logger.log(json.dumps(state_to_print, indent=2), level="DEBUG")
-                except Exception as json_e:
-                    memory_logger.log(f"    ERROR [Sync State]: Format JSON: {json_e}\n    Estado crudo: {current_physical_state}", level="ERROR")
-                memory_logger.log(f"    -------------------------------------------------", level="DEBUG")
-
-        except Exception as sync_err: 
-            memory_logger.log(f"    ERROR SYNC: Excepción durante sincronización {side.upper()}: {sync_err}", level="ERROR")
+        except Exception as e:
+            memory_logger.log(f"ERROR [Sync State]: Excepción sincronizando {side.upper()}: {e}", level="ERROR")

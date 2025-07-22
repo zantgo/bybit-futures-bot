@@ -1,5 +1,3 @@
-# core/menu/screens/_position_viewer.py
-
 """
 Módulo para la Pantalla de Visualización y Gestión de Posiciones.
 
@@ -16,7 +14,15 @@ except ImportError:
     TerminalMenu = None
 
 # --- Dependencias del Menú ---
-from .._helpers import clear_screen, print_tui_header, press_enter_to_continue, MENU_STYLE
+# <<< INICIO MODIFICACIÓN: Importar la nueva función de ayuda >>>
+from .._helpers import (
+    clear_screen, 
+    print_tui_header, 
+    press_enter_to_continue, 
+    MENU_STYLE,
+    show_help_popup # <-- NUEVA IMPORTACIÓN
+)
+# <<< FIN MODIFICACIÓN >>>
 
 def show_position_viewer_screen(pm_api: Any):
     """
@@ -40,9 +46,12 @@ def show_position_viewer_screen(pm_api: Any):
             time.sleep(2)
             return
 
+        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al menú principal >>>
         menu_items = [
             f"[1] Gestionar Posiciones LONG ({longs_count} abiertas)",
             f"[2] Gestionar Posiciones SHORT ({shorts_count} abiertas)",
+            None,
+            "[h] Ayuda sobre esta pantalla", # <-- NUEVA OPCIÓN
             None,
             "[b] Volver al Dashboard Principal"
         ]
@@ -57,8 +66,12 @@ def show_position_viewer_screen(pm_api: Any):
             _manage_side_positions('long', pm_api)
         elif choice == 1:
             _manage_side_positions('short', pm_api)
-        else:
+        elif choice == 3: # Índice de la opción de Ayuda
+            show_help_popup("position_viewer")
+        else: # Volver o ESC
             break
+        # <<< FIN MODIFICACIÓN >>>
+
 
 def _manage_side_positions(side: str, pm_api: Any):
     """
@@ -82,7 +95,7 @@ def _manage_side_positions(side: str, pm_api: Any):
             time.sleep(2)
             return
             
-        # --- Construcción del menú con detalles de cada posición ---
+        # --- Construcción del menú con detalles (Lógica existente, sin cambios) ---
         menu_items = []
         if not open_positions:
             menu_items.append("(No hay posiciones lógicas abiertas en este lado)")
@@ -96,26 +109,25 @@ def _manage_side_positions(side: str, pm_api: Any):
                 ts_info = "TS Inactivo"
                 if pos.get('ts_is_active'):
                     ts_stop = pos.get('ts_stop_price')
-                    # Asegurarse de que ts_stop no sea None antes de formatear
                     if ts_stop is not None:
                         ts_info = f"TS Activo @ {ts_stop:.4f}"
                     else:
                         ts_info = "TS Activo (Calculando...)"
 
-
                 if current_price > 0 and entry_price > 0 and size_contracts > 0:
                     pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
                 
-                # --- INICIO DE LA SOLUCIÓN ---
-                # Se ha unido la f-string en una sola línea para evitar el SyntaxError.
-                entry_str = f"Idx {i:<2} | PNL: {pnl:>+8.2f} USDT | Entrada: {entry_price:>9.4f} | Tamaño: {size_contracts:>8.4f} | SL: {sl_price if sl_price else 'N/A':<9} | {ts_info}"
-                # --- FIN DE LA SOLUCIÓN ---
+                # Formato de la entrada del menú
+                sl_str = f"{sl_price:.4f}" if sl_price is not None else 'N/A'
+                entry_str = f"Idx {i:<2} | PNL: {pnl:>+8.2f} USDT | Entrada: {entry_price:>9.4f} | Tamaño: {size_contracts:>8.4f} | SL: {sl_str:<9} | {ts_info}"
                 menu_items.append(f"[Cerrar] {entry_str}")
 
+        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al submenú >>>
         menu_items.extend([
             None,
             f"[Cerrar TODAS] las {len(open_positions)} posiciones {side.upper()}" if open_positions else "(No hay posiciones para cerrar)",
             "[r] Refrescar",
+            "[h] Ayuda", # <-- NUEVA OPCIÓN
             None,
             "[b] Volver"
         ])
@@ -127,16 +139,31 @@ def _manage_side_positions(side: str, pm_api: Any):
         )
         choice_index = submenu.show()
 
-        if choice_index is None or menu_items[choice_index] is None or "Volver" in menu_items[choice_index]:
+        if choice_index is None:
             break
 
-        action_text = menu_items[choice_index]
+        # Evitar IndexError si se presiona ESC y la lista está vacía
+        try:
+            action_text = menu_items[choice_index]
+        except IndexError:
+            break
+
+        if action_text is None or "Volver" in action_text:
+            break
+        # <<< FIN MODIFICACIÓN >>>
 
         if "[r] Refrescar" in action_text:
             continue
         
+        # <<< INICIO MODIFICACIÓN: Añadir manejo para la opción de ayuda >>>
+        if "[h] Ayuda" in action_text:
+            show_help_popup("position_viewer")
+            continue
+        # <<< FIN MODIFICACIÓN >>>
+        
         if "[Cerrar] Idx" in action_text:
             try:
+                # Lógica de cierre individual (sin cambios)
                 pos_index_to_close = int(action_text.split('|')[0].split(' ')[2])
                 success, msg = pm_api.manual_close_logical_position_by_index(side, pos_index_to_close)
                 print(f"\n{msg}")
@@ -146,6 +173,7 @@ def _manage_side_positions(side: str, pm_api: Any):
                 time.sleep(1.5)
 
         elif "[Cerrar TODAS]" in action_text and open_positions:
+            # Lógica de cierre total (sin cambios)
             confirm_title = f"¿Confirmas cerrar TODAS las {len(open_positions)} posiciones {side.upper()}?"
             confirm_menu = TerminalMenu(["[s] Sí, cerrar todas", "[n] No, cancelar"], title=confirm_title, **MENU_STYLE)
             if confirm_menu.show() == 0:
@@ -156,4 +184,4 @@ def _manage_side_positions(side: str, pm_api: Any):
                 else:
                     print(f"\nFALLO: No se pudieron cerrar todas las posiciones. Revisa los logs.")
                 time.sleep(3)
-                break
+                break # Rompe el bucle interno para volver al menú principal de posiciones

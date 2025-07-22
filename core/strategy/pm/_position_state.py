@@ -1,217 +1,169 @@
 """
-Módulo para almacenar y gestionar el estado de las posiciones lógicas
-(delegado a LogicalPositionTable) y físicas (agregadas).
-v7.0 (Refactorizado para usar LogicalPositionTable)
+Módulo del PositionState.
 
-Correcciones v2:
-- Corregir error Pylance "Variable not allowed in type expression".
+Define la clase PositionState, responsable de almacenar y gestionar el estado
+de las posiciones lógicas (delegado a instancias de LogicalPositionTable) y
+físicas (agregadas) para ambos lados (long y short).
+
+v2.0: Refactorizado de módulo con estado global a Clase.
 """
 import datetime
-# <<< CORRECCIÓN: Importar Union desde typing >>>
-from typing import List, Dict, Optional, Any, TYPE_CHECKING, Union
 import copy
 import traceback
-import numpy as np # Necesario para np.isfinite
+from typing import List, Dict, Optional, Any
 
-# --- Importar LogicalPositionTable ---
-try:
-    # Asumimos que está en el mismo directorio
-    from ._logical_table import LogicalPositionTable
-except ImportError as e:
-    print(f"ERROR CRITICO [Position State Import]: No se pudo importar LogicalPositionTable: {e}")
-    LogicalPositionTable = None # Definir como None si falla
+# --- Dependencias del Proyecto ---
+# Estas dependencias se inyectarán en el constructor de la clase
+from ._logical_table import LogicalPositionTable
+from ._entities import LogicalPosition, PhysicalPosition
 
-# --- Importar Dependencias (utils, config, live_ops) ---
-# Estas dependencias ahora son necesarias para inicializar LogicalPositionTable
-try:
-    import os
-    import sys
-    # Añadir raíz del proyecto al path si no está
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if project_root not in sys.path: sys.path.insert(0, project_root)
-    import config as config
-    from core import _utils
-    try:
-        from core import live_operations # Opcional, solo para modo live
-    except ImportError:
-        live_operations = None
-except ImportError as e_core:
-    print(f"WARN [Position State Import]: No se pudo importar dependencia core ({e_core.name}). Funcionalidad limitada.")
-    config = None; _utils = None; live_operations = None
-except Exception as e_imp:
-     print(f"ERROR inesperado importando dependencias en position_state: {e_imp}")
-     config = None; _utils = None; live_operations = None
 
-# --- Estado del Módulo ---
-_initialized: bool = False
-_long_table: Optional[Any] = None # Antes: Optional[LogicalPositionTable]
-_short_table: Optional[Any] = None # Antes: Optional[LogicalPositionTable]
-_physical_long_position: Dict[str, Any] = {}
-_physical_short_position: Dict[str, Any] = {}
+class PositionState:
+    """Gestiona el estado de las posiciones lógicas y físicas."""
 
-# --- Funciones Públicas ---
+    def __init__(self, config: Any, utils: Any, live_operations: Optional[Any]):
+        """
+        Inicializa el gestor de estado de posiciones.
+        """
+        # Inyección de dependencias
+        self._config = config
+        self._utils = utils
+        self._live_operations = live_operations
+        
+        # Atributos de estado de la instancia
+        self._initialized: bool = False
+        self._long_table: Optional[LogicalPositionTable] = None
+        self._short_table: Optional[LogicalPositionTable] = None
+        self.physical_long_position: PhysicalPosition = PhysicalPosition()
+        self.physical_short_position: PhysicalPosition = PhysicalPosition()
 
-def initialize_state(
-    is_live_mode: bool = False,
-    # Añadir dependencias como args opcionales para pasar a LPT
-    config_dependency: Optional[Any] = None,
-    utils_dependency: Optional[Any] = None,
-    live_ops_dependency: Optional[Any] = None
+    def initialize(self, is_live_mode: bool):
+        """
+        Inicializa o resetea el estado para una nueva sesión.
+        Crea las instancias de LogicalPositionTable.
+        """
+        print("[Position State] Inicializando estado...")
+        self._initialized = False
+
+        # Resetear estado físico
+        self.reset_physical_position_state('long')
+        self.reset_physical_position_state('short')
+
+        # Validar dependencias para las tablas lógicas
+        if not all([self._config, self._utils, LogicalPositionTable]):
+            print("ERROR CRITICO [PS Init]: Faltan dependencias para LogicalPositionTable.")
+            return
+
+        try:
+            # Crear instancias de las tablas lógicas
+            self._long_table = LogicalPositionTable(
+                side='long',
+                is_live_mode=is_live_mode,
+                config_param=self._config,
+                utils=self._utils,
+                live_operations=self._live_operations if is_live_mode else None
+            )
+            self._short_table = LogicalPositionTable(
+                side='short',
+                is_live_mode=is_live_mode,
+                config_param=self._config,
+                utils=self._utils,
+                live_operations=self._live_operations if is_live_mode else None
+            )
+            self._initialized = True
+            print("[Position State] Estado y Tablas Lógicas inicializados.")
+
+        except Exception as e:
+            print(f"ERROR CRITICO [PS Init]: Falló la inicialización de LogicalPositionTable: {e}")
+            traceback.print_exc()
+            self._initialized = False
+
+    def _get_table_for_side(self, side: str) -> Optional[LogicalPositionTable]:
+        """Método auxiliar para obtener la tabla correcta."""
+        if side == 'long':
+            return self._long_table
+        elif side == 'short':
+            return self._short_table
+        return None
+
+    # --- Métodos para Posiciones Lógicas ---
+    
+    def add_logical_position(self, side: str, position_data: Dict[str, Any]) -> bool:
+        """Añade una nueva posición lógica a la tabla correspondiente."""
+        if not self._initialized: return False
+        table = self._get_table_for_side(side)
+        return table.add_position(position_data) if table else False
+
+    def remove_logical_position(self, side: str, index: int) -> Optional[Dict[str, Any]]:
+        """Elimina una posición lógica por índice."""
+        if not self._initialized: return None
+        table = self._get_table_for_side(side)
+        return table.remove_position_by_index(index) if table else None
+
+    def get_open_logical_positions(self, side: str) -> List[Dict[str, Any]]:
+        """Devuelve una copia de las posiciones lógicas abiertas."""
+        if not self._initialized: return []
+        table = self._get_table_for_side(side)
+        # LogicalPositionTable.get_positions() ya devuelve una copia
+        return table.get_positions() if table else []
+        
+    def update_logical_position_details(self, side: str, position_id: str, details_to_update: Dict[str, Any]) -> bool:
+        """Actualiza detalles de una posición lógica específica."""
+        if not self._initialized: return False
+        table = self._get_table_for_side(side)
+        return table.update_position_details(position_id, details_to_update) if table else False
+
+    def display_logical_table(self, side: str):
+        """Solicita a la tabla lógica que imprima su estado."""
+        if not self._initialized: return
+        table = self._get_table_for_side(side)
+        if table:
+            table.display_table()
+
+    # --- Métodos para Posiciones Físicas ---
+
+    def get_physical_position_state(self, side: str) -> Dict[str, Any]:
+        """Devuelve una copia del estado físico en formato de diccionario."""
+        if not self._initialized: return {}
+        
+        target_physical: PhysicalPosition = self.physical_long_position if side == 'long' else self.physical_short_position
+        
+        # Convertir dataclass a diccionario para mantener la compatibilidad con la TUI
+        from dataclasses import asdict
+        state_dict = asdict(target_physical)
+        
+        # Formatear el timestamp para la visualización
+        ts = state_dict.get('last_update_ts')
+        if self._utils and ts and isinstance(ts, datetime.datetime):
+            state_dict['last_update_ts'] = self._utils.format_datetime(ts)
+        elif ts is not None:
+            state_dict['last_update_ts'] = str(ts)
+            
+        return state_dict
+
+    def update_physical_position_state(
+        self,
+        side: str,
+        avg_price: float,
+        total_size: float,
+        total_margin: float,
+        liq_price: Optional[float],
+        timestamp: datetime.datetime
     ):
-    """
-    Resetea el estado físico y crea/reinicializa las instancias
-    de LogicalPositionTable para long y short.
-    """
-    global _initialized, _long_table, _short_table
-    global _physical_long_position, _physical_short_position
-    # Usar dependencias pasadas o las globales si no se pasan
-    current_config = config_dependency if config_dependency else config
-    current_utils = utils_dependency if utils_dependency else _utils
-    current_live_ops = live_ops_dependency if live_ops_dependency else live_operations
+        """Actualiza el estado de la posición física."""
+        if not self._initialized: return
+        
+        target_physical = self.physical_long_position if side == 'long' else self.physical_short_position
+        
+        target_physical.avg_entry_price = self._utils.safe_float_convert(avg_price, 0.0)
+        target_physical.total_size_contracts = self._utils.safe_float_convert(total_size, 0.0)
+        target_physical.total_margin_usdt = self._utils.safe_float_convert(total_margin, 0.0)
+        target_physical.est_liq_price = self._utils.safe_float_convert(liq_price)
+        target_physical.last_update_ts = timestamp
 
-    print("[Position State] Inicializando estado...")
-    _initialized = False
-
-    # --- Resetear Estado Físico ---
-    reset_physical_position_state('long')
-    reset_physical_position_state('short')
-
-    # --- Crear/Reinicializar Tablas Lógicas ---
-    if not LogicalPositionTable: print("ERROR CRITICO [PS Init]: Clase LogicalPositionTable no importada."); _long_table = None; _short_table = None; return
-
-    # Verificar dependencias necesarias para las tablas
-    if not current_config or not current_utils: print("ERROR CRITICO [PS Init]: Faltan dependencias (config, utils) para inicializar LogicalPositionTable."); _long_table = None; _short_table = None; return
-    if is_live_mode and not current_live_ops: print("WARN [PS Init]: Modo Live pero live_operations no disponible para LogicalPositionTable.")
-
-    try:
-        _long_table = LogicalPositionTable(
-            side='long',
-            is_live_mode=is_live_mode,
-            config_param=current_config, # Corregido de 'config' a 'config_param'
-            utils=current_utils,
-            live_operations=current_live_ops if is_live_mode else None
-        )
-        _short_table = LogicalPositionTable(
-            side='short',
-            is_live_mode=is_live_mode,
-            config_param=current_config, # Corregido de 'config' a 'config_param'
-            utils=current_utils,
-            live_operations=current_live_ops if is_live_mode else None
-        )
-        # --- FIN MODIFICACIÓN ---
-        _initialized = True
-        print("[Position State] Estado y Tablas Lógicas inicializados.")
-
-    except Exception as table_init_err: print(f"ERROR CRITICO [PS Init]: Falló la inicialización de LogicalPositionTable: {table_init_err}"); traceback.print_exc(); _long_table = None; _short_table = None; _initialized = False
-
-
-def add_logical_position(side: str, position_data: Dict[str, Any]) -> bool:
-    """Añade una nueva posición lógica (delegando a la tabla apropiada)."""
-    if not _initialized: print("ERROR [PS Add]: No inicializado."); return False
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        return table.add_position(position_data)
-    else:
-        print(f"ERROR [PS Add]: Tabla lógica para lado '{side}' no disponible."); return False
-
-def remove_logical_position(side: str, index: int) -> Optional[Dict[str, Any]]:
-    """Elimina una posición lógica por índice (delegando a la tabla)."""
-    if not _initialized: print("ERROR [PS Remove Idx]: No inicializado."); return None
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        return table.remove_position_by_index(index)
-    else:
-        print(f"ERROR [PS Remove Idx]: Tabla lógica para lado '{side}' no disponible."); return None
-
-def remove_logical_position_by_id(side: str, position_id: str) -> Optional[Dict[str, Any]]:
-    """Elimina una posición lógica por su ID (delegando a la tabla)."""
-    if not _initialized: print("ERROR [PS Remove ID]: No inicializado."); return None
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        return table.remove_position_by_id(position_id)
-    else:
-        print(f"ERROR [PS Remove ID]: Tabla lógica para lado '{side}' no disponible."); return None
-
-
-def get_open_logical_positions(side: str) -> List[Dict[str, Any]]:
-    """Devuelve una COPIA PROFUNDA de la lista de posiciones lógicas (desde la tabla)."""
-    if not _initialized: return []
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        return table.get_positions() # get_positions ya devuelve copia profunda
-    else: return []
-
-def get_used_margin(side: str) -> float:
-    """Calcula la suma del margen USDT usado (delegando a la tabla)."""
-    if not _initialized: return 0.0
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        if hasattr(table, 'get_total_used_margin'): return table.get_total_used_margin()
-        else: print(f"WARN [PS Get Margin]: Método get_total_used_margin no encontrado en LPT {side}. Calculando manualmente."); total_used_margin = 0.0; positions_list = table.get_positions()
-        for pos in positions_list: margin = pos.get('margin_usdt', 0.0);
-        if isinstance(margin, (int, float)) and np.isfinite(margin): total_used_margin += margin
-        return total_used_margin
-    else: return 0.0
-
-# --- Nuevas Funciones de Delegación ---
-
-def sync_new_logical_entry_price(side: str, position_id: str, order_id: str) -> bool:
-    """Solicita a la tabla lógica que sincronice el precio de entrada post-apertura."""
-    if not _initialized: print("ERROR [PS Sync Entry]: No inicializado."); return False
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        if hasattr(table, 'sync_entry_price_after_open'): return table.sync_entry_price_after_open(position_id, order_id)
-        else: print(f"ERROR [PS Sync Entry]: Método 'sync_entry_price_after_open' no encontrado en LPT {side}."); return False
-    else: print(f"ERROR [PS Sync Entry]: Tabla lógica para lado '{side}' no disponible."); return False
-
-def update_logical_position_details(side: str, position_id: str, details_to_update: Dict[str, Any]) -> bool:
-    """Actualiza detalles específicos de una posición lógica por ID (delegando a la tabla)."""
-    if not _initialized: print("ERROR [PS Update Details]: No inicializado."); return False
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        if hasattr(table, 'update_position_details'): return table.update_position_details(position_id, details_to_update)
-        else: print(f"ERROR [PS Update Details]: Método 'update_position_details' no encontrado en LPT {side}."); return False
-    else: print(f"ERROR [PS Update Details]: Tabla lógica para lado '{side}' no disponible."); return False
-
-def display_logical_table(side: str):
-    """Solicita a la tabla lógica que imprima su estado."""
-    if not _initialized: print("ERROR [PS Display]: No inicializado."); return
-    table = _long_table if side == 'long' else _short_table
-    if table:
-        if hasattr(table, 'display_table'): table.display_table()
-        else: print(f"ERROR [PS Display]: Método 'display_table' no encontrado en LPT {side}.")
-    else: print(f"ERROR [PS Display]: Tabla lógica para lado '{side}' no disponible.")
-
-# --- Gestión del Estado Físico (Se mantiene aquí) ---
-
-def get_physical_position_state(side: str) -> Dict[str, Any]:
-    """Devuelve una COPIA PROFUNDA del estado físico y formatea timestamp."""
-    if not _initialized: return {}
-    target_physical = _physical_long_position if side == 'long' else _physical_short_position
-    if side not in ['long', 'short']: print(f"ERROR [PS Get Phys]: Lado inválido '{side}'."); return {}
-    state_copy = copy.deepcopy(target_physical)
-    ts = state_copy.get('last_update_ts')
-    global _utils # Necesario para el formateo
-    if _utils and ts and isinstance(ts, datetime.datetime): state_copy['last_update_ts'] = _utils.format_datetime(ts)
-    elif ts is not None: state_copy['last_update_ts'] = str(ts)
-    return state_copy
-
-def update_physical_position_state(side: str, avg_price: float, total_size: float, total_margin: float, liq_price: Optional[float], timestamp: datetime):
-    """Actualiza el estado físico con datos calculados externamente."""
-    if not _initialized: print("ERROR [PS Update Phys]: No inicializado."); return
-    target_physical = _physical_long_position if side == 'long' else _physical_short_position
-    if side not in ['long', 'short']: print(f"ERROR [PS Update Phys]: Lado inválido '{side}'."); return
-    target_physical['avg_entry_price'] = float(avg_price) if isinstance(avg_price, (int, float)) else 0.0
-    target_physical['total_size_contracts'] = float(total_size) if isinstance(total_size, (int, float)) else 0.0
-    target_physical['total_margin_usdt'] = float(total_margin) if isinstance(total_margin, (int, float)) else 0.0
-    target_physical['est_liq_price'] = float(liq_price) if isinstance(liq_price, (int, float)) else None
-    target_physical['last_update_ts'] = timestamp if isinstance(timestamp, datetime.datetime) else None
-
-
-def reset_physical_position_state(side: str):
-    """Resetea el estado físico a valores por defecto."""
-    default_state = { 'avg_entry_price': 0.0, 'total_size_contracts': 0.0,
-                      'total_margin_usdt': 0.0, 'est_liq_price': None,
-                      'last_update_ts': None }
-    if side == 'long': global _physical_long_position; _physical_long_position = default_state.copy()
-    elif side == 'short': global _physical_short_position; _physical_short_position = default_state.copy()
+    def reset_physical_position_state(self, side: str):
+        """Resetea el estado físico a sus valores por defecto."""
+        if side == 'long':
+            self.physical_long_position = PhysicalPosition()
+        elif side == 'short':
+            self.physical_short_position = PhysicalPosition()

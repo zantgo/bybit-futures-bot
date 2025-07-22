@@ -1,12 +1,11 @@
-# main.py
-
 """
 Punto de Entrada Principal del Bot de Trading.
 
 Este archivo es el lanzador de la aplicación. Su responsabilidad es:
 1. Importar todos los componentes y dependencias necesarios del bot.
-2. Inyectar estas dependencias en el orquestador principal de la TUI.
-3. Ceder el control total del ciclo de vida de la aplicación al paquete 'core.menu'.
+2. Ensamblar un diccionario de dependencias (Clases y Módulos).
+3. Inyectar estas dependencias en el orquestador principal (el 'runner' a través de la TUI).
+4. Ceder el control total del ciclo de vida de la aplicación al paquete 'core.menu'.
 """
 import sys
 import os
@@ -19,11 +18,7 @@ try:
     from core import utils
     
     # Paquete del Menú (TUI)
-    # --- INICIO DE LA SOLUCIÓN ---
-    # Se importa 'launch_bot' que es la única función necesaria.
-    # La importación de '__init__LEGACY' se elimina por ser incorrecta y obsoleta.
     from core.menu import launch_bot
-    # --- FIN DE LA SOLUCIÓN ---
     
     # Paquete de la API
     from core import api as live_operations
@@ -32,16 +27,14 @@ try:
     from core.logging import open_position_logger, closed_position_logger, signal_logger, memory_logger
     
     # Componentes de Estrategia
-    from core.strategy import pm as position_manager
     from core.strategy import ta
     from core.strategy import event_processor
     
-    # Módulos internos del PM para inyección de dependencias
-    from core.strategy.pm import _balance as balance_manager
-    from core.strategy.pm import _position_state as position_state
-    from core.strategy.pm import _helpers as position_helpers
-    from core.strategy.pm import _calculations as position_calculations
-    from core.strategy.pm._executor import PositionExecutor
+    # Clases y Módulos del PM refactorizado
+    from core.strategy.pm import api as pm_api_module
+    from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
+    from core.strategy.pm import _helpers as pm_helpers_module
+    from core.strategy.pm import _calculations as pm_calculations_module
 
     # Paquete de Conexión
     from connection import manager as connection_manager
@@ -54,9 +47,6 @@ except ImportError as e:
     print("="*80)
     print("!!! ERROR CRÍTICO DE IMPORTACIÓN !!!")
     print(f"No se pudo importar un módulo esencial: {e}")
-    print("Asegúrate de haber instalado todas las dependencias (pip install -r requirements.txt)")
-    print("y de que la estructura de directorios del proyecto es correcta.")
-    print("="*80)
     traceback.print_exc()
     sys.exit(1)
 
@@ -67,46 +57,50 @@ if __name__ == "__main__":
     Ensambla el diccionario de dependencias y lanza el controlador principal de la TUI.
     """
     
-    # 1. Crear un diccionario que contenga todos los módulos y componentes importados.
+    # <<< INICIO DE LA CORRECCIÓN: Las claves deben coincidir con la firma de la función >>>
     dependencies = {
         # Módulos base
-        "config": config,
-        "utils": utils,
+        "config_module": config,
+        "utils_module": utils,
         
         # Módulos de bajo nivel
-        "connection_manager": connection_manager,
-        "connection_ticker": connection_ticker,
-        "live_operations": live_operations,
+        "connection_manager_module": connection_manager,
+        "connection_ticker_module": connection_ticker,
+        "live_operations_module": live_operations,
         
         # Módulos de logging
-        "memory_logger": memory_logger,
-        "open_snapshot_logger": open_position_logger,
-        "closed_position_logger": closed_position_logger,
-        "signal_logger": signal_logger,
+        "memory_logger_module": memory_logger,
+        "open_snapshot_logger_module": open_position_logger,
+        "closed_position_logger_module": closed_position_logger,
+        "signal_logger_module": signal_logger,
         
-        # Módulos de estrategia y PM
-        "position_manager": position_manager,
-        "ta_manager": ta,
-        "event_processor": event_processor,
+        # Módulos de estrategia (los que no son del PM)
+        "ta_manager_module": ta,
+        "event_processor_module": event_processor,
         
-        # Módulos internos del PM (para inyección más profunda)
-        "pm_balance_manager": balance_manager,
-        "pm_position_state": position_state,
-        "pm_helpers": position_helpers,
-        "pm_calculations": position_calculations,
-        "pm_executor_class": PositionExecutor,
+        # Fachada de la API del PM (para la TUI y otros consumidores)
+        "position_manager_api_module": pm_api_module,
+        
+        # Clases del PM (para que el runner las instancie)
+        "PositionManager": PositionManager,
+        "BalanceManager": BalanceManager,
+        "PositionState": PositionState,
+        "PositionExecutor": PositionExecutor,
+        
+        # Módulos de soporte del PM
+        "pm_helpers_module": pm_helpers_module,
+        "pm_calculations_module": pm_calculations_module,
 
         # Funciones del Runner
         "initialize_bot_backend": initialize_bot_backend,
         "shutdown_bot_backend": shutdown_bot_backend,
     }
+    # <<< FIN DE LA CORRECCIÓN >>>
 
     try:
-        # 2. Ceder el control total al lanzador del menú, inyectando todas las dependencias.
-        # El módulo 'menu' no se pasa como dependencia porque es el que está controlando el flujo.
+        # Ceder el control total al lanzador del menú, inyectando todas las dependencias.
         launch_bot(dependencies)
     except Exception as e:
-        # Captura de errores catastróficos que puedan ocurrir antes de que el menú se inicie
         print("\n" + "="*80)
         print("!!! ERROR FATAL EN EL LANZADOR PRINCIPAL !!!")
         print(f"  Tipo de Error: {type(e).__name__}")

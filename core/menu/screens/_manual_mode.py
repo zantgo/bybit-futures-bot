@@ -1,5 +1,3 @@
-# core/menu/screens/_manual_mode.py
-
 """
 Módulo para la Pantalla del Modo Manual Guiado.
 
@@ -15,7 +13,16 @@ except ImportError:
     TerminalMenu = None
 
 # --- Dependencias del Menú ---
-from .._helpers import clear_screen, print_tui_header, press_enter_to_continue, get_input, MENU_STYLE
+# <<< INICIO MODIFICACIÓN: Importar la nueva función de ayuda >>>
+from .._helpers import (
+    clear_screen,
+    print_tui_header,
+    press_enter_to_continue,
+    get_input,
+    MENU_STYLE,
+    show_help_popup # <-- NUEVA IMPORTACIÓN
+)
+# <<< FIN MODIFICACIÓN >>>
 
 def show_manual_mode_screen(pm_api: Any):
     """
@@ -38,14 +45,18 @@ def show_manual_mode_screen(pm_api: Any):
         current_mode = manual_state.get('mode', 'N/A')
         
         print(f"\nEstado Actual: El bot está en modo -> {current_mode}\n")
-        if "ONLY" in current_mode or "SHORT" in current_mode:
+        # Corrección de la lógica para ser más precisa.
+        if current_mode in ["LONG_ONLY", "SHORT_ONLY"]:
              print("Una tendencia manual está actualmente activa.")
         else:
              print("El bot está en modo NEUTRAL o LONG_SHORT general. Puedes iniciar una nueva tendencia.")
 
+        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al menú >>>
         menu_items = [
             "[1] Iniciar/Cambiar Tendencia Manual",
             "[2] Configurar Límites para la PRÓXIMA Tendencia",
+            None,
+            "[h] Ayuda sobre esta pantalla", # <-- NUEVA OPCIÓN
             None,
             "[b] Volver al Dashboard Principal"
         ]
@@ -56,11 +67,16 @@ def show_manual_mode_screen(pm_api: Any):
             _set_manual_trend(pm_api)
         elif choice == 1:
             _configure_next_trend_limits(pm_api)
-        else:
+        elif choice == 3: # Índice de la opción de Ayuda
+            show_help_popup("manual_mode")
+        else: # Volver o ESC
             break
+        # <<< FIN MODIFICACIÓN >>>
+
 
 def _set_manual_trend(pm_api: Any):
     """Maneja la lógica para cambiar el modo de trading de la tendencia actual."""
+    # Esta función se mantiene 100% idéntica a la original.
     current_mode = pm_api.get_manual_state().get('mode', 'N/A')
     
     title = f"Selecciona el nuevo modo de trading\nModo actual: {current_mode}"
@@ -99,6 +115,7 @@ def _set_manual_trend(pm_api: Any):
 
 def _configure_next_trend_limits(pm_api: Any):
     """Permite al usuario pre-configurar los límites para la próxima tendencia que inicie."""
+    # Esta función se mantiene 100% idéntica a la original.
     clear_screen()
     print_tui_header("Configurar Límites para la Próxima Tendencia Manual")
     print("\nEstos límites se activarán la próxima vez que inicies un modo LONG_ONLY o SHORT_ONLY.")
@@ -138,9 +155,6 @@ def _configure_next_trend_limits(pm_api: Any):
         max_val=0.0
     )
     
-    # No hay opción de precio aquí, ya que eso se manejará con los Triggers (Hitos)
-    # en el modo automático para mantener la separación de conceptos.
-
     # Confirmar antes de guardar
     print("\nResumen de nuevos límites para la próxima tendencia:")
     print(f" - Límite de Trades: {'Ilimitados' if trade_limit == 0 else trade_limit}")

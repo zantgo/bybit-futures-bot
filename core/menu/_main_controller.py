@@ -1,5 +1,3 @@
-# core/menu/_main_controller.py
-
 """
 Controlador Principal del Ciclo de Vida de la TUI.
 
@@ -17,72 +15,74 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- Dependencias del Menú ---
-# Se importa el paquete 'screens' completo, que actúa como fachada para todas las pantallas.
 from . import screens
-from ._helpers import clear_screen, print_tui_header, press_enter_to_continue, MENU_STYLE
+from ._helpers import clear_screen, press_enter_to_continue
 
 # --- Variables Globales del Controlador ---
-# Almacenaremos las dependencias inyectadas desde main.py aquí
 _deps: Dict[str, Any] = {}
 
 def launch_bot(dependencies: Dict[str, Any]):
     """
     Punto de entrada principal para la TUI. Orquesta todo el ciclo de vida.
-
-    Args:
-        dependencies (Dict[str, Any]): Diccionario con todos los módulos
-                                       y componentes del bot inyectados.
     """
     global _deps
     if not TerminalMenu:
-        print("ERROR: La librería 'simple-term-menu' no está instalada. Por favor, ejecuta 'pip install simple-term-menu'")
+        print("ERROR: La librería 'simple-term-menu' no está instalada.")
         sys.exit(1)
 
     _deps = dependencies
     
-    # Inyectar dependencias en las pantallas que las necesiten.
+    # <<< INICIO DE LA CORRECCIÓN >>>
+    # 1. Inicializar el gestor de conexiones ANTES de hacer cualquier otra cosa.
+    #    Esto cargará las claves API y creará los clientes necesarios.
+    print("Inicializando gestor de conexiones y cargando credenciales API...")
+    try:
+        connection_manager = _deps.get("connection_manager_module")
+        if connection_manager:
+            connection_manager.initialize_all_clients()
+        else:
+            raise RuntimeError("El módulo 'connection_manager' no fue inyectado.")
+        print("Gestor de conexiones inicializado.")
+        time.sleep(1) # Pequeña pausa para que el usuario vea el mensaje
+    except Exception as e:
+        print(f"ERROR FATAL: No se pudo inicializar el gestor de conexiones: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+    # <<< FIN DE LA CORRECCIÓN >>>
+
     if hasattr(screens, 'init_screens'):
         screens.init_screens(dependencies)
     
-    bot_initialized = False # Variable para rastrear el estado para un apagado seguro
+    bot_initialized = False
     try:
-        # 1. Pantalla de Bienvenida y Configuración
-        # Esta función ahora controla el bucle de "Iniciar/Modificar/Salir".
         if not screens.show_welcome_screen():
-            # El usuario eligió salir en la pantalla de bienvenida.
             print("\nSalida solicitada por el usuario. ¡Hasta luego!")
             sys.exit(0)
 
-        # 2. Inicialización del Backend
-        # Se obtienen los parámetros de configuración que el usuario pudo haber modificado.
-        config_module = _deps["config"]
+        config_module = _deps["config_module"]
         base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 10.0)
         initial_slots = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5)
 
-        bot_initialized = _deps["initialize_bot_backend"](
-            # Argumentos requeridos por la función de inicialización.
+        init_kwargs = dependencies.copy()
+        init_kwargs.pop("initialize_bot_backend", None)
+        init_kwargs.pop("shutdown_bot_backend", None)
+        
+        success, message = _deps["initialize_bot_backend"](
             operation_mode="live_interactive",
             base_size=base_size,
             initial_slots=initial_slots,
-            # Inyección del resto de las dependencias.
-            config_module=config_module,
-            event_processor_module=_deps["event_processor"],
-            position_manager_module=_deps["position_manager"],
-            ta_manager_module=_deps["ta_manager"],
-            open_snapshot_logger_module=_deps["open_snapshot_logger"]
+            **init_kwargs
         )
         
-        if not bot_initialized:
-            print("\nEl bot no pudo inicializarse. Revisa los logs de error.")
+        if not success:
+            print(f"\nEl bot no pudo inicializarse: {message}")
             press_enter_to_continue()
             sys.exit(1)
-            
+
+        bot_initialized = True
         print("\nBot inicializado y operando en segundo plano.")
         time.sleep(2)
         
-        # 3. Bucle del Dashboard Principal
-        # Esta función ahora es bloqueante y solo retorna cuando el usuario decide salir.
         screens.show_dashboard_screen()
 
     except (KeyboardInterrupt, SystemExit):
@@ -97,18 +97,17 @@ def launch_bot(dependencies: Dict[str, Any]):
         traceback.print_exc()
         print("=" * 80)
     finally:
-        # 4. Secuencia de Apagado
         print("\nIniciando secuencia de apagado final...")
         final_summary = {}
-        # Llamamos a la función de apagado, pasando el estado de inicialización.
+        
         _deps["shutdown_bot_backend"](
             final_summary=final_summary,
             bot_started=bot_initialized,
-            config_module=_deps["config"],
-            connection_ticker_module=_deps["connection_ticker"],
-            position_manager_module=_deps["position_manager"],
-            open_snapshot_logger_module=_deps["open_snapshot_logger"]
+            config_module=_deps["config_module"],
+            connection_ticker_module=_deps["connection_ticker_module"],
+            position_manager_module=_deps["position_manager_api_module"],
+            open_snapshot_logger_module=_deps["open_snapshot_logger_module"]
         )
+        
         print("\nPrograma finalizado. ¡Hasta luego!")
-        # os._exit(0) asegura que todos los hilos terminen.
         os._exit(0)

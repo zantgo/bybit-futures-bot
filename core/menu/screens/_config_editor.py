@@ -1,5 +1,3 @@
-# core/menu/screens/_config_editor.py
-
 """
 Módulo para la Pantalla de Edición de Configuración.
 
@@ -16,7 +14,15 @@ except ImportError:
     TerminalMenu = None
 
 # --- Dependencias del Menú ---
-from .._helpers import get_input, MENU_STYLE, press_enter_to_continue
+# <<< INICIO MODIFICACIÓN: Importar la nueva función de ayuda >>>
+from .._helpers import (
+    get_input,
+    MENU_STYLE,
+    press_enter_to_continue,
+    show_help_popup # <-- NUEVA IMPORTACIÓN
+)
+# <<< FIN MODIFICACIÓN >>>
+
 
 # --- Lógica de la Pantalla ---
 
@@ -33,6 +39,7 @@ def show_config_editor_screen(config_module: Any):
         return
 
     while True:
+        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al menú >>>
         menu_items = [
             "[1] Configuración del Ticker",
             "[2] Parámetros de la Estrategia (TA y Señal)",
@@ -40,7 +47,9 @@ def show_config_editor_screen(config_module: Any):
             "[4] Gestión de Riesgo (SL y TS)",
             "[5] Límites de la Sesión (Disyuntores)",
             None,
-            "[b] Guardar y Volver a la Pantalla Principal"
+            "[h] Ayuda sobre el Editor de Configuración", # <-- NUEVA OPCIÓN
+            None,
+            "[b] Guardar y Volver a la Pantalla Anterior"
         ]
         main_menu = TerminalMenu(
             menu_items,
@@ -59,10 +68,14 @@ def show_config_editor_screen(config_module: Any):
             _show_pm_risk_config_menu(config_module)
         elif choice_index == 4:
             _show_session_limits_menu(config_module)
-        elif choice_index == 6 or choice_index is None:
+        elif choice_index == 6: # Índice de la opción de Ayuda
+            show_help_popup("config_editor")
+        elif choice_index == 8 or choice_index is None: # Índice de Volver
             break
+        # <<< FIN MODIFICACIÓN >>>
 
 # --- Submenús de Configuración (Privados) ---
+# (Todas las funciones de submenú se mantienen 100% idénticas a la original)
 
 def _show_ticker_config_menu(cfg: Any):
     """Muestra el submenú para la configuración del Ticker."""

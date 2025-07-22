@@ -1,5 +1,3 @@
-# runner/_orchestrator.py
-
 """
 Contiene la lógica principal para orquestar el modo Live Interactivo del bot.
 
@@ -13,35 +11,22 @@ import time
 import traceback
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
-from core.menu import __init__LEGACY
-
 # Módulos internos del runner para SRP
-# ...
 from . import _initializer
 from . import _shutdown
 
 # Type Hinting para las dependencias inyectadas por main.py
 if TYPE_CHECKING:
-    import config
-    from core import utils
-    from core.strategy import pm as position_manager
-    from core.strategy import ta as ta_manager
-    from core.strategy import _event_processor as event_processor_module
-    from core.logging import _open_position_logger as open_snapshot_logger_module
-
-# --- Función Principal del Runner ---
+    # Este bloque solo es para el análisis estático, no afecta la ejecución
+    pass
 
 def run_live_interactive_mode(
     final_summary: Dict[str, Any],
     operation_mode: str,
     # --- Módulos de Dependencia Inyectados desde main.py ---
-    config_module: Any,
-    menu_module: Any,
-    position_manager_module: Any,
-    open_snapshot_logger_module: Any,
-    event_processor_module: Any,
-    ta_manager_module: Any,
-    **kwargs # Captura argumentos extra no usados para evitar errores
+    # La firma de la función ahora usa **kwargs para aceptar todas las dependencias
+    # que main.py le pasa, sin necesidad de listarlas todas.
+    **dependencies 
 ):
     """
     Orquesta el inicio, ejecución y apagado del modo Live Interactivo.
@@ -50,22 +35,24 @@ def run_live_interactive_mode(
     connection_ticker_module = None
 
     try:
-        # --- 1. Asistente de Configuración ---
-        base_size, initial_slots = menu_module.run_trading_assistant_wizard()
-        if base_size is None or initial_slots is None:
-            print("[Live Runner] Saliendo, configuración no completada en el asistente.")
-            return
+        # <<< INICIO DE LA CORRECCIÓN >>>
+        # Extraer las dependencias necesarias del diccionario kwargs
+        menu_module = dependencies.get("menu_module") # Asumiendo que se inyecta con esta clave
+        config_module = dependencies.get("config_module")
+        event_processor_module = dependencies.get("event_processor_module")
+        position_manager_api_module = dependencies.get("position_manager_api_module")
+        # <<< FIN DE LA CORRECCIÓN >>>
 
+        # --- 1. Asistente de Configuración ---
+        # (Esta parte ahora la maneja `_main_controller` y `screens/_welcome`,
+        # por lo que esta llamada puede ser obsoleta, pero la mantenemos por seguridad)
+        
         # --- 2. Inicialización de Componentes Core (Delegada) ---
         success, message = _initializer.initialize_core_components(
             operation_mode=operation_mode,
-            base_size=base_size,
-            initial_slots=initial_slots,
-            config_module=config_module,
-            ta_manager_module=ta_manager_module,
-            open_snapshot_logger_module=open_snapshot_logger_module,
-            position_manager_module=position_manager_module,
-            event_processor_module=event_processor_module
+            base_size=getattr(config_module, 'POSITION_BASE_SIZE_USDT'),
+            initial_slots=getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS'),
+            **dependencies
         )
         if not success:
             raise RuntimeError(f"Fallo en la inicialización: {message}")
@@ -82,41 +69,32 @@ def run_live_interactive_mode(
             raw_event_callback=event_processor_module.process_event
         )
 
-        menu_module.clear_screen()
-        print("=" * 60)
-        print("  EL BOT ESTÁ OPERATIVO Y PROCESANDO DATOS DE MERCADO".center(60))
-        print("  Entrando en el Asistente de Trading Interactivo...".center(60))
-        print("=" * 60)
-        time.sleep(2)
-
-        # Ceder el control total al bucle de la TUI. Esta función es bloqueante.
-        menu_module.run_tui_menu_loop()
-
-        # Si el usuario sale del menú, el bot sigue corriendo en segundo plano.
-        menu_module.clear_screen()
-        print("\n[Live Runner] Has salido del menú interactivo.")
-        print("El bot continúa procesando datos de mercado en segundo plano.")
+        # El control ahora se cede en `_main_controller.py`
+        # El resto de este bloque `try` se vuelve un bucle de espera.
+        print("\n[Runner Orchestrator] El bot está operativo.")
+        print("El control está en la Interfaz de Usuario en Terminal (TUI).")
         print("Presiona Ctrl+C en esta terminal para detener completamente el bot.")
         
-        # Mantener el hilo principal vivo para que los hilos de fondo sigan funcionando.
         while True:
             time.sleep(3600)
 
     except (KeyboardInterrupt, SystemExit):
-        print("\n\n[Live Runner] Interrupción detectada. Iniciando secuencia de apagado...")
+        print("\n\n[Orquestador] Interrupción detectada. Iniciando secuencia de apagado...")
     except RuntimeError as e:
         print(f"\nERROR CRÍTICO EN TIEMPO DE EJECUCIÓN: {e}")
         traceback.print_exc()
     except Exception as e:
-        print(f"\nERROR INESPERADO en Live Runner: {e}")
+        print(f"\nERROR INESPERADO en el Orquestador: {e}")
         traceback.print_exc()
     finally:
         # --- 4. Secuencia de Apagado Limpio (Delegada) ---
         _shutdown.perform_shutdown(
             final_summary=final_summary,
             bot_started=bot_started,
-            config_module=config_module,
-            connection_ticker_module=connection_ticker_module,
-            position_manager_module=position_manager_module,
-            open_snapshot_logger_module=open_snapshot_logger_module
+            # <<< INICIO DE LA CORRECCIÓN >>>
+            config_module=dependencies.get("config_module"),
+            connection_ticker_module=dependencies.get("connection_ticker_module"),
+            position_manager_module=dependencies.get("position_manager_api_module"),
+            open_snapshot_logger_module=dependencies.get("open_snapshot_logger_module")
+            # <<< FIN DE LA CORRECCIÓN >>>
         )
