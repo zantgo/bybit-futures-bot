@@ -24,6 +24,13 @@ from .._helpers import (
 )
 from . import _config_editor, _manual_mode, _auto_mode, _position_viewer, _log_viewer
 
+# Importar el modelo de datos para la comprobación de tipos
+try:
+    from core.exchange._models import StandardBalance
+except ImportError:
+    # Fallback si la importación falla para permitir que el módulo se cargue
+    class StandardBalance: pass
+
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
@@ -40,7 +47,6 @@ def show_dashboard_screen():
         time.sleep(2)
         return
 
-    # Se obtiene la fachada de la API del PM usando la clave correcta del diccionario de dependencias.
     pm_api = _deps.get("position_manager_api_module")
     if not pm_api:
         print("ERROR CRÍTICO: La API del Position Manager no fue inyectada en el Dashboard.")
@@ -105,6 +111,25 @@ def show_dashboard_screen():
             "Límite TP de Sesión (ROI)": f"+{tp_roi_pct:.2f}%" if tp_roi_pct else "N/A",
         }
         print_section("Estado General de la Sesión", status_data)
+
+        # --- SECCIÓN DE BALANCES REALES (MODIFICADA PARA OBJETOS StandardBalance) ---
+        print("\n--- Estado Cuentas Reales " + "-"*56)
+        real_balances = summary.get('real_account_balances', {})
+        if not real_balances:
+            print("  (No hay datos de balance disponibles)")
+        else:
+            for acc_name, balance_info in real_balances.items():
+                if isinstance(balance_info, StandardBalance):
+                    equity = balance_info.total_equity_usd
+                    available = balance_info.available_balance_usd
+                    margin_used = equity - available
+                    print(f"  {acc_name.upper():<15}: ", end="")
+                    print(f"Equity: {equity:9.2f} USDT | ", end="")
+                    print(f"En Uso: {margin_used:8.2f} USDT | ", end="")
+                    print(f"Disponible: {available:8.2f} USDT")
+                else:
+                    # Imprime el mensaje de error o cualquier otro valor que no sea un objeto StandardBalance
+                    print(f"  {acc_name.upper():<15}: ({str(balance_info)})")
         
         menu_items = [
             "[1] Refrescar Dashboard", "[2] Ver/Gestionar Posiciones Lógicas",
@@ -122,13 +147,21 @@ def show_dashboard_screen():
         action_map = {0: 'refresh', 1: 'view_positions', 3: 'manual_mode', 4: 'auto_mode', 6: 'edit_config', 7: 'view_logs', 9: 'help', 11: 'exit'}
         action = action_map.get(choice)
         
-        if action == 'refresh': continue
-        elif action == 'view_positions': _position_viewer.show_position_viewer_screen(pm_api)
-        elif action == 'manual_mode': _manual_mode.show_manual_mode_screen(pm_api)
-        elif action == 'auto_mode': _auto_mode.show_auto_mode_screen(pm_api)
-        elif action == 'edit_config': _config_editor.show_config_editor_screen(_deps["config_module"])
-        elif action == 'view_logs': _log_viewer.show_log_viewer()
-        elif action == 'help': show_help_popup("dashboard_main")
+        if action == 'refresh': 
+            continue
+        elif action == 'view_positions': 
+            _position_viewer.show_position_viewer_screen(pm_api)
+        elif action == 'manual_mode': 
+            _manual_mode.show_manual_mode_screen(pm_api)
+        elif action == 'auto_mode': 
+            _auto_mode.show_auto_mode_screen(pm_api)
+        elif action == 'edit_config': 
+            _config_editor.show_config_editor_screen(_deps["config_module"])
+        elif action == 'view_logs': 
+            _log_viewer.show_log_viewer()
+        elif action == 'help': 
+            show_help_popup("dashboard_main")
         elif action == 'exit' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, salir y apagar el bot", "[2] No, continuar operando"], title="¿Estás seguro de que deseas salir?", **MENU_STYLE)
-            if confirm_menu.show() == 0: break
+            if confirm_menu.show() == 0: 
+                break

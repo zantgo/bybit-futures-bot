@@ -32,7 +32,6 @@ def launch_bot(dependencies: Dict[str, Any]):
 
     _deps = dependencies
     
-    # <<< INICIO DE LA CORRECCIÓN >>>
     # 1. Inicializar el gestor de conexiones ANTES de hacer cualquier otra cosa.
     #    Esto cargará las claves API y creará los clientes necesarios.
     print("Inicializando gestor de conexiones y cargando credenciales API...")
@@ -48,13 +47,14 @@ def launch_bot(dependencies: Dict[str, Any]):
         print(f"ERROR FATAL: No se pudo inicializar el gestor de conexiones: {e}")
         traceback.print_exc()
         sys.exit(1)
-    # <<< FIN DE LA CORRECCIÓN >>>
 
+    # Inyectar dependencias en las pantallas de la TUI
     if hasattr(screens, 'init_screens'):
         screens.init_screens(dependencies)
     
     bot_initialized = False
     try:
+        # Mostrar pantalla de bienvenida y esperar la decisión del usuario
         if not screens.show_welcome_screen():
             print("\nSalida solicitada por el usuario. ¡Hasta luego!")
             sys.exit(0)
@@ -63,10 +63,10 @@ def launch_bot(dependencies: Dict[str, Any]):
         base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 10.0)
         initial_slots = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5)
 
-        init_kwargs = dependencies.copy()
-        init_kwargs.pop("initialize_bot_backend", None)
-        init_kwargs.pop("shutdown_bot_backend", None)
+        # Copiar dependencias para pasarlas al inicializador
+        init_kwargs = _deps.copy()
         
+        # Llamar al inicializador del backend del bot
         success, message = _deps["initialize_bot_backend"](
             operation_mode="live_interactive",
             base_size=base_size,
@@ -83,6 +83,7 @@ def launch_bot(dependencies: Dict[str, Any]):
         print("\nBot inicializado y operando en segundo plano.")
         time.sleep(2)
         
+        # Iniciar el bucle principal de la TUI (Dashboard)
         screens.show_dashboard_screen()
 
     except (KeyboardInterrupt, SystemExit):
@@ -100,14 +101,19 @@ def launch_bot(dependencies: Dict[str, Any]):
         print("\nIniciando secuencia de apagado final...")
         final_summary = {}
         
-        _deps["shutdown_bot_backend"](
-            final_summary=final_summary,
-            bot_started=bot_initialized,
-            config_module=_deps["config_module"],
-            connection_ticker_module=_deps["connection_ticker_module"],
-            position_manager_module=_deps["position_manager_api_module"],
-            open_snapshot_logger_module=_deps["open_snapshot_logger_module"]
-        )
+        # Llamar a la función de apagado del backend, asegurando que pasamos
+        # las dependencias que espera explícitamente.
+        shutdown_bot_backend_func = _deps.get("shutdown_bot_backend")
+        if shutdown_bot_backend_func:
+            shutdown_bot_backend_func(
+                final_summary=final_summary,
+                bot_started=bot_initialized,
+                config_module=_deps.get("config_module"),
+                connection_ticker_module=_deps.get("connection_ticker_module"),
+                position_manager_module=_deps.get("position_manager_api_module"),
+                open_snapshot_logger_module=_deps.get("open_snapshot_logger_module")
+            )
         
         print("\nPrograma finalizado. ¡Hasta luego!")
+        # Usar os._exit(0) para una salida forzada y limpia, especialmente si hay hilos daemon.
         os._exit(0)

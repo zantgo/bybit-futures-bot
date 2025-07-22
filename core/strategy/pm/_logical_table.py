@@ -2,10 +2,8 @@
 Módulo que define la clase LogicalPositionTable para gestionar una lista de
 posiciones lógicas abiertas para un lado específico (long/short).
 
-v1.2 (HFT Ready):
-- Comentada la función `sync_entry_price_after_open` y sus delays asociados
-  para optimizar para operaciones de alta frecuencia.
-- Integrado el control de nivel de log para los mensajes de depuración.
+v2.0 (Exchange Agnostic Refactor):
+- Se reemplaza la dependencia de `live_operations` por `exchange_adapter`.
 """
 import datetime
 import traceback
@@ -15,10 +13,14 @@ from typing import Optional, Dict, Any, List, Tuple, Union, TYPE_CHECKING
 import pandas as pd
 
 # --- Dependencias (se inyectan en __init__) ---
+try:
+    from core.exchange import AbstractExchange
+except ImportError:
+    class AbstractExchange: pass
+
 if TYPE_CHECKING:
     import config as cfg_mod
-    from core import _utils as ut_mod
-    from core import live_operations as lo_mod
+    from core import utils as ut_mod
     
     class ConfigFallback:
         LOG_LEVEL = "INFO"
@@ -33,32 +35,41 @@ class LogicalPositionTable:
     def __init__(self,
                  side: str,
                  is_live_mode: bool,
-                 config_param: Optional[Any] = None, # Renombrado para evitar conflicto con el módulo importado
+                 config_param: Optional[Any] = None,
                  utils: Optional[Any] = None,
-                 live_operations: Optional[Any] = None
+                 exchange_adapter: Optional[AbstractExchange] = None # <-- CAMBIO CLAVE
                  ):
         """
         Inicializa la tabla de posiciones lógicas.
         """
         if side not in ['long', 'short']: raise ValueError(f"Lado inválido '{side}'.")
-        if is_live_mode and not live_operations: print(f"WARN [LPT Init {side}]: Modo Live pero live_operations no fue proporcionado.")
+        if is_live_mode and not exchange_adapter: 
+            print(f"WARN [LPT Init {side}]: Modo Live pero exchange_adapter no fue proporcionado.")
 
         self.side = side
         self.is_live_mode = is_live_mode
-        self._config_param = config_param # Usar el parámetro inyectado si existe
+        self._config_param = config_param
         self._utils = utils
-        self._live_operations = live_operations
+        self._exchange = exchange_adapter # <-- CAMBIO CLAVE
         self._positions: List[Dict[str, Any]] = []
 
         print(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}")
 
     # --- Métodos de Gestión Básica ---
     def add_position(self, position_data: Dict[str, Any]) -> bool:
-        if not isinstance(position_data, dict): print(f"ERROR [LPT {self.side.upper()} Add]: Dato no es dict."); return False
-        if 'id' not in position_data: print(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'."); return False
+        if not isinstance(position_data, dict): 
+            print(f"ERROR [LPT {self.side.upper()} Add]: Dato no es dict."); return False
+        if 'id' not in position_data: 
+            print(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'."); return False
+        
         self._positions.append(copy.deepcopy(position_data))
         
-        if getattr(config, 'LOG_LEVEL', 'INFO').upper() == "DEBUG":
+        # Usar config_param inyectado para el control de logs
+        log_level = "INFO"
+        if self._config_param:
+            log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
+
+        if log_level == "DEBUG":
             print(f"DEBUG [LPT {self.side.upper()} Add]: Posición ID ...{str(position_data['id'])[-6:]} añadida. Total: {len(self._positions)}")
         return True
 
@@ -67,35 +78,50 @@ class LogicalPositionTable:
             if 0 <= index < len(self._positions):
                 removed_position = self._positions.pop(index)
                 
-                if getattr(config, 'LOG_LEVEL', 'INFO').upper() == "DEBUG":
+                log_level = "INFO"
+                if self._config_param:
+                    log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
+
+                if log_level == "DEBUG":
                     print(f"DEBUG [LPT {self.side.upper()} Remove Idx]: Posición índice {index} (ID ...{str(removed_position.get('id','N/A'))[-6:]}) eliminada. Total: {len(self._positions)}")
                 return copy.deepcopy(removed_position)
-            else: print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango."); return None
-        except Exception as e: print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}"); traceback.print_exc(); return None
+            else: 
+                print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango."); return None
+        except Exception as e: 
+            print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}"); traceback.print_exc(); return None
 
     def remove_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
         index_to_remove = -1
         for i, pos in enumerate(self._positions):
-            if pos.get('id') == position_id: index_to_remove = i; break
-        if index_to_remove != -1: return self.remove_position_by_index(index_to_remove)
-        else: print(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado."); return None
+            if pos.get('id') == position_id: 
+                index_to_remove = i
+                break
+        if index_to_remove != -1: 
+            return self.remove_position_by_index(index_to_remove)
+        else: 
+            print(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado."); return None
 
     def update_position_details(self, position_id: str, details_to_update: Dict[str, Any]) -> bool:
-        if not isinstance(details_to_update, dict): print(f"ERROR [LPT {self.side.upper()} Update]: details no es dict."); return False
+        if not isinstance(details_to_update, dict): 
+            print(f"ERROR [LPT {self.side.upper()} Update]: details no es dict."); return False
         found = False
         for i, pos in enumerate(self._positions):
             if pos.get('id') == position_id:
                 try:
                     self._positions[i].update(details_to_update)
                     
-                    # --- INICIO MODIFICACIÓN: Asegurar consistencia del control de log ---
-                    if getattr(config, 'LOG_LEVEL', 'INFO').upper() == "DEBUG":
-                        print(f"DEBUG [LPT {self.side.upper()} Update]: Pos ID ...{position_id[-6:]} actualizada con: {details_to_update}")
-                    # --- FIN MODIFICACIÓN ---
+                    log_level = "INFO"
+                    if self._config_param:
+                        log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
+
+                    if log_level == "DEBUG":
+                        print(f"DEBUG [LPT {self.side.upper()} Update]: Pos ID ...{str(position_id)[-6:]} actualizada con: {details_to_update}")
                     found = True
                     break
-                except Exception as e: print(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}"); traceback.print_exc(); return False
-        if not found: print(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.")
+                except Exception as e: 
+                    print(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}"); traceback.print_exc(); return False
+        if not found: 
+            print(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.")
         return found
 
     # --- Métodos de Acceso y Cálculo ---
@@ -104,14 +130,18 @@ class LogicalPositionTable:
 
     def get_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
         for pos in self._positions:
-            if pos.get('id') == position_id: return copy.deepcopy(pos)
+            if pos.get('id') == position_id: 
+                return copy.deepcopy(pos)
         return None
 
     def get_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
         try:
-            if 0 <= index < len(self._positions): return copy.deepcopy(self._positions[index])
-            else: print(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango."); return None
-        except Exception as e: print(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}"); return None
+            if 0 <= index < len(self._positions): 
+                return copy.deepcopy(self._positions[index])
+            else: 
+                print(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango."); return None
+        except Exception as e: 
+            print(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}"); return None
 
     def get_count(self) -> int:
         return len(self._positions)
@@ -119,13 +149,15 @@ class LogicalPositionTable:
     def get_total_size(self) -> float:
         if not self._utils: return 0.0
         total_size = 0.0
-        for pos in self._positions: total_size += self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
+        for pos in self._positions: 
+            total_size += self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
         return total_size
 
     def get_total_used_margin(self) -> float:
          if not self._utils: return 0.0
          total_margin = 0.0
-         for pos in self._positions: total_margin += self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0)
+         for pos in self._positions: 
+             total_margin += self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0)
          return total_margin
 
     def get_average_entry_price(self) -> float:
@@ -134,40 +166,48 @@ class LogicalPositionTable:
         for pos in self._positions:
             size = self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
             price = self._utils.safe_float_convert(pos.get('entry_price'), 0.0)
-            if size > 0 and price > 0: total_value += size * price; total_size += size
+            if size > 0 and price > 0: 
+                total_value += size * price
+                total_size += size
         return self._utils.safe_division(total_value, total_size, default=0.0)
 
     # --- Visualización ---
     def display_table(self):
+        config_to_use = self._config_param
+        log_level = "INFO"
+        if config_to_use:
+            log_level = getattr(config_to_use, 'LOG_LEVEL', 'INFO').upper()
+
         if not self._positions:
-            if getattr(config, 'LOG_LEVEL', 'INFO').upper() == "DEBUG":
+            if log_level == "DEBUG":
                 print(f"\n--- Tabla Posiciones Lógicas {self.side.upper()} ---\n(Vacía)\n" + "-" * 60)
             return
         
         data_for_df = []
-        columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'TP Price', 'API Order ID', 'API Fill Px', 'API Fill Qty']
+        columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'Stop Loss', 'API Order ID']
         price_prec = 4; qty_prec = 3
         
-        # Usar el config global importado, o el inyectado como fallback
-        config_to_use = config or self._config_param
         if config_to_use:
              try: 
                  price_prec = int(getattr(config_to_use, 'PRICE_PRECISION', 4))
                  qty_prec = int(getattr(config_to_use, 'DEFAULT_QTY_PRECISION', 3))
-             except Exception: print("WARN [LPT Display]: Error obteniendo precisiones config."); price_prec = 4; qty_prec = 3
+             except Exception: 
+                 print("WARN [LPT Display]: Error obteniendo precisiones config."); price_prec = 4; qty_prec = 3
         
         for pos in self._positions:
-            entry_ts = pos.get('entry_timestamp'); entry_ts_str = self._utils.format_datetime(entry_ts, '%Y-%m-%d %H:%M:%S') if self._utils and entry_ts else "N/A"
+            entry_ts = pos.get('entry_timestamp')
+            entry_ts_str = self._utils.format_datetime(entry_ts, '%Y-%m-%d %H:%M:%S') if self._utils and entry_ts else "N/A"
+            sl_price = pos.get('stop_loss_price')
+            
             data_for_df.append({
-                'ID': str(pos.get('id', 'N/A'))[-6:], 'Entry Time': entry_ts_str,
+                'ID': str(pos.get('id', 'N/A'))[-6:], 
+                'Entry Time': entry_ts_str,
                 'Entry Price': f"{self._utils.safe_float_convert(pos.get('entry_price'), 0.0):.{price_prec}f}" if self._utils else pos.get('entry_price'),
                 'Size': f"{self._utils.safe_float_convert(pos.get('size_contracts'), 0.0):.{qty_prec}f}" if self._utils else pos.get('size_contracts'),
                 'Margin': f"{self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0):.2f}" if self._utils else pos.get('margin_usdt'),
                 'Leverage': f"{float(pos.get('leverage', 1.0)):.1f}x" if pos.get('leverage') else 'N/A',
-                'TP Price': f"{self._utils.safe_float_convert(pos.get('take_profit_price'), 0.0):.{price_prec}f}" if self._utils and pos.get('take_profit_price') else 'N/A',
-                'API Order ID': str(pos.get('api_order_id', 'N/A'))[-8:],
-                'API Fill Px': f"{self._utils.safe_float_convert(pos.get('api_avg_fill_price'), 0.0):.{price_prec}f}" if self._utils and pos.get('api_avg_fill_price') else '-',
-                'API Fill Qty': f"{self._utils.safe_float_convert(pos.get('api_filled_qty'), 0.0):.{qty_prec}f}" if self._utils and pos.get('api_filled_qty') else '-'
+                'Stop Loss': f"{self._utils.safe_float_convert(sl_price, 0.0):.{price_prec}f}" if self._utils and sl_price else 'N/A',
+                'API Order ID': str(pos.get('api_order_id', 'N/A'))[-8:]
             })
         try:
              df = pd.DataFrame(data_for_df, columns=columns)
@@ -176,5 +216,9 @@ class LogicalPositionTable:
                  table_string = df.to_string(index=False, justify='right')
                  print(table_string)
                  print("-" * (len(table_string.split('\n')[0]) if table_string else 60))
-             else: print("(Tabla vacía)"); print("-" * 60)
-        except Exception as e_df: print(f"ERROR [LPT Display]: Creando DataFrame: {e_df}"); print("-" * 60)
+             else: 
+                 print("(Tabla vacía)")
+                 print("-" * 60)
+        except Exception as e_df: 
+            print(f"ERROR [LPT Display]: Creando DataFrame: {e_df}")
+            print("-" * 60)

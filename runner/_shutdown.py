@@ -12,7 +12,7 @@ def perform_shutdown(
     # --- Módulos de dependencia inyectados ---
     config_module: Any,
     connection_ticker_module: Any,
-    position_manager_module: Any, # Ahora es pm_api_module
+    position_manager_module: Any,
     open_snapshot_logger_module: Any
 ):
     """
@@ -22,36 +22,29 @@ def perform_shutdown(
 
     # 1. Detener el ticker de precios si estaba corriendo
     if bot_started and connection_ticker_module:
-        is_alive = False
-        if hasattr(connection_ticker_module, '_ticker_thread'):
-            thread = getattr(connection_ticker_module, '_ticker_thread', None)
-            if thread and hasattr(thread, 'is_alive') and callable(thread.is_alive):
-                is_alive = thread.is_alive()
-        
-        if is_alive:
-            print("Deteniendo el Ticker de precios...")
-            connection_ticker_module.stop_ticker_thread()
-            print("Ticker detenido.")
+        print("Deteniendo el Ticker de precios...")
+        # La lógica de si está vivo o no está encapsulada en la función stop
+        connection_ticker_module.stop_ticker_thread()
+        print("Ticker detenido.")
 
     # 2. Obtener y guardar el resumen final del Position Manager
     if bot_started and getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
-        print("Obteniendo resumen final del Position Manager...")
-        
-        # <<< INICIO DE LA CORRECCIÓN >>>
-        # La API del PM ahora se llama a través del módulo de API, no directamente
-        summary = position_manager_module.get_position_summary()
-        # <<< FIN DE LA CORRECCIÓN >>>
-        
-        if summary and not summary.get('error'):
-            final_summary.clear()
-            final_summary.update(summary)
-
-            if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-                open_snapshot_logger_module.log_open_positions_snapshot(summary)
-            
-            print("Resumen final obtenido.")
+        if not position_manager_module or not hasattr(position_manager_module, 'is_initialized') or not position_manager_module.is_initialized():
+            print("PM no inicializado, no se puede obtener resumen final.")
         else:
-            final_summary['error'] = 'No se pudo obtener el resumen final del PM.'
-            print("No se pudo obtener el resumen final del PM.")
+            print("Obteniendo resumen final del Position Manager...")
+            summary = position_manager_module.get_position_summary()
+            
+            if summary and not summary.get('error'):
+                final_summary.clear()
+                final_summary.update(summary)
+
+                if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
+                    open_snapshot_logger_module.log_open_positions_snapshot(summary)
+                
+                print("Resumen final obtenido.")
+            else:
+                final_summary['error'] = 'No se pudo obtener el resumen final del PM.'
+                print(f"No se pudo obtener el resumen final del PM: {summary.get('error', 'Error desconocido')}")
     
     print("Secuencia de apagado completada.")

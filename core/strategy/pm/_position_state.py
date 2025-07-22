@@ -5,7 +5,9 @@ Define la clase PositionState, responsable de almacenar y gestionar el estado
 de las posiciones lógicas (delegado a instancias de LogicalPositionTable) y
 físicas (agregadas) para ambos lados (long y short).
 
-v2.0: Refactorizado de módulo con estado global a Clase.
+v2.1 (Exchange Agnostic Refactor):
+- Elimina la dependencia de `live_operations`.
+- Pasa el `exchange_adapter` a las `LogicalPositionTable` que instancia.
 """
 import datetime
 import copy
@@ -13,22 +15,33 @@ import traceback
 from typing import List, Dict, Optional, Any
 
 # --- Dependencias del Proyecto ---
-# Estas dependencias se inyectarán en el constructor de la clase
-from ._logical_table import LogicalPositionTable
-from ._entities import LogicalPosition, PhysicalPosition
+try:
+    from ._logical_table import LogicalPositionTable
+    from ._entities import LogicalPosition, PhysicalPosition
+    from core.exchange import AbstractExchange
+except ImportError:
+    # Fallbacks
+    class LogicalPositionTable: pass
+    class LogicalPosition: pass
+    class PhysicalPosition: pass
+    class AbstractExchange: pass
 
 
 class PositionState:
     """Gestiona el estado de las posiciones lógicas y físicas."""
 
-    def __init__(self, config: Any, utils: Any, live_operations: Optional[Any]):
+    def __init__(self,
+                 config: Any,
+                 utils: Any,
+                 exchange_adapter: AbstractExchange # <-- CAMBIO CLAVE
+                 ):
         """
         Inicializa el gestor de estado de posiciones.
         """
         # Inyección de dependencias
         self._config = config
         self._utils = utils
-        self._live_operations = live_operations
+        self._exchange = exchange_adapter # <-- CAMBIO CLAVE
         
         # Atributos de estado de la instancia
         self._initialized: bool = False
@@ -50,25 +63,25 @@ class PositionState:
         self.reset_physical_position_state('short')
 
         # Validar dependencias para las tablas lógicas
-        if not all([self._config, self._utils, LogicalPositionTable]):
+        if not all([self._config, self._utils, self._exchange, LogicalPositionTable]):
             print("ERROR CRITICO [PS Init]: Faltan dependencias para LogicalPositionTable.")
             return
 
         try:
-            # Crear instancias de las tablas lógicas
+            # Crear instancias de las tablas lógicas, inyectando el adaptador de exchange
             self._long_table = LogicalPositionTable(
                 side='long',
                 is_live_mode=is_live_mode,
                 config_param=self._config,
                 utils=self._utils,
-                live_operations=self._live_operations if is_live_mode else None
+                exchange_adapter=self._exchange if is_live_mode else None # <-- CAMBIO CLAVE
             )
             self._short_table = LogicalPositionTable(
                 side='short',
                 is_live_mode=is_live_mode,
                 config_param=self._config,
                 utils=self._utils,
-                live_operations=self._live_operations if is_live_mode else None
+                exchange_adapter=self._exchange if is_live_mode else None # <-- CAMBIO CLAVE
             )
             self._initialized = True
             print("[Position State] Estado y Tablas Lógicas inicializados.")
@@ -86,7 +99,7 @@ class PositionState:
             return self._short_table
         return None
 
-    # --- Métodos para Posiciones Lógicas ---
+    # --- Métodos para Posiciones Lógicas (Sin cambios en su lógica interna) ---
     
     def add_logical_position(self, side: str, position_data: Dict[str, Any]) -> bool:
         """Añade una nueva posición lógica a la tabla correspondiente."""
@@ -104,7 +117,6 @@ class PositionState:
         """Devuelve una copia de las posiciones lógicas abiertas."""
         if not self._initialized: return []
         table = self._get_table_for_side(side)
-        # LogicalPositionTable.get_positions() ya devuelve una copia
         return table.get_positions() if table else []
         
     def update_logical_position_details(self, side: str, position_id: str, details_to_update: Dict[str, Any]) -> bool:
@@ -120,7 +132,7 @@ class PositionState:
         if table:
             table.display_table()
 
-    # --- Métodos para Posiciones Físicas ---
+    # --- Métodos para Posiciones Físicas (Sin cambios en su lógica interna) ---
 
     def get_physical_position_state(self, side: str) -> Dict[str, Any]:
         """Devuelve una copia del estado físico en formato de diccionario."""

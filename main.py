@@ -4,7 +4,7 @@ Punto de Entrada Principal del Bot de Trading.
 Este archivo es el lanzador de la aplicación. Su responsabilidad es:
 1. Importar todos los componentes y dependencias necesarios del bot.
 2. Ensamblar un diccionario de dependencias (Clases y Módulos).
-3. Inyectar estas dependencias en el orquestador principal (el 'runner' a través de la TUI).
+3. Inyectar estas dependencias en el orquestador principal (la TUI).
 4. Ceder el control total del ciclo de vida de la aplicación al paquete 'core.menu'.
 """
 import sys
@@ -20,7 +20,7 @@ try:
     # Paquete del Menú (TUI)
     from core.menu import launch_bot
     
-    # Paquete de la API
+    # Paquete de la API (capa de bajo nivel para Bybit)
     from core import api as live_operations
     
     # Paquete de Logging
@@ -42,6 +42,10 @@ try:
     
     # Paquete Runner
     from runner import initialize_bot_backend, shutdown_bot_backend
+    
+    # --- NUEVO: Capa de Abstracción de Exchange ---
+    from core.exchange import AbstractExchange
+    from core.exchange.bybit_adapter import BybitAdapter
 
 except ImportError as e:
     print("="*80)
@@ -57,13 +61,12 @@ if __name__ == "__main__":
     Ensambla el diccionario de dependencias y lanza el controlador principal de la TUI.
     """
     
-    # <<< INICIO DE LA CORRECCIÓN: Las claves deben coincidir con la firma de la función >>>
     dependencies = {
         # Módulos base
         "config_module": config,
         "utils_module": utils,
         
-        # Módulos de bajo nivel
+        # Módulos de bajo nivel (API y Conexión)
         "connection_manager_module": connection_manager,
         "connection_ticker_module": connection_ticker,
         "live_operations_module": live_operations,
@@ -94,8 +97,12 @@ if __name__ == "__main__":
         # Funciones del Runner
         "initialize_bot_backend": initialize_bot_backend,
         "shutdown_bot_backend": shutdown_bot_backend,
+
+        # --- NUEVO: Clases de la capa de Exchange ---
+        # El inicializador las usará para construir el adaptador correcto.
+        "AbstractExchange": AbstractExchange,
+        "BybitAdapter": BybitAdapter,
     }
-    # <<< FIN DE LA CORRECCIÓN >>>
 
     try:
         # Ceder el control total al lanzador del menú, inyectando todas las dependencias.

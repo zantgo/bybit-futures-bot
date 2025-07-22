@@ -2,42 +2,46 @@
 Módulo del Position Manager Principal.
 
 Define la clase PositionManager, el corazón de la gestión de posiciones,
-capital y riesgo. Esta clase orquesta sus componentes dependientes (BalanceManager,
-PositionState, PositionExecutor) y encapsula el estado general, las reglas y
-las acciones de la estrategia.
+capital y riesgo. Esta clase orquesta sus componentes dependientes y encapsula
+el estado general, las reglas y las acciones de la estrategia.
 
-v1.0: Creado como parte de la refactorización a Clean Architecture.
+v3.0 (Full Exchange Agnostic Refactor):
+- Se eliminan todas las dependencias de bajo nivel (`live_operations`, `connection_manager`).
+- La clase ahora depende exclusivamente de la interfaz `AbstractExchange`.
 """
 import datetime
-import threading
 import time
 import copy
 from typing import Optional, Dict, Any, Tuple, List
 
 # --- Dependencias del Proyecto (inyectadas) ---
-# Se importan las entidades para el type-hinting y la creación de instancias
-from ._entities import Milestone, MilestoneCondition, MilestoneAction
-# Se importa el transfer_executor para usarlo directamente
-from . import _transfer_executor
+try:
+    from ._entities import Milestone, MilestoneCondition, MilestoneAction
+    from . import _transfer_executor
+    from core.exchange import AbstractExchange
+except ImportError:
+    # Fallbacks para el análisis estático
+    class Milestone: pass
+    class MilestoneCondition: pass
+    class MilestoneAction: pass
+    class AbstractExchange: pass
+    _transfer_executor = None
 
 class PositionManager:
     """
-    Orquesta la gestión de posiciones, capital, riesgo y automatización.
+    Orquesta la gestión de posiciones, capital, riesgo y automatización
+    de forma agnóstica al exchange.
     """
     def __init__(self,
                  # --- Clases de Dependencia ---
                  balance_manager: Any,
                  position_state: Any,
-                 executor: Any,
+                 exchange_adapter: AbstractExchange,
                  # --- Módulos de Utilidad ---
                  config: Any,
                  utils: Any,
                  memory_logger: Any,
-                 connection_ticker: Any,
-                 helpers: Any, # Módulo _helpers
-                 # --- Dependencias para Lógica Externa ---
-                 live_operations: Any,
-                 connection_manager: Any
+                 helpers: Any
                  ):
         """
         Inicializa la instancia del PositionManager con todas sus dependencias.
@@ -45,16 +49,14 @@ class PositionManager:
         # --- Inyección de Dependencias ---
         self._balance_manager = balance_manager
         self._position_state = position_state
-        self._executor = executor
+        self._executor: Optional[Any] = None
+        self._exchange = exchange_adapter
         self._config = config
         self._utils = utils
         self._memory_logger = memory_logger
-        self._connection_ticker = connection_ticker
         self._helpers = helpers
-        self._live_operations = live_operations
-        self._connection_manager = connection_manager
 
-        # --- Estado General (Migrado desde _state.py) ---
+        # --- Estado General ---
         self._initialized: bool = False
         self._operation_mode: str = "unknown"
         self._leverage: float = 1.0
@@ -94,16 +96,19 @@ class PositionManager:
         # --- Estado del Árbol de Decisiones ---
         self._milestones: List[Milestone] = []
 
+    def set_executor(self, executor: Any):
+        """Inyecta el executor después de la inicialización para romper la dependencia circular."""
+        self._executor = executor
+
     # ==============================================================================
-    # --- MÉTODOS PÚBLICOS PRINCIPALES (Puntos de Entrada del Sistema) ---
+    # --- MÉTODOS PÚBLICOS PRINCIPALES ---
     # ==============================================================================
 
-    def initialize(self, operation_mode: str, base_size: float, max_pos: int, real_balances: Dict):
-        """Inicializa el PM y todos sus componentes para una nueva sesión."""
+    def initialize(self, operation_mode: str, base_size: float, max_pos: int):
+        """Inicializa el PM y sus componentes para una nueva sesión."""
         self._reset_all_states()
         self._operation_mode = operation_mode
         
-        # Cargar configuración inicial
         self._leverage = getattr(self._config, 'POSITION_LEVERAGE', 1.0)
         self._max_logical_positions = max_pos
         self._initial_base_position_size_usdt = base_size
@@ -116,9 +121,8 @@ class PositionManager:
         self._trailing_stop_distance_pct = getattr(self._config, 'TRAILING_STOP_DISTANCE_PCT', 0.0)
         self._session_start_time = datetime.datetime.now()
 
-        # Inicializar componentes dependientes
+        # BalanceManager ahora se inicializa sin datos pre-cargados
         self._balance_manager.set_state_manager(self)
-        self._balance_manager.initialize(real_balances, base_size, max_pos)
         self._position_state.initialize(is_live_mode=True)
         
         self._initialized = True
@@ -126,7 +130,7 @@ class PositionManager:
 
     def handle_low_level_signal(self, signal: str, entry_price: float, timestamp: datetime.datetime):
         """Punto de entrada para señales desde el `event_processor`."""
-        if not self._initialized: return
+        if not self._initialized or not self._executor: return
 
         side_to_open = 'long' if signal == "BUY" else 'short'
         side_allowed_by_mode = (side_to_open == 'long' and self._manual_mode in ["LONG_ONLY", "LONG_SHORT"]) or \
@@ -137,7 +141,7 @@ class PositionManager:
 
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """Revisa SL y TS para todas las posiciones abiertas en cada tick."""
-        if not self._initialized: return
+        if not self._initialized or not self._executor: return
 
         for side in ['long', 'short']:
             open_positions = self._position_state.get_open_logical_positions(side)
@@ -162,18 +166,19 @@ class PositionManager:
                 self._close_logical_position(side, index, current_price, timestamp, reason=reasons.get(index, "UNKNOWN"))
 
     # ==============================================================================
-    # --- MÉTODOS PÚBLICOS DE LA API (Para la TUI y otros consumidores) ---
+    # --- MÉTODOS PÚBLICOS DE LA API (Sin cambios en su lógica) ---
     # ==============================================================================
 
     def is_initialized(self) -> bool: return self._initialized
 
     def get_position_summary(self) -> dict:
-        # Lógica completa de get_position_summary de _api.py
         if not self._initialized: return {"error": "PM no inicializado"}
         open_longs = self._position_state.get_open_logical_positions('long')
         open_shorts = self._position_state.get_open_logical_positions('short')
         from dataclasses import asdict
         milestones_as_dicts = [asdict(m) for m in self._milestones]
+        
+        self._balance_manager.update_real_balances_cache() # Asegurar que la caché esté fresca
 
         return {
             "initialized": True, "operation_mode": self._operation_mode,
@@ -185,8 +190,8 @@ class PositionManager:
             "bm_balances": self._balance_manager.get_balances_summary(),
             "open_long_positions_count": len(open_longs),
             "open_short_positions_count": len(open_shorts),
-            "open_long_positions": [self._helpers.format_pos_for_summary(p, self._utils) for p in open_longs],
-            "open_short_positions": [self._helpers.format_pos_for_summary(p, self._utils) for p in open_shorts],
+            "open_long_positions": [self._helpers.format_pos_for_summary(p) for p in open_longs],
+            "open_short_positions": [self._helpers.format_pos_for_summary(p) for p in open_shorts],
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": self._balance_manager.get_initial_total_capital(),
             "real_account_balances": self._balance_manager.get_real_balances_cache(),
@@ -197,7 +202,6 @@ class PositionManager:
             "all_milestones": milestones_as_dicts }
 
     def get_unrealized_pnl(self, current_price: float) -> float:
-        # Lógica completa de get_unrealized_pnl de _api.py
         total_pnl = 0.0
         for side in ['long', 'short']:
             for pos in self._position_state.get_open_logical_positions(side):
@@ -215,15 +219,13 @@ class PositionManager:
     def get_individual_stop_loss_pct(self) -> float: return self._individual_stop_loss_pct
     def get_trailing_stop_params(self) -> Dict[str, float]: return {"activation": self._trailing_stop_activation_pct, "distance": self._trailing_stop_distance_pct}
     def get_trend_limits(self) -> Dict[str, Any]: return {"start_time": self._trend_start_time, "duration_minutes": self._trend_limit_duration_minutes, "tp_roi_pct": self._trend_limit_tp_roi_pct, "sl_roi_pct": self._trend_limit_sl_roi_pct}
-    def get_trend_state(self) -> Dict[str, Any]: return self._trend_status # Mantenido por compatibilidad
+    def get_trend_state(self) -> Dict[str, Any]: return self._trend_status
     def get_global_sl_pct(self) -> Optional[float]: return self._global_stop_loss_roi_pct
     def get_all_milestones(self) -> List[Milestone]: return copy.deepcopy(self._milestones)
     def get_session_time_limit(self) -> Dict[str, Any]: return {"duration": self._session_max_duration_minutes, "action": self._session_time_limit_action}
     def get_total_pnl_realized(self) -> float: return self._total_realized_pnl_long + self._total_realized_pnl_short
 
-    # --- Métodos de la API para modificar el estado ---
     def set_manual_trading_mode(self, mode: str, trade_limit: Optional[int] = None, close_open: bool = False) -> Tuple[bool, str]:
-        # Lógica completa de set_manual_trading_mode de _api.py
         if close_open:
             if self._manual_mode in ["LONG_ONLY", "LONG_SHORT"] and mode not in ["LONG_ONLY", "LONG_SHORT"]: self.close_all_logical_positions('long', "Cierre por cambio de modo")
             if self._manual_mode in ["SHORT_ONLY", "LONG_SHORT"] and mode not in ["SHORT_ONLY", "LONG_SHORT"]: self.close_all_logical_positions('short', "Cierre por cambio de modo")
@@ -235,14 +237,12 @@ class PositionManager:
         return True, f"Modo actualizado a {self._manual_mode}."
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
-        # Lógica completa de manual_close_logical_position_by_index de _api.py
         price = self.get_current_price_for_exit()
         if not price: return False, "No se pudo obtener el precio de mercado actual."
         success = self._close_logical_position(side, index, price, datetime.datetime.now(), reason="MANUAL")
         return (True, f"Orden de cierre para {side.upper()} #{index} enviada.") if success else (False, f"Fallo al enviar orden de cierre.")
 
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> bool:
-        # Lógica completa de close_all_logical_positions de _api.py
         price = self.get_current_price_for_exit()
         if not price: self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR"); return False
         initial_count = len(self._position_state.get_open_logical_positions(side))
@@ -278,9 +278,17 @@ class PositionManager:
         if not isinstance(new_leverage, (int, float)) or not (1 <= new_leverage <= 100): return False, "Apalancamiento inválido."
         self._leverage = new_leverage
         symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-        success = self._live_operations.set_leverage(symbol, str(new_leverage), str(new_leverage))
-        return (True, f"Apalancamiento actualizado a {new_leverage}x.") if success else (False, f"Error al aplicar apalancamiento en el exchange.")
+        # Se establece en ambas cuentas de trading
+        success_long = self._exchange.set_leverage(symbol, new_leverage, account_purpose='longs')
+        success_short = self._exchange.set_leverage(symbol, new_leverage, account_purpose='shorts')
+        if success_long and success_short:
+            return True, f"Apalancamiento actualizado a {new_leverage}x."
+        else:
+            return False, f"Error al aplicar apalancamiento en el exchange (Long: {success_long}, Short: {success_short})."
     
+    # El resto de los métodos de la API pública no requieren cambios...
+    # (El código es idéntico al que proporcionaste desde aquí hasta el final de la clase)
+    # ...
     def set_individual_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
         if not isinstance(value, (int, float)) or value < 0: return False, "Valor inválido."
         self._individual_stop_loss_pct = value
@@ -319,7 +327,6 @@ class PositionManager:
         return (True, f"Límites para próxima tendencia: {', '.join(msg_parts)}.") if msg_parts else (True, "Límites de tendencia desactivados.")
 
     def add_milestone(self, condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
-        # Lógica completa de add_milestone de _api.py
         try:
             condition = MilestoneCondition(**condition_data)
             action = MilestoneAction(**action_data)
@@ -354,8 +361,10 @@ class PositionManager:
     def end_current_trend_and_ask(self): self._manual_mode = "NEUTRAL"
 
     def get_current_price_for_exit(self) -> Optional[float]:
-        try: return self._connection_ticker.get_latest_price().get('price')
-        except (AttributeError, TypeError): return None
+        try:
+            return self._exchange.get_latest_price()
+        except (AttributeError, TypeError):
+            return None
 
     def get_rrr_potential(self) -> Optional[float]:
         if self._individual_stop_loss_pct > 0 and self._trailing_stop_activation_pct > 0:
@@ -363,11 +372,10 @@ class PositionManager:
         return None
 
     # ==============================================================================
-    # --- MÉTODOS PRIVADOS (Lógica Interna Migrada) ---
+    # --- MÉTODOS PRIVADOS ---
     # ==============================================================================
     
     def _reset_all_states(self):
-        # Lógica completa de reset_all_states de _state.py
         self._initialized = False; self._operation_mode = "unknown"; self._leverage = 1.0
         self._max_logical_positions = 1; self._initial_base_position_size_usdt = 0.0
         self._total_realized_pnl_long = 0.0; self._total_realized_pnl_short = 0.0
@@ -380,7 +388,6 @@ class PositionManager:
         self._trend_limit_tp_roi_pct = None; self._trend_limit_sl_roi_pct = None
 
     def _can_open_new_position(self, side: str) -> bool:
-        # Lógica completa de can_open_new_position de _rules.py
         if self._session_tp_hit: return False
         if self._manual_mode == 'NEUTRAL' or \
            (side == 'long' and self._manual_mode == 'SHORT_ONLY') or \
@@ -395,7 +402,6 @@ class PositionManager:
         return True
 
     def _open_logical_position(self, side: str, entry_price: float, timestamp: datetime.datetime):
-        # Lógica completa de open_logical_position de _actions.py
         open_positions = self._position_state.get_open_logical_positions(side)
         if open_positions:
             last_entry = self._utils.safe_float_convert(open_positions[-1].get('entry_price'), 0.0)
@@ -405,24 +411,30 @@ class PositionManager:
                 short_thresh = getattr(self._config, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', 1.0)
                 if (side == 'long' and diff_pct > long_thresh) or (side == 'short' and diff_pct < short_thresh): return
         margin_to_use = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
+        if not self._executor: return
         result = self._executor.execute_open(side, entry_price, timestamp, margin_to_use)
         if result and result.get('success'): self._manual_trades_executed += 1
 
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> bool:
-        # Lógica completa de close_logical_position de _actions.py
+        if not self._executor: return False
         result = self._executor.execute_close(side, index, exit_price, timestamp, reason)
         if result and result.get('success', False):
             pnl = result.get('pnl_net_usdt', 0.0)
             if side == 'long': self._total_realized_pnl_long += pnl
             else: self._total_realized_pnl_short += pnl
             transfer_amount = result.get('amount_transferable_to_profit', 0.0)
-            if transfer_amount >= getattr(self._config, 'POSITION_MIN_TRANSFER_AMOUNT_USDT', 0.1):
-                transferred = _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, is_live_mode=True, config=self._config, live_manager=self._connection_manager, live_operations=self._live_operations, balance_manager=self._balance_manager)
+            if _transfer_executor and transfer_amount >= getattr(self._config, 'POSITION_MIN_TRANSFER_AMOUNT_USDT', 0.1):
+                transferred = _transfer_executor.execute_transfer(
+                    amount=transfer_amount, 
+                    from_account_side=side,
+                    exchange_adapter=self._exchange,
+                    config=self._config,
+                    balance_manager=self._balance_manager
+                )
                 if transferred > 0: self._balance_manager.record_real_profit_transfer(transferred)
         return result.get('success', False)
         
     def _update_trailing_stop(self, side, position_data, current_price):
-        # Lógica completa de check_and_close_positions (parte de TS)
         is_ts_active = position_data.get('ts_is_active', False)
         entry_price = position_data.get('entry_price')
         if not is_ts_active and self._trailing_stop_activation_pct > 0 and entry_price:
@@ -438,9 +450,9 @@ class PositionManager:
             self._position_state.update_logical_position_details(side, position_data['id'], position_data)
 
     def set_dynamic_base_size(self, long_size: float, short_size: float):
-        """Método llamado por BalanceManager para actualizar el estado del tamaño dinámico."""
         self._dynamic_base_size_long = long_size
         self._dynamic_base_size_short = short_size
         
     def get_max_logical_positions(self) -> int: return self._max_logical_positions
     def get_initial_base_position_size(self) -> float: return self._initial_base_position_size_usdt
+    def get_leverage(self) -> float: return self._leverage

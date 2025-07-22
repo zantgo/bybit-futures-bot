@@ -6,27 +6,38 @@ de las cuentas (Long Margin, Short Margin, Profit Balance) durante la
 operación del bot. También gestiona una caché de los balances REALES para
 evitar sobrecargar la API.
 
-v2.1: Refactorizado para eliminar la lógica de backtesting y enfocarse
-      exclusivamente en el modo 'live_interactive'.
+v3.0 (Full Exchange Agnostic Refactor):
+- Se eliminan las dependencias de bajo nivel `live_operations` y `connection_manager`.
+- Toda la obtención de balances reales se realiza a través del `exchange_adapter`.
 """
 import time
 import traceback
 from typing import Optional, Dict, Any
+
+try:
+    from core.exchange import AbstractExchange
+    from core.exchange._models import StandardBalance
+except ImportError:
+    class AbstractExchange: pass
+    class StandardBalance: pass
 
 class BalanceManager:
     """Gestiona los balances lógicos y una caché de balances reales."""
 
     _REAL_BALANCES_CACHE_EXPIRY_SECONDS = 30
 
-    def __init__(self, config: Any, utils: Any, live_operations: Any, connection_manager: Any):
+    def __init__(self,
+                 config: Any,
+                 utils: Any,
+                 exchange_adapter: AbstractExchange
+                 ):
         """
         Inicializa el BalanceManager con sus dependencias.
         """
         # Inyección de dependencias
         self._config = config
         self._utils = utils
-        self._live_operations = live_operations
-        self._connection_manager = connection_manager
+        self._exchange = exchange_adapter
 
         # Atributos de estado de la instancia
         self._initialized: bool = False
@@ -55,14 +66,13 @@ class BalanceManager:
 
     def initialize(
         self,
-        real_balances_data: Dict[str, Dict[str, Any]],
         base_position_size_usdt: float,
         initial_max_logical_positions: int
     ):
         """
         Inicializa o resetea los balances lógicos para una nueva sesión en vivo.
         """
-        if not all([self._config, self._utils, self._live_operations, self._connection_manager]):
+        if not all([self._config, self._utils, self._exchange]):
             print("ERROR CRITICO [BM Init]: Faltan dependencias core.")
             self._initialized = False
             return
@@ -70,28 +80,23 @@ class BalanceManager:
         print("[Balance Manager] Inicializando balances lógicos...")
         self._reset_logical_balances()
 
-        # Obtener configuración
         trading_mode_config = getattr(self._config, 'POSITION_TRADING_MODE', 'LONG_SHORT')
         
         print(f"  Usando Tamaño Base para sesión: {base_position_size_usdt:.4f} USDT")
         print(f"  Usando Slots por Lado para sesión: {initial_max_logical_positions}")
 
-        # Lógica de inicialización para modo Live
         self._initialize_live_balances(
             trading_mode_config,
             base_position_size_usdt,
-            initial_max_logical_positions,
-            real_balances_data
+            initial_max_logical_positions
         )
         
-        # Guardar balances iniciales para cálculos de ROI de sesión
         self.initial_operational_long_margin = self.operational_long_margin
         self.initial_operational_short_margin = self.operational_short_margin
         
         print(f"[Balance Manager] Balances LÓGICOS inicializados -> OpLong: {self.operational_long_margin:.4f}, OpShort: {self.operational_short_margin:.4f}")
         self._initialized = True
         
-        # Calcular el tamaño dinámico inicial
         if self._state_manager:
             self.recalculate_dynamic_base_sizes()
 
@@ -108,15 +113,18 @@ class BalanceManager:
         self._real_balances_cache = {}
         self._real_balances_last_update = 0.0
 
-    def _initialize_live_balances(self, trading_mode, base_size, slots, real_balances_data):
-        """Lógica para inicializar balances en modo Live."""
-        print("  Modo Live: Estableciendo márgenes lógicos iniciales desde API...")
+    def _initialize_live_balances(self, trading_mode, base_size, slots):
+        """Lógica para inicializar balances usando el adaptador de exchange."""
+        print("  Modo Live: Obteniendo balances reales desde el adaptador de exchange...")
         
-        long_acc_name = getattr(self._config, 'ACCOUNT_LONGS', self._config.ACCOUNT_MAIN)
-        short_acc_name = getattr(self._config, 'ACCOUNT_SHORTS', self._config.ACCOUNT_MAIN)
-        
-        real_long_margin = self._get_usdt_wallet_balance_from_data(real_balances_data, long_acc_name)
-        real_short_margin = self._get_usdt_wallet_balance_from_data(real_balances_data, short_acc_name)
+        real_long_balance = self._exchange.get_balance('longs')
+        real_short_balance = self._exchange.get_balance('shorts')
+
+        real_long_margin = real_long_balance.total_equity_usd if real_long_balance else 0.0
+        real_short_margin = real_short_balance.total_equity_usd if real_short_balance else 0.0
+
+        if real_long_balance is None: print("    ADVERTENCIA (Long): No se pudo obtener el balance real.")
+        if real_short_balance is None: print("    ADVERTENCIA (Short): No se pudo obtener el balance real.")
 
         logical_capital_needed = base_size * slots
         
@@ -130,16 +138,7 @@ class BalanceManager:
             if logical_capital_needed > real_short_margin:
                 print(f"    ADVERTENCIA (Short): Capital lógico ({logical_capital_needed:.2f}) > real ({real_short_margin:.2f}). Usando real.")
 
-    def _get_usdt_wallet_balance_from_data(self, data, acc_name) -> float:
-        """Auxiliar para extraer el balance USDT de los datos de la API."""
-        if acc_name in data and data.get(acc_name):
-            balance_info = data[acc_name].get('unified_balance')
-            if balance_info:
-                return self._utils.safe_float_convert(balance_info.get('usdt_balance', 0.0))
-        print(f"    WARN: No hay datos de balance para '{acc_name}'. Asumiendo 0.")
-        return 0.0
-
-    # --- Métodos Públicos ---
+    # --- Métodos Públicos (sin cambios en su lógica interna) ---
     
     def get_available_margin(self, side: str) -> float:
         if not self._initialized: return 0.0
@@ -204,21 +203,26 @@ class BalanceManager:
             pass
 
     def update_real_balances_cache(self):
-        """Actualiza la caché de balances reales si ha expirado."""
-        if not self._initialized or not self._live_operations or not self._connection_manager: return
+        """Actualiza la caché de balances reales si ha expirado, usando el adaptador."""
+        if not self._initialized or not self._exchange: return
         now = time.time()
         if (now - self._real_balances_last_update) < self._REAL_BALANCES_CACHE_EXPIRY_SECONDS:
             return
             
         new_cache = {}
-        accounts = [
-            self._config.ACCOUNT_MAIN, self._config.ACCOUNT_LONGS,
-            self._config.ACCOUNT_SHORTS, self._config.ACCOUNT_PROFIT
-        ]
-        for name in sorted(list(set(acc for acc in accounts if acc))):
-            if name in self._connection_manager.get_initialized_accounts():
-                info = self._live_operations.get_unified_account_balance_info(name)
-                new_cache[name] = info or "Error al obtener balance"
+        # Mapeo de nombre de cuenta a propósito para la caché
+        account_purposes = {
+            self._config.ACCOUNT_MAIN: 'main',
+            self._config.ACCOUNT_LONGS: 'longs',
+            self._config.ACCOUNT_SHORTS: 'shorts',
+            self._config.ACCOUNT_PROFIT: 'profit'
+        }
+        
+        for acc_name, purpose in account_purposes.items():
+            if acc_name: # Asegurarse de que el nombre de la cuenta esté definido
+                balance_obj = self._exchange.get_balance(purpose)
+                # Almacenamos el objeto StandardBalance o un mensaje de error
+                new_cache[acc_name] = balance_obj or "Error al obtener balance"
         
         self._real_balances_cache = new_cache
         self._real_balances_last_update = now

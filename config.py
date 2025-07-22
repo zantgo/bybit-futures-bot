@@ -1,5 +1,3 @@
-# config.py
-
 """
 Configuración Esencial para el Bot de Trading.
 
@@ -18,6 +16,10 @@ except NameError:
     # Fallback si __file__ no está definido (ej. en un entorno interactivo)
     PROJECT_ROOT = os.path.abspath(os.getcwd())
     print(f"Advertencia [config]: __file__ no definido, usando CWD como PROJECT_ROOT: {PROJECT_ROOT}")
+
+# --- Exchange Configuration (NUEVO) ---
+# Define qué adaptador de exchange cargar. Opciones: "bybit"
+EXCHANGE_NAME = "bybit"
 
 # --- Log Level Configuration ---
 # Define el nivel de detalle de los logs. Opciones: "DEBUG", "INFO", "WARN", "ERROR"
@@ -153,6 +155,7 @@ def print_initial_config(operation_mode="unknown"):
     """Imprime un resumen de la configuración cargada."""
     print("-" * 70)
     print(f"Configuración Base Cargada (Modo: {operation_mode})".center(70))
+    print(f"  Exchange Seleccionado   : {EXCHANGE_NAME.upper()}")
     print(f"  Modo Testnet API        : {UNIVERSAL_TESTNET_MODE}")
     print(f"  Ticker Símbolo (Default): {TICKER_SYMBOL}")
     print(f"  Intervalo de Estrategia : {TICKER_INTERVAL_SECONDS} segundos")
@@ -168,4 +171,4 @@ def print_initial_config(operation_mode="unknown"):
     print("-" * 70)
 
 # Carga UIDs al importar el módulo
-_load_and_validate_uids()   
+_load_and_validate_uids()
