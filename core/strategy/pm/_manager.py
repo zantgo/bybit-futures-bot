@@ -455,3 +455,46 @@ class PositionManager:
     def get_max_logical_positions(self) -> int: return self._max_logical_positions
     def get_initial_base_position_size(self) -> float: return self._initial_base_position_size_usdt
     def get_leverage(self) -> float: return self._leverage
+
+
+    # --- INICIO DEL CÓDIGO AÑADIDO ---
+    def update_milestone(self, milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
+        """Busca un hito por su ID y actualiza sus datos."""
+        for i, m in enumerate(self._milestones):
+            if m.id == milestone_id:
+                if m.status not in ['PENDING', 'ACTIVE']:
+                    return False, "No se puede modificar un hito completado o cancelado."
+                try:
+                    new_condition = MilestoneCondition(**condition_data)
+                    new_trend_config = TrendConfig(**action_data['params'])
+                    new_action = MilestoneAction(params=new_trend_config, type=action_data['type'])
+                    
+                    self._milestones[i].condition = new_condition
+                    self._milestones[i].action = new_action
+                    
+                    self._memory_logger.log(f"HITO ACTUALIZADO: ID ...{milestone_id[-6:]}", "INFO")
+                    return True, f"Hito ...{milestone_id[-6:]} actualizado."
+                except Exception as e:
+                    return False, f"Error actualizando hito: {e}"
+        return False, "Hito no encontrado para actualizar."
+
+    def force_trigger_milestone(self, milestone_id: str) -> Tuple[bool, str]:
+        """Fuerza la activación de un hito como si su condición de precio se hubiera cumplido."""
+        milestone = next((m for m in self._milestones if m.id == milestone_id), None)
+        if not milestone:
+            return False, "Hito no encontrado."
+        if milestone.status != 'ACTIVE':
+            return False, f"Solo se pueden forzar hitos con estado 'ACTIVE'. Estado actual: {milestone.status}."
+        
+        self._memory_logger.log(f"FORZANDO HITO: ID ...{milestone_id[-6:]} activado manualmente.", "WARN")
+        self.process_triggered_milestone(milestone_id)
+        return True, f"Hito ...{milestone_id[-6:]} activado forzosamente."
+
+    def force_end_trend(self) -> Tuple[bool, str]:
+        """Fuerza la finalización de la tendencia activa actual."""
+        if not self._active_trend:
+            return False, "No hay ninguna tendencia activa para finalizar."
+        
+        self._end_trend(reason="Finalización forzada por el usuario")
+        return True, "Tendencia activa finalizada."
+    # --- FIN DEL CÓDIGO AÑADIDO ---

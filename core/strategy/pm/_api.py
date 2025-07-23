@@ -138,6 +138,33 @@ def remove_milestone(milestone_id: str) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.remove_milestone(milestone_id)
 
+
+# --- INICIO DEL CÓDIGO AÑADIDO ---
+def update_milestone(milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
+    """Actualiza los datos de un hito existente."""
+    if not _pm_instance: return False, "PM no instanciado"
+    # Esta función deberá ser implementada en _manager.py
+    if hasattr(_pm_instance, 'update_milestone'):
+        return _pm_instance.update_milestone(milestone_id, condition_data, action_data)
+    return False, "Función 'update_milestone' no implementada en el manager."
+
+def force_trigger_milestone(milestone_id: str) -> Tuple[bool, str]:
+    """Fuerza la activación de un hito, ignorando su condición de precio."""
+    if not _pm_instance: return False, "PM no instanciado"
+    # Esta función deberá ser implementada en _manager.py
+    if hasattr(_pm_instance, 'force_trigger_milestone'):
+        return _pm_instance.force_trigger_milestone(milestone_id)
+    return False, "Función 'force_trigger_milestone' no implementada en el manager."
+
+def force_end_trend() -> Tuple[bool, str]:
+    """Fuerza la finalización de la tendencia activa y vuelve a NEUTRAL."""
+    if not _pm_instance: return False, "PM no instanciado"
+    # Esta función deberá ser implementada en _manager.py
+    if hasattr(_pm_instance, 'force_end_trend'):
+        return _pm_instance.force_end_trend()
+    return False, "Función 'force_end_trend' no implementada en el manager."
+# --- FIN DEL CÓDIGO AÑADIDO ---
+
 # --- Funciones para uso interno del sistema (Workflow) ---
 
 def process_triggered_milestone(milestone_id: str):
