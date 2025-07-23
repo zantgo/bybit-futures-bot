@@ -70,9 +70,8 @@ STRATEGY_INCREMENT_THRESHOLD = 0.45
 
 # --- Position Management Configuration ---
 POSITION_MANAGEMENT_ENABLED = True
-POSITION_TRADING_MODE = "LONG_SHORT" # Modo inicial por defecto
-POSITION_BASE_SIZE_USDT = 10.0 # Tamaño por defecto, se puede cambiar en el wizard
-POSITION_MAX_LOGICAL_POSITIONS = 5 # [REFACTORIZADO] Renombrado desde POSITION_SLOT_COUNT para mayor claridad.
+POSITION_BASE_SIZE_USDT = 10.0
+POSITION_MAX_LOGICAL_POSITIONS = 5
 POSITION_LEVERAGE = 10.0
 POSITION_MIN_PRICE_DIFF_LONG_PCT = -0.25
 POSITION_MIN_PRICE_DIFF_SHORT_PCT = 0.25
@@ -80,12 +79,22 @@ POSITION_REINVEST_PROFIT_PCT = 10.0
 POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 POSITION_COMMISSION_RATE = 0.001
 
-# --- Risk Management: Stop Loss & Trailing Stop ---
-POSITION_INDIVIDUAL_STOP_LOSS_PCT = 10.0 # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_STOP_LOSS_PCT
-TRAILING_STOP_ACTIVATION_PCT = 1.0 # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_TRAILING_STOP_ACTIVATION_PCT
-TRAILING_STOP_DISTANCE_PCT = 0.5   # [REFACTORIZADO] Renombrado desde INDIVIDUAL_POSITION_TRAILING_STOP_DISTANCE_PCT
+#-- Risk Management: Default Trend & Position Parameters ---
+# Estos son los valores por defecto que se mostrarán en la TUI al crear un nuevo Hito.
 
-SESSION_MAX_TRADES = 0
+# Defaults para el Riesgo de Posiciones Individuales (dentro de una tendencia)
+DEFAULT_TREND_INDIVIDUAL_SL_PCT = 10.0
+DEFAULT_TREND_TS_ACTIVATION_PCT = 1.0
+DEFAULT_TREND_TS_DISTANCE_PCT = 0.5
+
+# Defaults para los Límites de Finalización de Tendencia
+DEFAULT_TREND_LIMIT_TRADE_COUNT = 5     # 0 para ilimitado
+DEFAULT_TREND_LIMIT_DURATION_MINUTES = 60 # 0 para ilimitado
+DEFAULT_TREND_LIMIT_TP_ROI_PCT = 2.5    # 0 para desactivado
+DEFAULT_TREND_LIMIT_SL_ROI_PCT = -1.5   # 0 para desactivado. ¡Nota: Debe ser negativo!
+
+# --- Session Limits (Circuit Breakers) ---
+SESSION_MAX_TRADES = 0 # Obsoleto, pero se mantiene por si se reutiliza
 SESSION_STOP_LOSS_ROI_PCT = 10.0
 SESSION_TAKE_PROFIT_ROI_PCT = 5.0
 SESSION_MAX_DURATION_MINUTES = 0
@@ -166,10 +175,11 @@ def print_initial_config(operation_mode="unknown"):
     pos_enabled = POSITION_MANAGEMENT_ENABLED
     print(f"  Gestión Posiciones      : {'Activada' if pos_enabled else 'Desactivada'}")
     if pos_enabled:
-        print(f"    Stop Loss Individual    : {POSITION_INDIVIDUAL_STOP_LOSS_PCT}% (Default)")
-        print(f"    Trailing Stop           : Act {TRAILING_STOP_ACTIVATION_PCT}% / Dist {TRAILING_STOP_DISTANCE_PCT}% (Default)")
-        print(f"    Stop Loss de Sesión     : {'Desactivado' if SESSION_STOP_LOSS_ROI_PCT <= 0 else f'-{SESSION_STOP_LOSS_ROI_PCT}%'}")
-        print(f"    Take Profit de Sesión   : {'Desactivado' if SESSION_TAKE_PROFIT_ROI_PCT <= 0 else f'+{SESSION_TAKE_PROFIT_ROI_PCT}%'}")
+        # Actualizamos para reflejar los nuevos nombres de variables
+        print(f"    Stop Loss Individual    : {DEFAULT_TREND_INDIVIDUAL_SL_PCT}% (Default)")
+        print(f"    Trailing Stop           : Act {DEFAULT_TREND_TS_ACTIVATION_PCT}% / Dist {DEFAULT_TREND_TS_DISTANCE_PCT}% (Default)")
+        print(f"    Stop Loss de Sesión     : {'Desactivado' if not SESSION_ROI_SL_ENABLED else f'-{SESSION_STOP_LOSS_ROI_PCT}%'}")
+        print(f"    Take Profit de Sesión   : {'Desactivado' if not SESSION_ROI_TP_ENABLED else f'+{SESSION_TAKE_PROFIT_ROI_PCT}%'}")
         print(f"    Apalancamiento          : {POSITION_LEVERAGE:.1f}x")
     print("-" * 70)
 

@@ -1,12 +1,14 @@
 """
 Módulo del Position Manager Principal.
 
-v4.0 (Refactor de Hitos):
+v4.1 (Refactor de Hitos y API de Control Completa):
 - Se refactoriza para operar bajo un modelo jerárquico Sesión > Hito > Tendencia.
 - Se elimina el estado de `_manual_mode` y se reemplaza por el estado `_active_trend`.
 - La lógica de apertura de posiciones y gestión de riesgo ahora depende de la
   configuración de la tendencia activa.
 - Se adapta la gestión de hitos para trabajar con la nueva entidad `TrendConfig`.
+- Se implementan las funciones de control de hitos y tendencias (update, force_trigger, force_end).
+- Se restauran los setters para límites de sesión globales (SL/TP) para completar la API de control estratégico.
 """
 import datetime
 import time
@@ -70,11 +72,9 @@ class PositionManager:
         # --- Estado del Árbol de Decisiones ---
         self._milestones: List[Milestone] = []
         
-        # --- INICIO DE CAMBIOS: Nuevo Modelo de Estado ---
-        # El estado actual del bot se define por la tendencia activa.
+        # --- Modelo de Estado basado en Tendencia Activa ---
         # Si _active_trend es None, el bot está en modo NEUTRAL.
         self._active_trend: Optional[Dict[str, Any]] = None
-        # --- FIN DE CAMBIOS ---
         
 
     def set_executor(self, executor: Any):
@@ -166,7 +166,7 @@ class PositionManager:
         return {
             "initialized": True,
             "operation_mode": self._operation_mode,
-            "trend_status": self.get_trend_state(), # <-- CAMBIO: Fuente de verdad del estado
+            "trend_status": self.get_trend_state(),
             "leverage": self._leverage,
             "max_logical_positions": self._max_logical_positions,
             "initial_base_position_size_usdt": self._initial_base_position_size_usdt,
@@ -236,6 +236,21 @@ class PositionManager:
     # ==============================================================================
     # --- MÉTODOS DE LA API PÚBLICA (SETTERS Y ACCIONES) ---
     # ==============================================================================
+    
+    def set_global_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
+        """Establece el disyuntor de SL global de la sesión."""
+        self._global_stop_loss_roi_pct = value
+        msg = f"Stop Loss Global de Sesión actualizado a -{value}%." if value > 0 else "Stop Loss Global de Sesión desactivado."
+        self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
+        return True, msg
+
+    def set_global_take_profit_pct(self, value: float) -> Tuple[bool, str]:
+        """Establece el disyuntor de TP global de la sesión."""
+        self._global_take_profit_roi_pct = value
+        self._session_tp_hit = False
+        msg = f"Take Profit Global de Sesión actualizado a +{value}%." if value > 0 else "Take Profit Global de Sesión desactivado."
+        self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
+        return True, msg
 
     def add_milestone(self, condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
         try:
@@ -257,9 +272,29 @@ class PositionManager:
             return True, f"Hito '{milestone_id[-6:]}' añadido en Nivel {level}."
         except Exception as e:
             return False, f"Error creando hito: {e}"
+            
+    def update_milestone(self, milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
+        """Busca un hito por su ID y actualiza sus datos."""
+        for i, m in enumerate(self._milestones):
+            if m.id == milestone_id:
+                if m.status not in ['PENDING', 'ACTIVE']:
+                    return False, "No se puede modificar un hito completado o cancelado."
+                try:
+                    new_condition = MilestoneCondition(**condition_data)
+                    new_trend_config = TrendConfig(**action_data['params'])
+                    new_action = MilestoneAction(params=new_trend_config, type=action_data['type'])
+                    
+                    self._milestones[i].condition = new_condition
+                    self._milestones[i].action = new_action
+                    
+                    self._memory_logger.log(f"HITO ACTUALIZADO: ID ...{milestone_id[-6:]}", "INFO")
+                    return True, f"Hito ...{milestone_id[-6:]} actualizado."
+                except Exception as e:
+                    return False, f"Error actualizando hito: {e}"
+        return False, "Hito no encontrado para actualizar."
 
     def remove_milestone(self, milestone_id: str) -> Tuple[bool, str]:
-        # Implementa borrado en cascada
+        """Implementa borrado en cascada."""
         ids_to_remove = {milestone_id}
         ids_to_check = [milestone_id]
         while ids_to_check:
@@ -296,10 +331,38 @@ class PositionManager:
 
         # 3. Iniciar la nueva tendencia definida por el hito
         self._start_trend(triggered_milestone)
+        
+        # 4. Limpiar hitos antiguos que ya no son relevantes
+        self._cleanup_completed_milestones()
+        
+    def force_trigger_milestone(self, milestone_id: str) -> Tuple[bool, str]:
+        """Fuerza la activación de un hito como si su condición de precio se hubiera cumplido."""
+        milestone = next((m for m in self._milestones if m.id == milestone_id), None)
+        if not milestone:
+            return False, "Hito no encontrado."
+        if milestone.status != 'ACTIVE':
+            return False, f"Solo se pueden forzar hitos con estado 'ACTIVE'. Estado actual: {milestone.status}."
+        
+        self._memory_logger.log(f"FORZANDO HITO: ID ...{milestone_id[-6:]} activado manualmente.", "WARN")
+        self.process_triggered_milestone(milestone_id)
+        return True, f"Hito ...{milestone_id[-6:]} activado forzosamente."
 
     def end_current_trend_and_ask(self):
         """Llamado por los limit checkers para finalizar una tendencia."""
         self._end_trend(reason="Límite de tendencia alcanzado")
+
+    def force_end_trend(self, close_positions: bool = False) -> Tuple[bool, str]:
+        """Fuerza la finalización de la tendencia activa actual."""
+        if not self._active_trend:
+            return False, "No hay ninguna tendencia activa para finalizar."
+        
+        if close_positions:
+            self._memory_logger.log("Cierre forzoso de todas las posiciones por finalización de tendencia.", "WARN")
+            self.close_all_logical_positions('long', reason="TREND_FORCE_CLOSED")
+            self.close_all_logical_positions('short', reason="TREND_FORCE_CLOSED")
+
+        self._end_trend(reason="Finalización forzada por el usuario")
+        return True, "Tendencia activa finalizada."
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         price = self.get_current_price_for_exit()
@@ -396,8 +459,6 @@ class PositionManager:
             entry_price=entry_price, 
             timestamp=timestamp, 
             margin_to_use=margin_to_use,
-            # Pasamos los parámetros de riesgo de la tendencia al ejecutor
-            # (Esto requerirá un pequeño cambio en _executor.py)
             sl_pct=trend_config.individual_sl_pct
         )
         if result and result.get('success'):
@@ -428,7 +489,6 @@ class PositionManager:
             position_data['ts_stop_price'] = new_stop_price
             self._position_state.update_logical_position_details(side, position_data['id'], position_data)
             
-    # --- MÉTODOS INTERNOS (sin cambios significativos) ---
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> bool:
         if not self._executor: return False
         result = self._executor.execute_close(side, index, exit_price, timestamp, reason)
@@ -448,6 +508,32 @@ class PositionManager:
                 if transferred > 0: self._balance_manager.record_real_profit_transfer(transferred)
         return result.get('success', False)
     
+    def _cleanup_completed_milestones(self):
+        """Limpia el árbol, eliminando hitos obsoletos para evitar acumulación."""
+        completed_milestones = sorted(
+            [m for m in self._milestones if m.status == 'COMPLETED'],
+            key=lambda m: m.created_at,
+            reverse=True
+        )
+        
+        last_completed = completed_milestones[0] if completed_milestones else None
+        
+        def should_keep(milestone: Milestone) -> bool:
+            # Mantener siempre los hitos que están por cumplirse
+            if milestone.status in ['PENDING', 'ACTIVE']:
+                return True
+            # Mantener el último hito completado para referencia histórica
+            if milestone == last_completed:
+                return True
+            # El resto se puede descartar
+            return False
+
+        initial_count = len(self._milestones)
+        self._milestones = [m for m in self._milestones if should_keep(m)]
+        removed_count = initial_count - len(self._milestones)
+        if removed_count > 0:
+            self._memory_logger.log(f"LIMPIEZA DE HITOS: {removed_count} hito(s) obsoletos eliminados.", "INFO")
+    
     def set_dynamic_base_size(self, long_size: float, short_size: float):
         self._dynamic_base_size_long = long_size
         self._dynamic_base_size_short = short_size
@@ -455,46 +541,3 @@ class PositionManager:
     def get_max_logical_positions(self) -> int: return self._max_logical_positions
     def get_initial_base_position_size(self) -> float: return self._initial_base_position_size_usdt
     def get_leverage(self) -> float: return self._leverage
-
-
-    # --- INICIO DEL CÓDIGO AÑADIDO ---
-    def update_milestone(self, milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
-        """Busca un hito por su ID y actualiza sus datos."""
-        for i, m in enumerate(self._milestones):
-            if m.id == milestone_id:
-                if m.status not in ['PENDING', 'ACTIVE']:
-                    return False, "No se puede modificar un hito completado o cancelado."
-                try:
-                    new_condition = MilestoneCondition(**condition_data)
-                    new_trend_config = TrendConfig(**action_data['params'])
-                    new_action = MilestoneAction(params=new_trend_config, type=action_data['type'])
-                    
-                    self._milestones[i].condition = new_condition
-                    self._milestones[i].action = new_action
-                    
-                    self._memory_logger.log(f"HITO ACTUALIZADO: ID ...{milestone_id[-6:]}", "INFO")
-                    return True, f"Hito ...{milestone_id[-6:]} actualizado."
-                except Exception as e:
-                    return False, f"Error actualizando hito: {e}"
-        return False, "Hito no encontrado para actualizar."
-
-    def force_trigger_milestone(self, milestone_id: str) -> Tuple[bool, str]:
-        """Fuerza la activación de un hito como si su condición de precio se hubiera cumplido."""
-        milestone = next((m for m in self._milestones if m.id == milestone_id), None)
-        if not milestone:
-            return False, "Hito no encontrado."
-        if milestone.status != 'ACTIVE':
-            return False, f"Solo se pueden forzar hitos con estado 'ACTIVE'. Estado actual: {milestone.status}."
-        
-        self._memory_logger.log(f"FORZANDO HITO: ID ...{milestone_id[-6:]} activado manualmente.", "WARN")
-        self.process_triggered_milestone(milestone_id)
-        return True, f"Hito ...{milestone_id[-6:]} activado forzosamente."
-
-    def force_end_trend(self) -> Tuple[bool, str]:
-        """Fuerza la finalización de la tendencia activa actual."""
-        if not self._active_trend:
-            return False, "No hay ninguna tendencia activa para finalizar."
-        
-        self._end_trend(reason="Finalización forzada por el usuario")
-        return True, "Tendencia activa finalizada."
-    # --- FIN DEL CÓDIGO AÑADIDO ---

@@ -156,14 +156,12 @@ def force_trigger_milestone(milestone_id: str) -> Tuple[bool, str]:
         return _pm_instance.force_trigger_milestone(milestone_id)
     return False, "Función 'force_trigger_milestone' no implementada en el manager."
 
-def force_end_trend() -> Tuple[bool, str]:
+# --- INICIO DE LA CORRECCIÓN ---
+def force_end_trend(close_positions: bool = False) -> Tuple[bool, str]:
     """Fuerza la finalización de la tendencia activa y vuelve a NEUTRAL."""
     if not _pm_instance: return False, "PM no instanciado"
-    # Esta función deberá ser implementada en _manager.py
-    if hasattr(_pm_instance, 'force_end_trend'):
-        return _pm_instance.force_end_trend()
-    return False, "Función 'force_end_trend' no implementada en el manager."
-# --- FIN DEL CÓDIGO AÑADIDO ---
+    return _pm_instance.force_end_trend(close_positions=close_positions)
+# --- FIN DE LA CORRECCIÓN ---
 
 # --- Funciones para uso interno del sistema (Workflow) ---
 

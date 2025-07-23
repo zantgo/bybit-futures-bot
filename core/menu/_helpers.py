@@ -5,7 +5,8 @@ Contiene funciones de utilidad reutilizables para la TUI, como limpiar la pantal
 imprimir cabeceras estilizadas, obtener entrada del usuario de forma robusta,
 y formatear secciones de información.
 
-v3.1: Actualizado el formato de fecha a UTC estándar para trading.
+v3.2: Añadida la clase CancelInput y la lógica de cancelación a la función
+get_input para mejorar la usabilidad de los asistentes de edición.
 """
 import os
 import datetime
@@ -15,14 +16,12 @@ import textwrap
 from typing import Dict, Any, Optional, Callable
 
 # --- Dependencias del Proyecto (importaciones seguras) ---
-# Se mantiene igual, no necesita cambios.
 try:
     from core import _utils
 except ImportError:
     _utils = None
 
 # --- Estilo Visual Consistente para simple-term-menu ---
-# Se mantiene igual, no necesita cambios.
 MENU_STYLE = {
     "menu_cursor": "> ",
     "menu_cursor_style": ("fg_yellow", "bold"),
@@ -31,8 +30,7 @@ MENU_STYLE = {
     "clear_screen": True,
 }
 
-# --- Sistema de Ayuda en Pantalla ---
-# Se mantiene igual, no necesita cambios.
+# --- Sistema de Ayuda en Pantalla (Fusionado y Completo) ---
 HELP_TEXTS = {
     # Pantalla Dashboard
     "dashboard_main": textwrap.dedent("""
@@ -62,7 +60,7 @@ HELP_TEXTS = {
         - Puedes forzar el cierre de cualquier posición manualmente desde aquí.
     """),
     
-    # Pantalla Modo Manual
+    # Pantalla Modo Manual (RESTURADO DEL v3.1)
     "manual_mode": textwrap.dedent("""
         El Modo Manual Guiado te permite dirigir la estrategia del bot.
         
@@ -77,37 +75,33 @@ HELP_TEXTS = {
         cambies de NEUTRAL a un modo de trading activo.
     """),
 
-    # Pantalla Modo Automático
+    # Pantalla Modo Automático (ACTUALIZADO CON TEXTO DEL v3.2)
     "auto_mode": textwrap.dedent("""
-        El Modo Automático te permite construir un 'Árbol de Decisiones' para que
+        El Gestor de Hitos te permite construir un 'Árbol de Decisiones' para que
         el bot reaccione a condiciones de mercado específicas.
         
-        - Hito (Milestone): Es una regla 'SI... ENTONCES...'.
-        - Condición: 'SI el precio sube por encima de X...'
-        - Acción: 'ENTONCES iniciar una tendencia LONG_ONLY'.
+        - Hito (Milestone): Es una regla 'SI (condición) ENTONCES (iniciar Tendencia)'.
+        - Tendencia: Es un período operativo con reglas propias (modo, riesgo, finalización).
         
         Puedes anidar Hitos. Un hito de Nivel 2 solo se activará si su hito
         padre de Nivel 1 se cumple primero. Cuando un hito se cumple, sus
         'hermanos' (los otros hitos del mismo nivel) se cancelan.
     """),
 
-    # Pantalla Editor de Configuración
+    # Pantalla Editor de Configuración (ACTUALIZADO CON TEXTO DEL v3.2)
     "config_editor": textwrap.dedent("""
-        Aquí puedes ajustar los parámetros del bot para la sesión actual.
-        Los cambios que hagas aquí NO se guardan permanentemente en tu archivo
-        config.py, solo afectan a esta ejecución del bot.
+        Aquí puedes ajustar los parámetros GLOBALES del bot para la sesión actual.
+        Los cambios aquí NO se guardan permanentemente en tu archivo config.py.
         
         - Ticker: Símbolo del activo y frecuencia de actualización.
         - Estrategia: Parámetros numéricos que definen cuándo se genera
           una señal de compra o venta (EMA, márgenes, etc.).
-        - Gestión de Capital: Define cuánto capital usar por operación (Tamaño Base),
-          cuántas operaciones simultáneas tener (Máx. Posiciones) y el apalancamiento.
-        - Gestión de Riesgo: Define los Stop Loss y Trailing Stops individuales.
-        - Límites de Sesión: Define los disyuntores globales para toda la cuenta.
+        - Gestión de Capital: Define cuánto capital usar (Tamaño Base),
+          cuántas operaciones simultáneas tener y el apalancamiento.
+        - Límites de Sesión: Define los disyuntores de seguridad globales.
     """)
 }
 
-# La función show_help_popup se mantiene igual.
 def show_help_popup(help_key: str):
     """Muestra una ventana de ayuda con el texto correspondiente a la clave."""
     if help_key not in HELP_TEXTS:
@@ -132,11 +126,7 @@ def clear_screen():
     """Limpia la pantalla de la terminal."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
-
-# --- INICIO DEL CÓDIGO CORREGIDO ---
-
-# A diferencia de la importación desde _utils, esta función ahora vive aquí
-# para ser usada por print_tui_header, garantizando el formato UTC.
+# Mantenemos la versión robusta de `format_datetime_utc` del v3.1
 def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
     """
     Formatea un objeto datetime a string en formato UTC, manejando None.
@@ -161,9 +151,8 @@ def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%
 def print_tui_header(title: str, width: int = 80):
     """
     Imprime una cabecera estilizada y consistente para cada pantalla de la TUI.
-    Ahora utiliza la nueva función de formateo UTC.
+    Utiliza la función de formateo UTC.
     """
-    # Llamamos a nuestra nueva función local para obtener el timestamp en UTC.
     timestamp_str = format_datetime_utc(datetime.datetime.now())
 
     print("=" * width)
@@ -174,10 +163,12 @@ def print_tui_header(title: str, width: int = 80):
     print(f"|{' ' * (width - 2)}|")
     print("=" * width)
 
-# --- FIN DEL CÓDIGO CORREGIDO ---
 
+# --- INICIO DEL CÓDIGO AÑADIDO Y MEJORADO DEL v3.2 ---
 
-# --- El resto de las funciones se mantienen 100% idénticas ---
+class CancelInput:
+    """Clase marcadora para indicar que el usuario canceló la entrada."""
+    pass
 
 def get_input(
     prompt: str,
@@ -187,17 +178,22 @@ def get_input(
     max_val: Optional[float] = None
 ) -> Any:
     """
-    Función robusta para obtener entrada del usuario con validación de tipo,
-    valor por defecto y rangos opcionales.
+    Función robusta para obtener entrada del usuario con validación,
+    valores por defecto, rangos y una opción para cancelar.
     """
     while True:
         try:
             prompt_full = f"{prompt}"
             if default is not None:
                 prompt_full += f" (actual: {default})"
-            prompt_full += ": "
+            # Añadimos la opción de cancelar
+            prompt_full += " [o 'c' para cancelar]: "
 
             val_str = input(prompt_full).strip()
+            
+            # Comprobamos si el usuario quiere cancelar
+            if val_str.lower() == 'c':
+                return CancelInput() # Devolvemos una instancia de la clase
 
             if not val_str and default is not None:
                 return default
@@ -216,6 +212,9 @@ def get_input(
             print(f"Error: Entrada inválida. Por favor, introduce un valor de tipo '{type_func.__name__}'.")
         except Exception as e:
             print(f"Error inesperado: {e}")
+
+# --- FIN DEL CÓDIGO AÑADIDO Y MEJORADO ---
+
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):
     """
