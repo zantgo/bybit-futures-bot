@@ -45,7 +45,7 @@ try:
     
     # --- NUEVO: Capa de Abstracción de Exchange ---
     from core.exchange import AbstractExchange
-    from core.exchange.bybit_adapter import BybitAdapter
+    from core.exchange._bybit_adapter import BybitAdapter
 
 except ImportError as e:
     print("="*80)

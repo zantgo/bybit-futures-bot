@@ -5,20 +5,24 @@ Contiene funciones de utilidad reutilizables para la TUI, como limpiar la pantal
 imprimir cabeceras estilizadas, obtener entrada del usuario de forma robusta,
 y formatear secciones de información.
 
-v3.0: Añadido sistema de "Ayuda en Pantalla".
+v3.1: Actualizado el formato de fecha a UTC estándar para trading.
 """
 import os
 import datetime
+# ¡Importante! Añadimos timezone para la conversión a UTC.
+from datetime import timezone
 import textwrap
 from typing import Dict, Any, Optional, Callable
 
 # --- Dependencias del Proyecto (importaciones seguras) ---
+# Se mantiene igual, no necesita cambios.
 try:
     from core import _utils
 except ImportError:
     _utils = None
 
 # --- Estilo Visual Consistente para simple-term-menu ---
+# Se mantiene igual, no necesita cambios.
 MENU_STYLE = {
     "menu_cursor": "> ",
     "menu_cursor_style": ("fg_yellow", "bold"),
@@ -27,8 +31,8 @@ MENU_STYLE = {
     "clear_screen": True,
 }
 
-# <<< INICIO DE MODIFICACIÓN: Sistema de Ayuda en Pantalla >>>
-
+# --- Sistema de Ayuda en Pantalla ---
+# Se mantiene igual, no necesita cambios.
 HELP_TEXTS = {
     # Pantalla Dashboard
     "dashboard_main": textwrap.dedent("""
@@ -103,6 +107,7 @@ HELP_TEXTS = {
     """)
 }
 
+# La función show_help_popup se mantiene igual.
 def show_help_popup(help_key: str):
     """Muestra una ventana de ayuda con el texto correspondiente a la clave."""
     if help_key not in HELP_TEXTS:
@@ -110,31 +115,56 @@ def show_help_popup(help_key: str):
     else:
         text = HELP_TEXTS[help_key]
     
-    # Guardamos la pantalla actual para restaurarla
-    # (Esto es una simulación, ya que simple-term-menu no soporta popups reales.
-    # Simplemente limpiamos, mostramos ayuda y esperamos.)
     clear_screen()
     print_tui_header(f"Ayuda: {help_key.replace('_', ' ').title()}")
     print(text)
     press_enter_to_continue()
-    # La pantalla que llamó a la ayuda deberá volver a renderizarse.
-
-# <<< FIN DE MODIFICACIÓN >>>
 
 
-# --- Funciones de Utilidad de la Terminal (Funcionalidad Existente Preservada) ---
+def press_enter_to_continue():
+    """Pausa la ejecución y espera a que el usuario presione Enter."""
+    input("\nPresiona Enter para continuar...")
+    
+
+# --- Funciones de Utilidad de la Terminal ---
 
 def clear_screen():
     """Limpia la pantalla de la terminal."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
+
+# --- INICIO DEL CÓDIGO CORREGIDO ---
+
+# A diferencia de la importación desde _utils, esta función ahora vive aquí
+# para ser usada por print_tui_header, garantizando el formato UTC.
+def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
+    """
+    Formatea un objeto datetime a string en formato UTC, manejando None.
+    """
+    # Usamos el objeto global _utils si está disponible, si no, lo hacemos manualmente.
+    # Esto es por si esta función se necesita antes de que _utils esté completamente inicializado.
+    
+    # Primero, validamos que el input es un objeto datetime
+    if not isinstance(dt_object, datetime.datetime):
+        return "N/A"
+
+    try:
+        # Convertir a UTC. Si el objeto es "naive" (sin tzinfo), se asume que es
+        # la hora local del sistema y se convierte a UTC.
+        # Si ya tiene zona horaria, se convierte correctamente a UTC.
+        dt_utc = dt_object.astimezone(timezone.utc)
+        return dt_utc.strftime(fmt)
+    except (ValueError, TypeError):
+        # En caso de cualquier error de formateo, devolvemos un mensaje claro.
+        return "Invalid DateTime"
+
 def print_tui_header(title: str, width: int = 80):
     """
     Imprime una cabecera estilizada y consistente para cada pantalla de la TUI.
+    Ahora utiliza la nueva función de formateo UTC.
     """
-    timestamp_str = ""
-    if _utils and hasattr(_utils, 'format_datetime'):
-        timestamp_str = _utils.format_datetime(datetime.datetime.now())
+    # Llamamos a nuestra nueva función local para obtener el timestamp en UTC.
+    timestamp_str = format_datetime_utc(datetime.datetime.now())
 
     print("=" * width)
     print(f"|{' ' * (width - 2)}|")
@@ -143,6 +173,11 @@ def print_tui_header(title: str, width: int = 80):
         print(f"|{timestamp_str.center(width - 2)}|")
     print(f"|{' ' * (width - 2)}|")
     print("=" * width)
+
+# --- FIN DEL CÓDIGO CORREGIDO ---
+
+
+# --- El resto de las funciones se mantienen 100% idénticas ---
 
 def get_input(
     prompt: str,
@@ -207,7 +242,3 @@ def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = F
         max_key_len = max(len(str(k)) for k in data.keys()) if data else 0
         for key, value in data.items():
             print(f"  {str(key):<{max_key_len + 2}}: {value}")
-
-def press_enter_to_continue():
-    """Pausa la ejecución y espera a que el usuario presione Enter."""
-    input("\nPresiona Enter para continuar...")

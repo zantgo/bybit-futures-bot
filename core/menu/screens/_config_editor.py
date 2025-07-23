@@ -1,11 +1,10 @@
 """
 Módulo para la Pantalla de Edición de Configuración.
 
-Permite al usuario modificar en tiempo real los parámetros del módulo `config`
-para la sesión actual. Los cambios se aplican directamente al objeto `config`
-en memoria.
+v2.2: Añadida la inyección de dependencias para poder acceder a la pm_api
+y propagar los cambios de configuración al Position Manager.
 """
-from typing import Any
+from typing import Any, Dict
 import time
 
 try:
@@ -13,25 +12,31 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- Dependencias del Menú ---
-# <<< INICIO MODIFICACIÓN: Importar la nueva función de ayuda >>>
 from .._helpers import (
     get_input,
     MENU_STYLE,
     press_enter_to_continue,
-    show_help_popup # <-- NUEVA IMPORTACIÓN
+    show_help_popup
 )
-# <<< FIN MODIFICACIÓN >>>
+
+# --- INYECCIÓN DE DEPENDENCIAS A NIVEL DE MÓDULO ---
+# Esta variable global almacenará las dependencias inyectadas una sola vez.
+_deps: Dict[str, Any] = {}
+
+def init(dependencies: Dict[str, Any]):
+    """
+    Recibe las dependencias inyectadas desde el paquete de pantallas (__init__.py).
+    Esto permite que los submenús accedan a la API del Position Manager.
+    """
+    global _deps
+    _deps = dependencies
 
 
-# --- Lógica de la Pantalla ---
+# --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
 def show_config_editor_screen(config_module: Any):
     """
     Muestra el menú principal de edición de configuración.
-
-    Args:
-        config_module: El módulo `config` importado, para modificar sus atributos.
     """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado.")
@@ -39,7 +44,6 @@ def show_config_editor_screen(config_module: Any):
         return
 
     while True:
-        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al menú >>>
         menu_items = [
             "[1] Configuración del Ticker",
             "[2] Parámetros de la Estrategia (TA y Señal)",
@@ -47,7 +51,7 @@ def show_config_editor_screen(config_module: Any):
             "[4] Gestión de Riesgo (SL y TS)",
             "[5] Límites de la Sesión (Disyuntores)",
             None,
-            "[h] Ayuda sobre el Editor de Configuración", # <-- NUEVA OPCIÓN
+            "[h] Ayuda sobre el Editor de Configuración",
             None,
             "[b] Guardar y Volver a la Pantalla Anterior"
         ]
@@ -67,15 +71,19 @@ def show_config_editor_screen(config_module: Any):
         elif choice_index == 3:
             _show_pm_risk_config_menu(config_module)
         elif choice_index == 4:
-            _show_session_limits_menu(config_module)
-        elif choice_index == 6: # Índice de la opción de Ayuda
+            # Obtenemos la pm_api desde el diccionario de dependencias del módulo.
+            pm_api = _deps.get("position_manager_api_module")
+            if pm_api:
+                _show_session_limits_menu(config_module, pm_api)
+            else:
+                print("\nERROR: No se pudo acceder a la API del Position Manager.")
+                time.sleep(2)
+        elif choice_index == 6:
             show_help_popup("config_editor")
-        elif choice_index == 8 or choice_index is None: # Índice de Volver
+        elif choice_index == 8 or choice_index is None:
             break
-        # <<< FIN MODIFICACIÓN >>>
 
-# --- Submenús de Configuración (Privados) ---
-# (Todas las funciones de submenú se mantienen 100% idénticas a la original)
+# --- SUBMENÚS DE CONFIGURACIÓN (SIN CAMBIOS) ---
 
 def _show_ticker_config_menu(cfg: Any):
     """Muestra el submenú para la configuración del Ticker."""
@@ -182,18 +190,31 @@ def _show_pm_risk_config_menu(cfg: Any):
         else:
             break
 
-def _show_session_limits_menu(cfg: Any):
-    """Muestra el submenú para los límites de la Sesión."""
+def _show_session_limits_menu(cfg: Any, pm_api: Any):
+    """Muestra el submenú para los límites de la Sesión, usando flags y propagando los cambios."""
     while True:
         action = getattr(cfg, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
         duration = getattr(cfg, 'SESSION_MAX_DURATION_MINUTES', 0)
         duration_str = f"{duration} min (Acción: {action})" if duration > 0 else "Desactivado"
 
+        sl_roi_enabled = getattr(cfg, 'SESSION_ROI_SL_ENABLED', False)
+        tp_roi_enabled = getattr(cfg, 'SESSION_ROI_TP_ENABLED', False)
+        
+        sl_roi_status = "Activado" if sl_roi_enabled else "Desactivado"
+        tp_roi_status = "Activado" if tp_roi_enabled else "Desactivado"
+        
+        sl_roi_val = getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
+        tp_roi_val = getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
+
         menu_items = [
             f"[1] Límite de Duración (minutos) (Actual: {duration_str})",
             f"[2] Límite de Trades Totales (Actual: {'Ilimitados' if getattr(cfg, 'SESSION_MAX_TRADES', 0) == 0 else getattr(cfg, 'SESSION_MAX_TRADES', 0)})",
-            f"[3] Stop Loss de Sesión por ROI (%) (Actual: -{getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0):.2f})",
-            f"[4] Take Profit de Sesión por ROI (%) (Actual: +{getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0):.2f})",
+            None,
+            f"[3] Stop Loss de Sesión por ROI (Estado: {sl_roi_status})",
+            f"[4]    └─ Umbral de SL (%): (Actual: -{sl_roi_val:.2f})",
+            None,
+            f"[5] Take Profit de Sesión por ROI (Estado: {tp_roi_status})",
+            f"[6]    └─ Umbral de TP (%): (Actual: +{tp_roi_val:.2f})",
             None,
             "[b] Volver"
         ]
@@ -207,14 +228,56 @@ def _show_session_limits_menu(cfg: Any):
                 action_idx = TerminalMenu(["[1] Pasar a modo NEUTRAL", "[2] Parada de Emergencia (STOP)"], title="Acción al alcanzar el límite:").show()
                 new_action = "STOP" if action_idx == 1 else "NEUTRAL"
                 setattr(cfg, 'SESSION_TIME_LIMIT_ACTION', new_action)
+        
         elif choice == 1:
             new_val = get_input("\nNuevo límite de trades (0 para ilimitados)", int, getattr(cfg, 'SESSION_MAX_TRADES', 0), min_val=0)
             setattr(cfg, 'SESSION_MAX_TRADES', new_val)
-        elif choice == 2:
-            new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0), min_val=0.0)
-            setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
+        
         elif choice == 3:
-            new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0), min_val=0.0)
+            current_status = getattr(cfg, 'SESSION_ROI_SL_ENABLED', False)
+            menu_choice = TerminalMenu(["[1] Activado", "[2] Desactivado"], title=f"\nEstado actual del SL de Sesión: { 'Activado' if current_status else 'Desactivado' }").show()
+            if menu_choice is not None:
+                new_status = (menu_choice == 0)
+                setattr(cfg, 'SESSION_ROI_SL_ENABLED', new_status)
+                if not new_status:
+                    pm_api.set_global_stop_loss_pct(0)
+                    print("\nSL de Sesión DESACTIVADO en el Position Manager.")
+                else:
+                    current_val = getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
+                    pm_api.set_global_stop_loss_pct(current_val)
+                    print(f"\nSL de Sesión ACTIVADO en el PM con valor -{current_val}%.")
+                time.sleep(1.5)
+
+        elif choice == 4:
+            new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, sl_roi_val, min_val=0.1)
+            setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
+            if getattr(cfg, 'SESSION_ROI_SL_ENABLED', False):
+                pm_api.set_global_stop_loss_pct(new_val)
+                print(f"\nUmbral de SL en el PM actualizado a -{new_val}%.")
+                time.sleep(1.5)
+        
+        elif choice == 6:
+            current_status = getattr(cfg, 'SESSION_ROI_TP_ENABLED', False)
+            menu_choice = TerminalMenu(["[1] Activado", "[2] Desactivado"], title=f"\nEstado actual del TP de Sesión: { 'Activado' if current_status else 'Desactivado' }").show()
+            if menu_choice is not None:
+                new_status = (menu_choice == 0)
+                setattr(cfg, 'SESSION_ROI_TP_ENABLED', new_status)
+                if not new_status:
+                    pm_api.set_global_take_profit_pct(0)
+                    print("\nTP de Sesión DESACTIVADO en el Position Manager.")
+                else:
+                    current_val = getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
+                    pm_api.set_global_take_profit_pct(current_val)
+                    print(f"\nTP de Sesión ACTIVADO en el PM con valor +{current_val}%.")
+                time.sleep(1.5)
+
+        elif choice == 7:
+            new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, tp_roi_val, min_val=0.1)
             setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
+            if getattr(cfg, 'SESSION_ROI_TP_ENABLED', False):
+                pm_api.set_global_take_profit_pct(new_val)
+                print(f"\nUmbral de TP en el PM actualizado a +{new_val}%.")
+                time.sleep(1.5)
+        
         else:
             break

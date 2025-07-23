@@ -35,7 +35,11 @@ def init_screens(dependencies: Dict[str, Any]):
     if hasattr(_welcome, 'init'):
         _welcome.init(dependencies)
     # Añadir inicializadores para otras pantallas si los necesitan en el futuro.
-
+    # --- INICIO DE LA SOLUCIÓN ---
+    # Añadimos la inicialización para el editor de configuración.
+    if hasattr(_config_editor, 'init'):
+        _config_editor.init(dependencies)
+    # --- FIN DE LA SOLUCIÓN ---
 # --- Control de lo que se exporta con 'from . import *' ---
 __all__ = [
     'init_screens',

@@ -5,33 +5,29 @@ Este módulo actúa como una fachada (proxy) que expone los métodos de una inst
 de la clase PositionManager. Contiene todas las funciones que los consumidores
 externos, como la TUI, utilizan para controlar y consultar el estado del PM.
 
-v2.0: Refactorizado para delegar todas las llamadas a una instancia de PositionManager.
+v2.1: Añadidas funciones faltantes para completar la API y evitar
+AttributeErrors en los módulos consumidores.
 """
 import datetime
 from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 # --- Dependencias de Tipado ---
-# Esto permite el type hinting sin causar importaciones circulares en tiempo de ejecución.
 if TYPE_CHECKING:
     from ._manager import PositionManager
     from ._entities import Milestone
 
 # --- Instancia Global del Position Manager ---
-# Esta variable contendrá la única instancia de PositionManager creada por el runner.
 _pm_instance: Optional['PositionManager'] = None
 
 def init_pm_api(instance: 'PositionManager'):
     """
     Inicializa esta fachada API inyectando la instancia principal del PositionManager.
-    Esta función es llamada una vez por el inicializador del bot.
     """
     global _pm_instance
     _pm_instance = instance
 
 # ==============================================================================
 # --- FUNCIONES PROXY (DELEGADAS) ---
-# Cada función ahora es una simple llamada al método correspondiente
-# en la instancia _pm_instance, con una comprobación de seguridad.
 # ==============================================================================
 
 # --- Funciones de Acceso y Resumen de Estado ---
@@ -89,6 +85,28 @@ def get_global_sl_pct() -> Optional[float]:
 def get_all_milestones() -> List['Milestone']:
     """Obtiene todos los hitos (triggers) como objetos Milestone."""
     return _pm_instance.get_all_milestones() if _pm_instance else []
+
+# --- INICIO DEL CÓDIGO AÑADIDO ---
+# Estas son las funciones que faltaban y que son requeridas por el módulo _limit_checks.
+
+def get_session_time_limit() -> Dict[str, Any]:
+    """Obtiene la configuración del límite de tiempo de la sesión."""
+    if not _pm_instance: return {'duration': 0, 'action': 'NEUTRAL'}
+    return _pm_instance.get_session_time_limit()
+
+def set_session_tp_hit(value: bool):
+    """
+    Establece el estado de 'TP de sesión alcanzado'.
+    En la implementación actual, esto se logra cambiando el modo a NEUTRAL.
+    """
+    if _pm_instance and value:
+        # La acción de "TP de sesión alcanzado" es poner el bot en modo neutral.
+        _pm_instance.set_manual_trading_mode("NEUTRAL", close_open=False)
+    # Si value es False, podría implementarse una lógica para "reactivar" la sesión,
+    # pero actualmente no es un caso de uso.
+
+# --- FIN DEL CÓDIGO AÑADIDO ---
+
 
 # --- Funciones de Control Manual (TUI) ---
 
@@ -193,7 +211,7 @@ def end_current_trend_and_ask():
     if _pm_instance:
         _pm_instance.end_current_trend_and_ask()
 
-# --- Funciones de Ayuda y Visualización (pueden quedar aquí o ser eliminadas si no se usan externamente) ---
+# --- Funciones de Ayuda y Visualización ---
 
 def get_current_price_for_exit() -> Optional[float]:
     """Obtiene el último precio del ticker para cierres manuales."""
