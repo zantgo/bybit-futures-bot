@@ -1,13 +1,12 @@
 """
 Módulo del Position Manager Principal.
 
-Define la clase PositionManager, el corazón de la gestión de posiciones,
-capital y riesgo. Esta clase orquesta sus componentes dependientes y encapsula
-el estado general, las reglas y las acciones de la estrategia.
-
-v3.0 (Full Exchange Agnostic Refactor):
-- Se eliminan todas las dependencias de bajo nivel (`live_operations`, `connection_manager`).
-- La clase ahora depende exclusivamente de la interfaz `AbstractExchange`.
+v4.0 (Refactor de Hitos):
+- Se refactoriza para operar bajo un modelo jerárquico Sesión > Hito > Tendencia.
+- Se elimina el estado de `_manual_mode` y se reemplaza por el estado `_active_trend`.
+- La lógica de apertura de posiciones y gestión de riesgo ahora depende de la
+  configuración de la tendencia activa.
+- Se adapta la gestión de hitos para trabajar con la nueva entidad `TrendConfig`.
 """
 import datetime
 import time
@@ -16,36 +15,31 @@ from typing import Optional, Dict, Any, Tuple, List
 
 # --- Dependencias del Proyecto (inyectadas) ---
 try:
-    from ._entities import Milestone, MilestoneCondition, MilestoneAction
+    from ._entities import Milestone, MilestoneCondition, MilestoneAction, TrendConfig
     from . import _transfer_executor
     from core.exchange import AbstractExchange
 except ImportError:
-    # Fallbacks para el análisis estático
     class Milestone: pass
     class MilestoneCondition: pass
     class MilestoneAction: pass
+    class TrendConfig: pass
     class AbstractExchange: pass
     _transfer_executor = None
 
 class PositionManager:
     """
-    Orquesta la gestión de posiciones, capital, riesgo y automatización
-    de forma agnóstica al exchange.
+    Orquesta la gestión de posiciones, capital y riesgo bajo un modelo
+    de control jerárquico basado en Hitos y Tendencias.
     """
     def __init__(self,
-                 # --- Clases de Dependencia ---
                  balance_manager: Any,
                  position_state: Any,
                  exchange_adapter: AbstractExchange,
-                 # --- Módulos de Utilidad ---
                  config: Any,
                  utils: Any,
                  memory_logger: Any,
                  helpers: Any
                  ):
-        """
-        Inicializa la instancia del PositionManager con todas sus dependencias.
-        """
         # --- Inyección de Dependencias ---
         self._balance_manager = balance_manager
         self._position_state = position_state
@@ -56,7 +50,7 @@ class PositionManager:
         self._memory_logger = memory_logger
         self._helpers = helpers
 
-        # --- Estado General ---
+        # --- Estado de la Sesión (Global) ---
         self._initialized: bool = False
         self._operation_mode: str = "unknown"
         self._leverage: float = 1.0
@@ -64,109 +58,96 @@ class PositionManager:
         self._initial_base_position_size_usdt: float = 0.0
         self._dynamic_base_size_long: float = 0.0
         self._dynamic_base_size_short: float = 0.0
+        self._session_start_time: Optional[datetime.datetime] = None
+        self._session_tp_hit: bool = False
         self._global_stop_loss_roi_pct: Optional[float] = None
         self._global_take_profit_roi_pct: Optional[float] = None
-        self._session_tp_hit: bool = False
-        self._individual_stop_loss_pct: float = 0.0
-        self._trailing_stop_activation_pct: float = 0.0
-        self._trailing_stop_distance_pct: float = 0.0
-
-        # --- Estado de Límites de Sesión y Tendencia ---
-        self._session_start_time: Optional[datetime.datetime] = None
-        self._session_max_duration_minutes: int = 0
-        self._session_time_limit_action: str = "NEUTRAL"
-        self._trend_start_time: Optional[datetime.datetime] = None
-        self._trend_limit_duration_minutes: Optional[int] = None
-        self._trend_limit_tp_roi_pct: Optional[float] = None
-        self._trend_limit_sl_roi_pct: Optional[float] = None
         
         # --- Estado de PNL ---
         self._total_realized_pnl_long: float = 0.0
         self._total_realized_pnl_short: float = 0.0
 
-        # --- Estado del Modo Manual ---
-        self._manual_mode: str = "NEUTRAL"
-        self._manual_trade_limit: Optional[int] = None
-        self._manual_trades_executed: int = 0
-        self._initial_pnl_at_trend_start: float = 0.0
-        
-        # --- Estado de Tendencia Automática (Legado) ---
-        self._trend_status: Dict[str, Any] = {}
-
         # --- Estado del Árbol de Decisiones ---
         self._milestones: List[Milestone] = []
+        
+        # --- INICIO DE CAMBIOS: Nuevo Modelo de Estado ---
+        # El estado actual del bot se define por la tendencia activa.
+        # Si _active_trend es None, el bot está en modo NEUTRAL.
+        self._active_trend: Optional[Dict[str, Any]] = None
+        # --- FIN DE CAMBIOS ---
+        
 
     def set_executor(self, executor: Any):
         """Inyecta el executor después de la inicialización para romper la dependencia circular."""
         self._executor = executor
 
     # ==============================================================================
-    # --- MÉTODOS PÚBLICOS PRINCIPALES ---
+    # --- MÉTODOS DE CICLO DE VIDA ---
     # ==============================================================================
 
     def initialize(self, operation_mode: str, base_size: float, max_pos: int):
-        """Inicializa el PM y sus componentes para una nueva sesión."""
+        """Inicializa el PM para una nueva sesión."""
         self._reset_all_states()
         self._operation_mode = operation_mode
-        
         self._leverage = getattr(self._config, 'POSITION_LEVERAGE', 1.0)
         self._max_logical_positions = max_pos
         self._initial_base_position_size_usdt = base_size
+        self._session_start_time = datetime.datetime.now()
+        
+        # Límites globales de la sesión (disyuntores)
         self._global_stop_loss_roi_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         self._global_take_profit_roi_pct = getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
-        self._session_max_duration_minutes = getattr(self._config, 'SESSION_MAX_DURATION_MINUTES', 0)
-        self._session_time_limit_action = getattr(self._config, 'SESSION_TIME_LIMIT_ACTION', "NEUTRAL")
-        self._individual_stop_loss_pct = getattr(self._config, 'POSITION_INDIVIDUAL_STOP_LOSS_PCT', 0.0)
-        self._trailing_stop_activation_pct = getattr(self._config, 'TRAILING_STOP_ACTIVATION_PCT', 0.0)
-        self._trailing_stop_distance_pct = getattr(self._config, 'TRAILING_STOP_DISTANCE_PCT', 0.0)
-        self._session_start_time = datetime.datetime.now()
 
-        # BalanceManager ahora se inicializa sin datos pre-cargados
         self._balance_manager.set_state_manager(self)
         self._position_state.initialize(is_live_mode=True)
         
         self._initialized = True
-        self._memory_logger.log("PositionManager y sus componentes han sido inicializados.", level="INFO")
+        self._memory_logger.log("PositionManager inicializado bajo el nuevo modelo de Hitos/Tendencias.", level="INFO")
 
     def handle_low_level_signal(self, signal: str, entry_price: float, timestamp: datetime.datetime):
         """Punto de entrada para señales desde el `event_processor`."""
-        if not self._initialized or not self._executor: return
+        if not self._initialized or not self._executor or not self._active_trend:
+            return
 
+        trend_mode = self._active_trend['config'].mode
         side_to_open = 'long' if signal == "BUY" else 'short'
-        side_allowed_by_mode = (side_to_open == 'long' and self._manual_mode in ["LONG_ONLY", "LONG_SHORT"]) or \
-                               (side_to_open == 'short' and self._manual_mode in ["SHORT_ONLY", "LONG_SHORT"])
         
-        if side_allowed_by_mode and self._can_open_new_position(side_to_open):
+        side_allowed = (side_to_open == 'long' and trend_mode in ["LONG_ONLY", "LONG_SHORT"]) or \
+                       (side_to_open == 'short' and trend_mode in ["SHORT_ONLY", "LONG_SHORT"])
+        
+        if side_allowed and self._can_open_new_position(side_to_open):
             self._open_logical_position(side_to_open, entry_price, timestamp)
 
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """Revisa SL y TS para todas las posiciones abiertas en cada tick."""
-        if not self._initialized or not self._executor: return
+        if not self._initialized or not self._executor:
+            return
 
         for side in ['long', 'short']:
             open_positions = self._position_state.get_open_logical_positions(side)
-            if not open_positions: continue
+            if not open_positions:
+                continue
 
             indices_to_close = []
             reasons = {}
             for i, pos in enumerate(open_positions):
-                pos_id = pos.get('id')
-                if not pos_id: continue
-
                 sl_price = pos.get('stop_loss_price')
                 if sl_price and ((side == 'long' and current_price <= sl_price) or (side == 'short' and current_price >= sl_price)):
-                    indices_to_close.append(i); reasons[i] = "SL"; continue
+                    indices_to_close.append(i)
+                    reasons[i] = "SL"
+                    continue
 
                 self._update_trailing_stop(side, pos, current_price)
                 ts_stop_price = pos.get('ts_stop_price')
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or (side == 'short' and current_price >= ts_stop_price)):
-                    indices_to_close.append(i); reasons[i] = "TS"
+                    indices_to_close.append(i)
+                    reasons[i] = "TS"
 
             for index in sorted(list(set(indices_to_close)), reverse=True):
                 self._close_logical_position(side, index, current_price, timestamp, reason=reasons.get(index, "UNKNOWN"))
 
     # ==============================================================================
-    # --- MÉTODOS PÚBLICOS DE LA API (Sin cambios en su lógica) ---
+    # --- MÉTODOS DE LA API PÚBLICA (GETTERS) ---
     # ==============================================================================
 
     def is_initialized(self) -> bool: return self._initialized
@@ -175,15 +156,19 @@ class PositionManager:
         if not self._initialized: return {"error": "PM no inicializado"}
         open_longs = self._position_state.get_open_logical_positions('long')
         open_shorts = self._position_state.get_open_logical_positions('short')
+        
+        # Usamos asdict para serializar los dataclasses para la TUI
         from dataclasses import asdict
         milestones_as_dicts = [asdict(m) for m in self._milestones]
         
-        self._balance_manager.update_real_balances_cache() # Asegurar que la caché esté fresca
+        self._balance_manager.update_real_balances_cache()
 
         return {
-            "initialized": True, "operation_mode": self._operation_mode,
-            "manual_mode_status": self.get_manual_state(), "trend_status": self.get_trend_state(),
-            "leverage": self._leverage, "max_logical_positions": self._max_logical_positions,
+            "initialized": True,
+            "operation_mode": self._operation_mode,
+            "trend_status": self.get_trend_state(), # <-- CAMBIO: Fuente de verdad del estado
+            "leverage": self._leverage,
+            "max_logical_positions": self._max_logical_positions,
             "initial_base_position_size_usdt": self._initial_base_position_size_usdt,
             "dynamic_base_size_long": self._dynamic_base_size_long,
             "dynamic_base_size_short": self._dynamic_base_size_short,
@@ -195,46 +180,126 @@ class PositionManager:
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": self._balance_manager.get_initial_total_capital(),
             "real_account_balances": self._balance_manager.get_real_balances_cache(),
-            "session_limits": {
-                "time_limit": self.get_session_time_limit(),
-                "trade_limit": self._manual_trade_limit,
-                "trades_executed": self._manual_trades_executed },
-            "all_milestones": milestones_as_dicts }
+            "session_limits": { "time_limit": self.get_session_time_limit() },
+            "all_milestones": milestones_as_dicts
+        }
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         total_pnl = 0.0
         for side in ['long', 'short']:
             for pos in self._position_state.get_open_logical_positions(side):
-                entry = pos.get('entry_price', 0.0); size = pos.get('size_contracts', 0.0)
+                entry = pos.get('entry_price', 0.0)
+                size = pos.get('size_contracts', 0.0)
                 if side == 'long': total_pnl += (current_price - entry) * size
                 else: total_pnl += (entry - current_price) * size
         return total_pnl
 
-    def get_manual_state(self) -> Dict[str, Any]:
-        return {"mode": self._manual_mode, "limit": self._manual_trade_limit, "executed": self._manual_trades_executed}
+    def get_trend_state(self) -> Dict[str, Any]:
+        """Devuelve el estado de la tendencia activa."""
+        if not self._active_trend:
+            return {'mode': 'NEUTRAL'}
+        
+        from dataclasses import asdict
+        return {
+            'mode': self._active_trend['config'].mode,
+            'milestone_id': self._active_trend['milestone_id'],
+            'start_time': self._active_trend['start_time'],
+            'trades_executed': self._active_trend['trades_executed'],
+            'initial_pnl': self._active_trend['initial_pnl'],
+            'config': asdict(self._active_trend['config'])
+        }
+
+    def get_trend_limits(self) -> Dict[str, Any]:
+        """Devuelve los límites de la tendencia activa."""
+        if not self._active_trend:
+            return {}
+        
+        config = self._active_trend['config']
+        return {
+            "start_time": self._active_trend['start_time'],
+            "duration_minutes": config.limit_duration_minutes,
+            "tp_roi_pct": config.limit_tp_roi_pct,
+            "sl_roi_pct": config.limit_sl_roi_pct,
+            "trade_limit": config.limit_trade_count
+        }
 
     def get_session_start_time(self) -> Optional[datetime.datetime]: return self._session_start_time
     def get_global_tp_pct(self) -> Optional[float]: return self._global_take_profit_roi_pct
     def is_session_tp_hit(self) -> bool: return self._session_tp_hit
-    def get_individual_stop_loss_pct(self) -> float: return self._individual_stop_loss_pct
-    def get_trailing_stop_params(self) -> Dict[str, float]: return {"activation": self._trailing_stop_activation_pct, "distance": self._trailing_stop_distance_pct}
-    def get_trend_limits(self) -> Dict[str, Any]: return {"start_time": self._trend_start_time, "duration_minutes": self._trend_limit_duration_minutes, "tp_roi_pct": self._trend_limit_tp_roi_pct, "sl_roi_pct": self._trend_limit_sl_roi_pct}
-    def get_trend_state(self) -> Dict[str, Any]: return self._trend_status
     def get_global_sl_pct(self) -> Optional[float]: return self._global_stop_loss_roi_pct
     def get_all_milestones(self) -> List[Milestone]: return copy.deepcopy(self._milestones)
-    def get_session_time_limit(self) -> Dict[str, Any]: return {"duration": self._session_max_duration_minutes, "action": self._session_time_limit_action}
+    def get_session_time_limit(self) -> Dict[str, Any]:
+        return {"duration": getattr(self._config, 'SESSION_MAX_DURATION_MINUTES', 0),
+                "action": getattr(self._config, 'SESSION_TIME_LIMIT_ACTION', "NEUTRAL")}
     def get_total_pnl_realized(self) -> float: return self._total_realized_pnl_long + self._total_realized_pnl_short
 
-    def set_manual_trading_mode(self, mode: str, trade_limit: Optional[int] = None, close_open: bool = False) -> Tuple[bool, str]:
-        if close_open:
-            if self._manual_mode in ["LONG_ONLY", "LONG_SHORT"] and mode not in ["LONG_ONLY", "LONG_SHORT"]: self.close_all_logical_positions('long', "Cierre por cambio de modo")
-            if self._manual_mode in ["SHORT_ONLY", "LONG_SHORT"] and mode not in ["SHORT_ONLY", "LONG_SHORT"]: self.close_all_logical_positions('short', "Cierre por cambio de modo")
-        if mode != self._manual_mode or trade_limit != self._manual_trade_limit: self._manual_trades_executed = 0
-        self._manual_mode = mode.upper()
-        self._manual_trade_limit = trade_limit if trade_limit is not None and trade_limit > 0 else None
-        if self._manual_mode != "NEUTRAL": self._trend_start_time = datetime.datetime.now(); self._initial_pnl_at_trend_start = self.get_total_pnl_realized()
-        else: self._trend_start_time = None
-        return True, f"Modo actualizado a {self._manual_mode}."
+    # ==============================================================================
+    # --- MÉTODOS DE LA API PÚBLICA (SETTERS Y ACCIONES) ---
+    # ==============================================================================
+
+    def add_milestone(self, condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
+        try:
+            condition = MilestoneCondition(**condition_data)
+            trend_config = TrendConfig(**action_data['params'])
+            action = MilestoneAction(type=action_data['type'], params=trend_config)
+            
+            level, status = 1, 'ACTIVE'
+            if parent_id:
+                parent = next((m for m in self._milestones if m.id == parent_id), None)
+                if not parent: return False, f"Hito padre con ID '{parent_id}' no encontrado."
+                level = parent.level + 1
+                status = 'PENDING'
+            
+            milestone_id = f"mstone_{int(time.time() * 1000)}"
+            new_milestone = Milestone(id=milestone_id, condition=condition, action=action, parent_id=parent_id, level=level, status=status)
+            self._milestones.append(new_milestone)
+            self._memory_logger.log(f"HITO CREADO: ID ...{milestone_id[-6:]}, Nivel {level}, Estado {status}", "INFO")
+            return True, f"Hito '{milestone_id[-6:]}' añadido en Nivel {level}."
+        except Exception as e:
+            return False, f"Error creando hito: {e}"
+
+    def remove_milestone(self, milestone_id: str) -> Tuple[bool, str]:
+        # Implementa borrado en cascada
+        ids_to_remove = {milestone_id}
+        ids_to_check = [milestone_id]
+        while ids_to_check:
+            parent_id = ids_to_check.pop(0)
+            children = [m.id for m in self._milestones if m.parent_id == parent_id]
+            ids_to_remove.update(children)
+            ids_to_check.extend(children)
+        
+        initial_len = len(self._milestones)
+        self._milestones = [m for m in self._milestones if m.id not in ids_to_remove]
+        
+        if len(self._milestones) < initial_len:
+             self._memory_logger.log(f"HITOS ELIMINADOS: {len(ids_to_remove)} hito(s) en cascada desde ...{milestone_id[-6:]}", "WARN")
+             return True, f"{len(ids_to_remove)} hito(s) eliminados."
+        else:
+             return False, "No se encontró el hito."
+
+    def process_triggered_milestone(self, milestone_id: str):
+        triggered_milestone = next((m for m in self._milestones if m.id == milestone_id), None)
+        if not triggered_milestone: return
+        
+        # 1. Finalizar la tendencia actual (si la hay)
+        self._end_trend("Hito completado")
+        
+        # 2. Actualizar estados del árbol
+        parent_id = triggered_milestone.parent_id
+        for m in self._milestones:
+            if m.id == milestone_id:
+                m.status = 'COMPLETED'
+            elif m.parent_id == parent_id and m.status in ['PENDING', 'ACTIVE']:
+                m.status = 'CANCELLED' # Cancela hermanos
+            elif m.parent_id == milestone_id and m.status == 'PENDING':
+                m.status = 'ACTIVE' # Activa hijos directos
+
+        # 3. Iniciar la nueva tendencia definida por el hito
+        self._start_trend(triggered_milestone)
+
+    def end_current_trend_and_ask(self):
+        """Llamado por los limit checkers para finalizar una tendencia."""
+        self._end_trend(reason="Límite de tendencia alcanzado")
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         price = self.get_current_price_for_exit()
@@ -245,176 +310,125 @@ class PositionManager:
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> bool:
         price = self.get_current_price_for_exit()
         if not price: self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR"); return False
-        initial_count = len(self._position_state.get_open_logical_positions(side))
-        if initial_count == 0: return True
-        self._memory_logger.log(f"Iniciando cierre total de {initial_count} posiciones {side.upper()}.", level="INFO")
-        for i in range(initial_count - 1, -1, -1):
+        
+        count = len(self._position_state.get_open_logical_positions(side))
+        if count == 0: return True
+        
+        for i in range(count - 1, -1, -1):
             self._close_logical_position(side, i, price, datetime.datetime.now(), reason)
-        remaining = len(self._position_state.get_open_logical_positions(side))
-        if remaining == 0: self._memory_logger.log(f"ÉXITO: Todas las posiciones {side.upper()} cerradas.", level="INFO"); return True
-        else: self._memory_logger.log(f"FALLO: Quedan {remaining} posiciones {side.upper()}.", level="ERROR"); return False
-
-    def add_max_logical_position_slot(self) -> Tuple[bool, str]:
-        self._max_logical_positions += 1
-        self._balance_manager.update_operational_margins_based_on_slots(self._max_logical_positions, self._initial_base_position_size_usdt)
-        return True, f"Slots incrementados a {self._max_logical_positions}."
-    
-    def remove_max_logical_position_slot(self) -> Tuple[bool, str]:
-        if self._max_logical_positions <= 1: return False, "Mínimo 1 slot."
-        open_count = max(len(self._position_state.get_open_logical_positions('long')), len(self._position_state.get_open_logical_positions('short')))
-        if (self._max_logical_positions - 1) < open_count: return False, "No se puede remover, hay más posiciones abiertas que el nuevo límite."
-        self._max_logical_positions -= 1
-        self._balance_manager.update_operational_margins_based_on_slots(self._max_logical_positions, self._initial_base_position_size_usdt)
-        return True, f"Slots decrementados a {self._max_logical_positions}."
-
-    def set_base_position_size(self, new_size_usdt: float) -> Tuple[bool, str]:
-        if not isinstance(new_size_usdt, (int, float)) or new_size_usdt <= 0: return False, "Tamaño inválido."
-        old_size = self._initial_base_position_size_usdt
-        self._initial_base_position_size_usdt = new_size_usdt
-        self._balance_manager.recalculate_dynamic_base_sizes()
-        return True, f"Tamaño base actualizado de {old_size:.2f} a {new_size_usdt:.2f} USDT."
-
-    def set_leverage(self, new_leverage: float) -> Tuple[bool, str]:
-        if not isinstance(new_leverage, (int, float)) or not (1 <= new_leverage <= 100): return False, "Apalancamiento inválido."
-        self._leverage = new_leverage
-        symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-        # Se establece en ambas cuentas de trading
-        success_long = self._exchange.set_leverage(symbol, new_leverage, account_purpose='longs')
-        success_short = self._exchange.set_leverage(symbol, new_leverage, account_purpose='shorts')
-        if success_long and success_short:
-            return True, f"Apalancamiento actualizado a {new_leverage}x."
-        else:
-            return False, f"Error al aplicar apalancamiento en el exchange (Long: {success_long}, Short: {success_short})."
-    
-    # El resto de los métodos de la API pública no requieren cambios...
-    # (El código es idéntico al que proporcionaste desde aquí hasta el final de la clase)
-    # ...
-    def set_individual_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
-        if not isinstance(value, (int, float)) or value < 0: return False, "Valor inválido."
-        self._individual_stop_loss_pct = value
-        return True, f"Stop Loss individual para nuevas posiciones ajustado a {value:.2f}%."
-
-    def set_trailing_stop_params(self, activation_pct: float, distance_pct: float) -> Tuple[bool, str]:
-        if not all(isinstance(v, (int, float)) and v >= 0 for v in [activation_pct, distance_pct]): return False, "Valores inválidos."
-        self._trailing_stop_activation_pct = activation_pct
-        self._trailing_stop_distance_pct = distance_pct
-        return True, f"Trailing Stop ajustado (Activación: {activation_pct:.2f}%, Distancia: {distance_pct:.2f}%)."
-
-    def set_global_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
-        self._global_stop_loss_roi_pct = value
-        return True, f"Stop Loss Global actualizado a -{value}%." if value > 0 else "Stop Loss Global desactivado."
-
-    def set_global_take_profit_pct(self, value: float) -> Tuple[bool, str]:
-        self._global_take_profit_roi_pct = value; self._session_tp_hit = False
-        return True, f"Take Profit Global actualizado a +{value}%." if value > 0 else "Take Profit Global desactivado."
-
-    def set_session_time_limit(self, duration: int, action: str) -> Tuple[bool, str]:
-        self._session_max_duration_minutes = duration; self._session_time_limit_action = action
-        return True, f"Límite de tiempo a {duration} min, acción: {action.upper()}." if duration > 0 else "Límite de tiempo desactivado."
-
-    def set_manual_trade_limit(self, limit: Optional[int]) -> Tuple[bool, str]:
-        new_limit = limit if limit is not None and limit > 0 else None
-        self.set_manual_trading_mode(self._manual_mode, new_limit)
-        limit_str = f"{new_limit} trades" if new_limit else "ilimitados"
-        return True, f"Límite de sesión establecido a {limit_str}."
-
-    def set_trend_limits(self, duration: Optional[int], tp_roi_pct: Optional[float], sl_roi_pct: Optional[float], trade_limit: Optional[int] = None) -> Tuple[bool, str]:
-        if trade_limit is not None: self.set_manual_trade_limit(trade_limit)
-        self._trend_limit_duration_minutes = duration if duration is not None and duration > 0 else None
-        self._trend_limit_tp_roi_pct = abs(tp_roi_pct) if tp_roi_pct is not None and tp_roi_pct > 0 else None
-        self._trend_limit_sl_roi_pct = -abs(sl_roi_pct) if sl_roi_pct is not None and sl_roi_pct < 0 else None
-        msg_parts = [p for p in [f"Duración: {duration} min" if duration else None, f"Trades: {trade_limit or 'Ilimitados'}" if trade_limit is not None else None, f"TP ROI: +{tp_roi_pct:.2f}%" if self._trend_limit_tp_roi_pct else None, f"SL ROI: {self._trend_limit_sl_roi_pct:.2f}%" if self._trend_limit_sl_roi_pct else None] if p]
-        return (True, f"Límites para próxima tendencia: {', '.join(msg_parts)}.") if msg_parts else (True, "Límites de tendencia desactivados.")
-
-    def add_milestone(self, condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
-        try:
-            condition = MilestoneCondition(**condition_data)
-            action = MilestoneAction(**action_data)
-            level, status = 1, 'ACTIVE'
-            if parent_id:
-                parent = next((m for m in self._milestones if m.id == parent_id), None)
-                if not parent: return False, f"Hito padre con ID '{parent_id}' no encontrado."
-                level = parent.level + 1; status = 'PENDING'
-            milestone_id = f"mstone_{int(time.time() * 1000)}"
-            new_milestone = Milestone(id=milestone_id, condition=condition, action=action, parent_id=parent_id, level=level, status=status)
-            self._milestones.append(new_milestone)
-            return True, f"Hito '{milestone_id}' añadido en Nivel {level} (Estado: {status})."
-        except Exception as e: return False, f"Error creando hito: {e}"
-
-    def remove_milestone(self, milestone_id: str) -> Tuple[bool, str]:
-        initial_len = len(self._milestones)
-        self._milestones = [m for m in self._milestones if m.id != milestone_id]
-        return (True, f"Hito '{milestone_id}' eliminado.") if len(self._milestones) < initial_len else (False, f"No se encontró el hito.")
-
-    def process_triggered_milestone(self, milestone_id: str):
-        parent_id_of_completed = next((m.parent_id for m in self._milestones if m.id == milestone_id), "NOT_FOUND")
-        if parent_id_of_completed == "NOT_FOUND": return
-        for m in self._milestones:
-            if m.id == milestone_id: m.status = 'COMPLETED'
-            elif m.parent_id == parent_id_of_completed and m.status in ['PENDING', 'ACTIVE']: m.status = 'CANCELLED'
-            elif m.parent_id == milestone_id and m.status == 'PENDING': m.status = 'ACTIVE'
-
-    def start_manual_trend(self, mode: str, trade_limit: Optional[int], duration_limit: Optional[int], tp_roi_limit: Optional[float], sl_roi_limit: Optional[float]) -> Tuple[bool, str]:
-        self.set_trend_limits(duration_limit, tp_roi_limit, sl_roi_limit)
-        return self.set_manual_trading_mode(mode, trade_limit=trade_limit, close_open=False)
-
-    def end_current_trend_and_ask(self): self._manual_mode = "NEUTRAL"
+        return True
 
     def get_current_price_for_exit(self) -> Optional[float]:
         try:
             return self._exchange.get_latest_price()
         except (AttributeError, TypeError):
             return None
-
-    def get_rrr_potential(self) -> Optional[float]:
-        if self._individual_stop_loss_pct > 0 and self._trailing_stop_activation_pct > 0:
-            return self._utils.safe_division(self._trailing_stop_activation_pct, self._individual_stop_loss_pct)
-        return None
-
+    
     # ==============================================================================
-    # --- MÉTODOS PRIVADOS ---
+    # --- MÉTODOS PRIVADOS DE GESTIÓN DE ESTADO ---
     # ==============================================================================
     
     def _reset_all_states(self):
-        self._initialized = False; self._operation_mode = "unknown"; self._leverage = 1.0
-        self._max_logical_positions = 1; self._initial_base_position_size_usdt = 0.0
-        self._total_realized_pnl_long = 0.0; self._total_realized_pnl_short = 0.0
-        self._manual_mode = "NEUTRAL"; self._manual_trade_limit = None; self._manual_trades_executed = 0
-        self._global_stop_loss_roi_pct = None; self._global_take_profit_roi_pct = None
-        self._session_tp_hit = False; self._session_start_time = None
-        self._session_max_duration_minutes = 0; self._session_time_limit_action = "NEUTRAL"
-        self._individual_stop_loss_pct = 0.0; self._trailing_stop_activation_pct = 0.0; self._trailing_stop_distance_pct = 0.0
-        self._milestones = []; self._trend_start_time = None; self._trend_limit_duration_minutes = None
-        self._trend_limit_tp_roi_pct = None; self._trend_limit_sl_roi_pct = None
+        self._initialized = False
+        self._operation_mode = "unknown"
+        self._leverage = 1.0
+        self._max_logical_positions = 1
+        self._initial_base_position_size_usdt = 0.0
+        self._total_realized_pnl_long = 0.0
+        self._total_realized_pnl_short = 0.0
+        self._session_tp_hit = False
+        self._session_start_time = None
+        self._global_stop_loss_roi_pct = None
+        self._global_take_profit_roi_pct = None
+        self._milestones = []
+        self._active_trend = None
+
+    def _start_trend(self, milestone: Milestone):
+        """Activa una nueva tendencia basada en la configuración de un hito."""
+        if self._active_trend:
+            self._memory_logger.log(f"ADVERTENCIA: Se intentó iniciar una nueva tendencia mientras otra estaba activa.", "WARN")
+            self._end_trend("Iniciando nueva tendencia")
+        
+        self._active_trend = {
+            "milestone_id": milestone.id,
+            "config": milestone.action.params,
+            "start_time": datetime.datetime.now(),
+            "trades_executed": 0,
+            "initial_pnl": self.get_total_pnl_realized()
+        }
+        mode = self._active_trend['config'].mode
+        self._memory_logger.log(f"TENDENCIA INICIADA: Modo '{mode}' activado por hito ...{milestone.id[-6:]}", "INFO")
+
+    def _end_trend(self, reason: str):
+        """Finaliza la tendencia activa y vuelve al estado NEUTRAL."""
+        if self._active_trend:
+            mode = self._active_trend['config'].mode
+            self._memory_logger.log(f"TENDENCIA FINALIZADA: Modo '{mode}' terminado. Razón: {reason}", "INFO")
+            self._active_trend = None
 
     def _can_open_new_position(self, side: str) -> bool:
-        if self._session_tp_hit: return False
-        if self._manual_mode == 'NEUTRAL' or \
-           (side == 'long' and self._manual_mode == 'SHORT_ONLY') or \
-           (side == 'short' and self._manual_mode == 'LONG_ONLY'):
+        if self._session_tp_hit or not self._active_trend:
             return False
-        if self._manual_trade_limit is not None and self._manual_trades_executed >= self._manual_trade_limit:
-            if not self._session_tp_hit: self._memory_logger.log(f"Límite de trades ({self._manual_trade_limit}) alcanzado.", "INFO"); self._session_tp_hit = True
+            
+        trend_config = self._active_trend['config']
+        
+        if trend_config.limit_trade_count is not None and self._active_trend['trades_executed'] >= trend_config.limit_trade_count:
             return False
-        if len(self._position_state.get_open_logical_positions(side)) >= self._max_logical_positions: return False
+        
+        if len(self._position_state.get_open_logical_positions(side)) >= self._max_logical_positions:
+            return False
+            
         margin_needed = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
-        if self._balance_manager.get_available_margin(side) < margin_needed - 1e-6: return False
+        if self._balance_manager.get_available_margin(side) < margin_needed - 1e-6:
+            return False
+            
         return True
 
     def _open_logical_position(self, side: str, entry_price: float, timestamp: datetime.datetime):
-        open_positions = self._position_state.get_open_logical_positions(side)
-        if open_positions:
-            last_entry = self._utils.safe_float_convert(open_positions[-1].get('entry_price'), 0.0)
-            if last_entry > 1e-9:
-                diff_pct = self._utils.safe_division(entry_price - last_entry, last_entry) * 100.0
-                long_thresh = getattr(self._config, 'POSITION_MIN_PRICE_DIFF_LONG_PCT', -1.0)
-                short_thresh = getattr(self._config, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', 1.0)
-                if (side == 'long' and diff_pct > long_thresh) or (side == 'short' and diff_pct < short_thresh): return
-        margin_to_use = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
-        if not self._executor: return
-        result = self._executor.execute_open(side, entry_price, timestamp, margin_to_use)
-        if result and result.get('success'): self._manual_trades_executed += 1
+        if not self._active_trend: return
 
+        # Aplicar SL y TS de la tendencia activa
+        trend_config = self._active_trend['config']
+        
+        margin_to_use = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
+        result = self._executor.execute_open(
+            side=side, 
+            entry_price=entry_price, 
+            timestamp=timestamp, 
+            margin_to_use=margin_to_use,
+            # Pasamos los parámetros de riesgo de la tendencia al ejecutor
+            # (Esto requerirá un pequeño cambio en _executor.py)
+            sl_pct=trend_config.individual_sl_pct
+        )
+        if result and result.get('success'):
+            self._active_trend['trades_executed'] += 1
+
+    def _update_trailing_stop(self, side, position_data, current_price):
+        if not self._active_trend: return
+
+        trend_config = self._active_trend['config']
+        activation_pct = trend_config.trailing_stop_activation_pct
+        distance_pct = trend_config.trailing_stop_distance_pct
+        
+        is_ts_active = position_data.get('ts_is_active', False)
+        entry_price = position_data.get('entry_price')
+        
+        if not is_ts_active and activation_pct > 0 and entry_price:
+            activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
+            if (side == 'long' and current_price >= activation_price) or (side == 'short' and current_price <= activation_price):
+                position_data['ts_is_active'] = True
+                position_data['ts_peak_price'] = current_price
+
+        if position_data.get('ts_is_active'):
+            peak_price = position_data.get('ts_peak_price', current_price)
+            if (side == 'long' and current_price > peak_price) or (side == 'short' and current_price < peak_price):
+                position_data['ts_peak_price'] = current_price
+            
+            new_stop_price = position_data['ts_peak_price'] * (1 - distance_pct / 100) if side == 'long' else position_data['ts_peak_price'] * (1 + distance_pct / 100)
+            position_data['ts_stop_price'] = new_stop_price
+            self._position_state.update_logical_position_details(side, position_data['id'], position_data)
+            
+    # --- MÉTODOS INTERNOS (sin cambios significativos) ---
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> bool:
         if not self._executor: return False
         result = self._executor.execute_close(side, index, exit_price, timestamp, reason)
@@ -433,22 +447,7 @@ class PositionManager:
                 )
                 if transferred > 0: self._balance_manager.record_real_profit_transfer(transferred)
         return result.get('success', False)
-        
-    def _update_trailing_stop(self, side, position_data, current_price):
-        is_ts_active = position_data.get('ts_is_active', False)
-        entry_price = position_data.get('entry_price')
-        if not is_ts_active and self._trailing_stop_activation_pct > 0 and entry_price:
-            activation_price = entry_price * (1 + self._trailing_stop_activation_pct / 100) if side == 'long' else entry_price * (1 - self._trailing_stop_activation_pct / 100)
-            if (side == 'long' and current_price >= activation_price) or (side == 'short' and current_price <= activation_price):
-                position_data['ts_is_active'] = True; position_data['ts_peak_price'] = current_price
-        if position_data.get('ts_is_active'):
-            peak_price = position_data.get('ts_peak_price', current_price)
-            if (side == 'long' and current_price > peak_price) or (side == 'short' and current_price < peak_price):
-                position_data['ts_peak_price'] = current_price
-            new_stop_price = position_data['ts_peak_price'] * (1 - self._trailing_stop_distance_pct / 100) if side == 'long' else position_data['ts_peak_price'] * (1 + self._trailing_stop_distance_pct / 100)
-            position_data['ts_stop_price'] = new_stop_price
-            self._position_state.update_logical_position_details(side, position_data['id'], position_data)
-
+    
     def set_dynamic_base_size(self, long_size: float, short_size: float):
         self._dynamic_base_size_long = long_size
         self._dynamic_base_size_short = short_size

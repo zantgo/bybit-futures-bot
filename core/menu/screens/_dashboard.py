@@ -1,9 +1,10 @@
 """
 Módulo para la Pantalla del Dashboard Principal.
 
-v3.2: Actualizada la sección de configuración para mostrar el estado de
-activación (Activado/Desactivado) de los límites de ROI de sesión,
-reflejando las flags booleanas del módulo `config`.
+v4.0 (Refactor de Hitos):
+- Se eliminan los botones de menú para "Modo Manual" y "Modo Automático".
+- Se añade un único botón "Gestionar Hitos" para centralizar la estrategia.
+- La cabecera ahora muestra el estado de la Tendencia activa del Position Manager.
 """
 import time
 import datetime
@@ -22,7 +23,11 @@ from .._helpers import (
 )
 from .. import _helpers as helpers_module
 
-from . import _config_editor, _manual_mode, _auto_mode, _position_viewer, _log_viewer
+# --- INICIO DE LA CORRECCIÓN ---
+# Importamos el nuevo gestor de hitos y eliminamos los antiguos.
+from . import _config_editor, _position_viewer, _log_viewer, _milestone_manager
+# from . import _config_editor, _manual_mode, _auto_mode, _position_viewer, _log_viewer
+# --- FIN DE LA CORRECCIÓN ---
 
 try:
     from core.exchange._models import StandardBalance
@@ -128,7 +133,18 @@ def show_dashboard_screen():
             duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
             
             ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-            manual_state = summary.get('manual_mode_status', {})
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Leemos el estado de la tendencia actual para mostrarlo
+            # (Anticipando el cambio en el PM que devolverá esta información)
+            trend_status = summary.get('trend_status', {})
+            trend_mode = trend_status.get('mode', 'NEUTRAL')
+            milestone_id = trend_status.get('milestone_id', None)
+            
+            status_display = f"Tendencia: {trend_mode}"
+            if milestone_id:
+                status_display += f" (Hito: ...{milestone_id[-6:]})"
+            elif trend_mode == 'NEUTRAL':
+                status_display = "Modo: NEUTRAL (Esperando Hito)"
 
         except Exception as e:
             clear_screen()
@@ -138,7 +154,8 @@ def show_dashboard_screen():
         
         clear_screen()
         
-        header_title = f"Dashboard: {ticker_symbol} @ {current_price:.4f} USDT | Modo: {manual_state.get('mode', 'N/A')}"
+        header_title = f"Dashboard: {ticker_symbol} @ {current_price:.4f} USDT | {status_display}"
+        # --- FIN DE LA CORRECCIÓN ---
         print_tui_header(header_title)
         
         print("\n--- Estado General y Configuración de la Sesión " + "-"*31)
@@ -149,13 +166,10 @@ def show_dashboard_screen():
             "PNL Total": f"{total_pnl:+.4f} USDT", "ROI Sesión": f"{current_roi:+.2f}%",
         }
         
-        # --- INICIO DE LA LÓGICA CORREGIDA ---
         sl_roi_enabled = getattr(config_module, 'SESSION_ROI_SL_ENABLED', False)
         tp_roi_enabled = getattr(config_module, 'SESSION_ROI_TP_ENABLED', False)
-        
         sl_roi_val = getattr(config_module, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         tp_roi_val = getattr(config_module, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
-
         sl_roi_str = f"Activo (-{sl_roi_val}%)" if sl_roi_enabled else "Desactivado"
         tp_roi_str = f"Activo (+{tp_roi_val}%)" if tp_roi_enabled else "Desactivado"
 
@@ -167,7 +181,6 @@ def show_dashboard_screen():
             "SL Sesión (ROI)": sl_roi_str,
             "TP Sesión (ROI)": tp_roi_str,
         }
-        # --- FIN DE LA LÓGICA CORREGIDA ---
 
         max_key_len1 = max(len(k) for k in col1_data.keys())
         max_key_len2 = max(len(k) for k in col2_data.keys())
@@ -203,9 +216,18 @@ def show_dashboard_screen():
         _print_positions_table("Posiciones LONG", summary.get('open_long_positions', []), current_price, 'long')
         _print_positions_table("Posiciones SHORT", summary.get('open_short_positions', []), current_price, 'short')
 
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Actualizamos la lista de ítems del menú
         menu_items = [
-            "[1] Refrescar", "[2] Gestionar Posiciones", "[3] Modo Manual", "[4] Modo Automático",
-            "[5] Editar Configuración", "[6] Ver Logs", "[h] Ayuda", "[q] Salir del Bot"
+            "[1] Refrescar", 
+            "[2] Gestionar Posiciones", 
+            "[3] Gestionar Hitos (Árbol de Decisiones)",
+            None,
+            "[4] Editar Configuración de Sesión", 
+            "[5] Ver Logs en Tiempo Real",
+            None,
+            "[h] Ayuda", 
+            "[q] Salir del Bot"
         ]
         
         menu_options = helpers_module.MENU_STYLE.copy()
@@ -215,17 +237,19 @@ def show_dashboard_screen():
         menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
         choice = menu.show()
         
-        action_map = {0: 'refresh', 1: 'view_positions', 2: 'manual_mode', 3: 'auto_mode', 4: 'edit_config', 5: 'view_logs', 6: 'help', 7: 'exit'}
+        # Actualizamos el mapeo de acciones para que coincida con el nuevo menú
+        action_map = {
+            0: 'refresh', 1: 'view_positions', 2: 'milestone_manager',
+            4: 'edit_config', 5: 'view_logs', 7: 'help', 8: 'exit'
+        }
         action = action_map.get(choice)
         
         if action == 'refresh': 
             continue
         elif action == 'view_positions': 
             _position_viewer.show_position_viewer_screen(pm_api)
-        elif action == 'manual_mode': 
-            _manual_mode.show_manual_mode_screen(pm_api)
-        elif action == 'auto_mode': 
-            _auto_mode.show_auto_mode_screen(pm_api)
+        elif action == 'milestone_manager': 
+            _milestone_manager.show_milestone_manager_screen()
         elif action == 'edit_config': 
             _config_editor.show_config_editor_screen(config_module)
         elif action == 'view_logs': 
@@ -236,3 +260,4 @@ def show_dashboard_screen():
             confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="¿Confirmas apagar el bot?", **helpers_module.MENU_STYLE)
             if confirm_menu.show() == 0: 
                 break
+        # --- FIN DE LA CORRECCIÓN ---

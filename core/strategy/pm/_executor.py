@@ -2,11 +2,9 @@
 Clase PositionExecutor: Encapsula y centraliza la lógica de ejecución de
 operaciones de mercado (apertura/cierre) y sincronización de estado.
 
-v21.0 (Exchange Agnostic Refactor):
-- Reemplaza dependencias de API específicas (`live_operations`, `connection_manager`)
-  con una interfaz de exchange abstracta (`AbstractExchange`).
-- Utiliza modelos de datos estandarizados (`StandardOrder`) para comunicarse
-  con la capa de exchange.
+v22.0 (Refactor de Hitos):
+- `execute_open` ahora acepta `sl_pct` como argumento para permitir que el
+  PositionManager delegue los parámetros de riesgo de la tendencia activa.
 """
 import datetime
 import uuid
@@ -17,7 +15,7 @@ from typing import Optional, Dict, Any
 
 try:
     from core.logging import memory_logger
-    from core.exchange import AbstractExchange, StandardOrder # <-- CAMBIO CLAVE
+    from core.exchange import AbstractExchange, StandardOrder
 except ImportError:
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
@@ -36,7 +34,7 @@ class PositionExecutor:
                  balance_manager: Any,
                  position_state: Any,
                  state_manager: Any,
-                 exchange_adapter: AbstractExchange, # <-- CAMBIO CLAVE
+                 exchange_adapter: AbstractExchange,
                  calculations: Any,
                  helpers: Any,
                  closed_position_logger: Optional[Any] = None
@@ -50,7 +48,7 @@ class PositionExecutor:
         self._balance_manager = balance_manager
         self._position_state = position_state
         self._state_manager = state_manager
-        self._exchange = exchange_adapter # <-- CAMBIO CLAVE
+        self._exchange = exchange_adapter
         self._calculations = calculations
         self._helpers = helpers
         self._closed_position_logger = closed_position_logger
@@ -62,7 +60,9 @@ class PositionExecutor:
         
         memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
-    def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float) -> Dict[str, Any]:
+    # --- INICIO DE LA CORRECCIÓN ---
+    def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float) -> Dict[str, Any]:
+    # --- FIN DE LA CORRECCIÓN ---
         """Orquesta la apertura de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'api_order_id': None, 'logical_position_id': None, 'message': 'Error no especificado'}
         leverage = self._state_manager.get_leverage()
@@ -71,14 +71,13 @@ class PositionExecutor:
 
         # --- 1. Calcular Tamaño y Validar ---
         try:
-            # Esta parte de la lógica es interna y no cambia
             calc_qty_result = self._helpers.calculate_and_round_quantity(
                 margin_usdt=margin_to_use, 
                 entry_price=entry_price, 
                 leverage=leverage, 
                 symbol=self._symbol, 
-                is_live=True, # Asumimos que el executor siempre es live
-                exchange_adapter=self._exchange # <-- CAMBIO: Pasar el adaptador al helper
+                is_live=True,
+                exchange_adapter=self._exchange
             )
             if not calc_qty_result['success']:
                 result['message'] = calc_qty_result['error']
@@ -86,7 +85,7 @@ class PositionExecutor:
                 return result
                 
             size_contracts_float = calc_qty_result['qty_float']
-            size_contracts_str = calc_qty_result['qty_str'] # String ya formateado
+            size_contracts_str = calc_qty_result['qty_str']
             qty_precision = calc_qty_result['precision']
             memory_logger.log(f"  Tamaño Calculado: {size_contracts_float:.{qty_precision}f} ({size_contracts_str} API), Margen: {margin_to_use:.4f} USDT", level="DEBUG")
 
@@ -97,10 +96,14 @@ class PositionExecutor:
             return result
         
         # --- 2. Crear Datos de la Posición Lógica ---
-        # Lógica interna, no cambia
         logical_position_id = str(uuid.uuid4())
-        sl_pct = self._state_manager.get_individual_stop_loss_pct()
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        # El `sl_pct` ahora viene como argumento, delegado desde la tendencia activa.
+        # sl_pct = self._state_manager.get_individual_stop_loss_pct() # LÍNEA ORIGINAL
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
+        # --- FIN DE LA CORRECCIÓN ---
+
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
         new_position_data = {
@@ -112,11 +115,10 @@ class PositionExecutor:
         }
         result['logical_position_id'] = logical_position_id
 
-        # --- 3. Ejecutar Orden en el Exchange (usando la interfaz) ---
+        # --- 3. Ejecutar Orden en el Exchange ---
         execution_success = False
         api_order_id = None
         try:
-            # Crear el objeto de orden estandarizado
             order_to_place = StandardOrder(
                 symbol=self._symbol,
                 side="buy" if side == 'long' else "sell",
@@ -125,8 +127,11 @@ class PositionExecutor:
                 reduce_only=False
             )
             
-            # Llamar al método agnóstico de la interfaz de exchange
-            success, order_id_or_error = self._exchange.place_order(order_to_place)
+            # NOTA: La lógica de `place_order` en el adaptador ahora debe aceptar el propósito
+            # de la cuenta para saber a qué cuenta de Bybit/Binance enviar la orden.
+            # Asumimos que esta lógica ya está implementada en el adaptador.
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            success, order_id_or_error = self._exchange.place_order(order_to_place, account_purpose=account_purpose)
             
             if success:
                 execution_success = True
@@ -141,7 +146,6 @@ class PositionExecutor:
             memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR")
 
         # --- 4. Actualizar Estado Interno ---
-        # Lógica interna, no cambia
         if execution_success:
             new_position_data['api_order_id'] = api_order_id
             add_ok = self._position_state.add_logical_position(side, new_position_data)
@@ -167,7 +171,6 @@ class PositionExecutor:
         result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
         memory_logger.log(f"CLOSE [{side.upper()} Idx:{position_index}] -> Solicitud para cerrar @ {exit_price:.{self._price_prec}f} (Razón: {exit_reason})", level="INFO")
 
-        # --- 1. Obtener Datos de la Posición a Cerrar ---
         open_positions = self._position_state.get_open_logical_positions(side)
         if not (0 <= position_index < len(open_positions)):
             result['message'] = f"Índice {position_index} fuera de rango."
@@ -176,17 +179,14 @@ class PositionExecutor:
         pos_to_close = open_positions[position_index]
         size_to_close_float = self._utils.safe_float_convert(pos_to_close.get('size_contracts'), 0.0)
         
-        # El helper ahora también necesita el adaptador para obtener la info del instrumento
         format_qty_result = self._helpers.format_quantity_for_api(size_to_close_float, self._symbol, is_live=True, exchange_adapter=self._exchange)
         if not format_qty_result['success']:
             result['message'] = f"Error formateando cantidad para API: {format_qty_result['error']}"
             return result
         size_to_close_str = format_qty_result['qty_str']
         
-        # --- 2. Ejecutar Orden en el Exchange ---
         execution_success = False
         try:
-            # Crear el objeto de orden estandarizado para el cierre
             order_to_close = StandardOrder(
                 symbol=self._symbol,
                 side="sell" if side == 'long' else "buy",
@@ -194,32 +194,28 @@ class PositionExecutor:
                 quantity_contracts=float(size_to_close_str),
                 reduce_only=True
             )
-
-            # Llamar al método agnóstico de la interfaz de exchange
-            success, response_msg = self._exchange.place_order(order_to_close)
+            
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            success, response_msg = self._exchange.place_order(order_to_close, account_purpose=account_purpose)
             
             if success:
                 execution_success = True
             else:
-                # Algunos exchanges (como Bybit) pueden dar un error específico si la posición
-                # ya no existe. El adaptador podría normalizar esto, o podemos manejarlo aquí.
                 if "position does not exist" in response_msg.lower() or "110001" in response_msg:
-                    execution_success = True # Consideramos éxito para limpiar el estado lógico
+                    execution_success = True
                     memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}).", level="WARN")
                 else:
                     result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
         except Exception as e:
             result['message'] = f"Excepción durante ejecución de cierre: {e}"
 
-        # --- 3. Actualizar Estado Interno y Loguear ---
         if execution_success:
             removed_pos = self._position_state.remove_logical_position(side, position_index)
             if not removed_pos:
-                result['message'] = "Ejecución en Exchange OK (o posición inexistente) pero falló al remover posición lógica."
+                result['message'] = "Ejecución en Exchange OK pero falló al remover posición lógica."
                 memory_logger.log(f"ERROR SEVERE [Exec Close]: {result['message']}", level="ERROR")
                 return result
 
-            # Calcular PNL y reinversión (lógica interna, sin cambios)
             calc_res = self._calculations.calculate_pnl_commission_reinvestment(
                 side, removed_pos['entry_price'], exit_price, removed_pos['size_contracts']
             )
@@ -249,14 +245,12 @@ class PositionExecutor:
     def sync_physical_state(self, side: str):
         """Sincroniza el estado físico interno con el real del exchange."""
         try:
-            # La obtención de posiciones ahora se hace a través de la interfaz
-            standard_positions = self._exchange.get_positions(self._symbol)
-            if standard_positions is None: return # Error en la API
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            standard_positions = self._exchange.get_positions(self._symbol, account_purpose=account_purpose)
+            if standard_positions is None: return
 
-            # Filtrar por el lado correcto
             positions_for_side = [p for p in standard_positions if p.side == side]
             
-            # El helper ahora toma los objetos estandarizados
             state_data = self._helpers.extract_physical_state_from_standard_positions(positions_for_side, self._utils)
             
             if state_data:

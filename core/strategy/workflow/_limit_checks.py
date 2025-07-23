@@ -1,9 +1,9 @@
 """
 Módulo para la Comprobación de Límites y Disyuntores.
 
-v2.1: Corregido el acceso a la API del Position Manager para usar la
-fachada `pm.api` en lugar del objeto de paquete `pm`, resolviendo el
-`AttributeError`.
+v3.0 (Refactor de Hitos):
+- `check_trend_limits` se ha adaptado para leer los límites de finalización
+  directamente desde la configuración de la tendencia activa en el Position Manager.
 """
 import sys
 import os
@@ -50,39 +50,45 @@ def has_global_stop_loss_triggered() -> bool:
 # --- Lógica de Comprobación de Límites ---
 
 def check_trend_limits(current_price: float, current_timestamp: datetime.datetime, operation_mode: str):
-    """Comprueba si se han alcanzado los límites para una tendencia manual activa."""
+    """Comprueba si se han alcanzado los límites de finalización de la tendencia activa."""
     global _trend_limit_hit_reported
     
     if not (position_manager and position_manager.api.is_initialized() and utils):
         return
 
-    if operation_mode != "live_interactive":
-        return
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Obtenemos el estado completo de la tendencia activa.
+    trend_state = position_manager.api.get_trend_state()
+    trend_mode = trend_state.get("mode")
 
-    manual_state = position_manager.api.get_manual_state()
-    current_mode = manual_state.get("mode")
-    if current_mode == "NEUTRAL" or _trend_limit_hit_reported:
-        if current_mode == "NEUTRAL" and _trend_limit_hit_reported:
-            _trend_limit_hit_reported = False
+    # Si no hay tendencia activa (modo NEUTRAL) o el límite ya fue reportado, no hacemos nada.
+    if trend_mode == "NEUTRAL" or _trend_limit_hit_reported:
+        if trend_mode == "NEUTRAL" and _trend_limit_hit_reported:
+            _trend_limit_hit_reported = False # Reseteamos si vuelve a NEUTRAL
         return
 
     limit_reason = None
-    trend_limits = position_manager.api.get_trend_limits()
+    
+    # Extraemos los límites de la configuración de la tendencia.
+    trend_config = trend_state.get('config', {})
+    trade_limit = trend_config.get("limit_trade_count")
+    duration_limit = trend_config.get("limit_duration_minutes")
+    tp_roi_limit = trend_config.get("limit_tp_roi_pct")
+    sl_roi_limit = trend_config.get("limit_sl_roi_pct")
 
-    trade_limit = manual_state.get("limit")
-    if trade_limit is not None and manual_state.get("executed", 0) >= trade_limit:
+    # 1. Comprobar límite de trades
+    if trade_limit is not None and trend_state.get("trades_executed", 0) >= trade_limit:
         limit_reason = f"Límite de {trade_limit} trades alcanzado"
 
-    duration_limit = trend_limits.get("duration_minutes")
+    # 2. Comprobar límite de duración
     if duration_limit and not limit_reason:
-        trend_start_time = trend_limits.get("start_time")
+        trend_start_time = trend_state.get("start_time")
         if trend_start_time:
             elapsed_minutes = (current_timestamp - trend_start_time).total_seconds() / 60.0
             if elapsed_minutes >= duration_limit:
                 limit_reason = f"Límite de duración de {duration_limit} min alcanzado"
 
-    tp_roi_limit = trend_limits.get("tp_roi_pct")
-    sl_roi_limit = trend_limits.get("sl_roi_pct")
+    # 3. Comprobar límites de ROI de tendencia
     if (tp_roi_limit is not None or sl_roi_limit is not None) and not limit_reason:
         summary = position_manager.api.get_position_summary()
         initial_capital = summary.get('initial_total_capital', 0.0)
@@ -91,7 +97,6 @@ def check_trend_limits(current_price: float, current_timestamp: datetime.datetim
             unrealized_pnl = position_manager.api.get_unrealized_pnl(current_price)
             realized_pnl = summary.get('total_realized_pnl_session', 0.0)
             
-            trend_state = position_manager.api.get_trend_state()
             initial_pnl_at_trend_start = trend_state.get("initial_pnl", 0.0)
             total_pnl_trend = (realized_pnl + unrealized_pnl) - initial_pnl_at_trend_start
             
@@ -104,9 +109,10 @@ def check_trend_limits(current_price: float, current_timestamp: datetime.datetim
 
     if limit_reason:
         memory_logger.log(f"!!! LÍMITE DE TENDENCIA ALCANZADO: {limit_reason} !!!", level="INFO")
-        memory_logger.log("Revirtiendo modo a NEUTRAL. No se abrirán más posiciones en esta tendencia.", level="INFO")
+        memory_logger.log("Finalizando tendencia y revirtiendo a modo NEUTRAL.", level="INFO")
         _trend_limit_hit_reported = True
         position_manager.api.end_current_trend_and_ask()
+    # --- FIN DE LA CORRECCIÓN ---
 
 
 def check_session_limits(
