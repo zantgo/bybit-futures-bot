@@ -58,8 +58,13 @@ class PositionManager:
         self._leverage: float = 1.0
         self._max_logical_positions: int = 1
         self._initial_base_position_size_usdt: float = 0.0
-        self._dynamic_base_size_long: float = 0.0
-        self._dynamic_base_size_short: float = 0.0
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se comentan los atributos de tamaño dinámico para eliminar la lógica propensa a errores.
+        # self._dynamic_base_size_long: float = 0.0
+        # self._dynamic_base_size_short: float = 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
+
         self._session_start_time: Optional[datetime.datetime] = None
         self._session_tp_hit: bool = False
         self._global_stop_loss_roi_pct: Optional[float] = None
@@ -154,7 +159,7 @@ class PositionManager:
         Obtiene un resumen completo y FRESCO del estado del PM.
         Esta función es la fuente única de datos para el dashboard.
         """
-        if not self._initialized: return {"error": "PM no inicializado"}
+        if not self._initialized: return {"error": "PM no instanciado"}
         
         ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
@@ -165,15 +170,13 @@ class PositionManager:
         from dataclasses import asdict
         milestones_as_dicts = [asdict(m) for m in self._milestones]
 
-        return {
+        summary_data = {
             "initialized": True,
             "operation_mode": self._operation_mode,
             "trend_status": self.get_trend_state(),
             "leverage": self._leverage,
             "max_logical_positions": self._max_logical_positions,
             "initial_base_position_size_usdt": self._initial_base_position_size_usdt,
-            "dynamic_base_size_long": self._dynamic_base_size_long,
-            "dynamic_base_size_short": self._dynamic_base_size_short,
             "bm_balances": self._balance_manager.get_balances_summary(),
             "open_long_positions_count": len(open_longs),
             "open_short_positions_count": len(open_shorts),
@@ -186,6 +189,12 @@ class PositionManager:
             "all_milestones": milestones_as_dicts,
             "current_market_price": current_market_price,
         }
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se eliminan las claves de tamaño dinámico del resumen ya que los atributos no existen.
+        # "dynamic_base_size_long": self._dynamic_base_size_long,
+        # "dynamic_base_size_short": self._dynamic_base_size_short,
+        # --- FIN DE LA MODIFICACIÓN ---
+        return summary_data
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         total_pnl = 0.0
@@ -450,21 +459,47 @@ class PositionManager:
             self._active_trend = None
 
     def _can_open_new_position(self, side: str) -> bool:
+        """Verifica si es posible abrir una nueva posición lógica."""
         if self._session_tp_hit or not self._active_trend: return False
+        
         trend_config = self._active_trend['config']
         if trend_config.limit_trade_count is not None and self._active_trend['trades_executed'] >= trend_config.limit_trade_count:
             return False
-        if len(self._position_state.get_open_logical_positions(side)) >= self._max_logical_positions:
+            
+        open_positions_count = len(self._position_state.get_open_logical_positions(side))
+        if open_positions_count >= self._max_logical_positions:
             return False
-        margin_needed = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
-        if self._balance_manager.get_available_margin(side) < margin_needed - 1e-6:
+            
+        # Comprobar si hay margen disponible para al menos el tamaño MÍNIMO de orden.
+        # Esto evita intentar abrir posiciones de 0 USDT cuando el balance es muy bajo.
+        if self._balance_manager.get_available_margin(side) < 1.0: # Umbral de ~1 USDT
             return False
+            
         return True
 
     def _open_logical_position(self, side: str, entry_price: float, timestamp: datetime.datetime):
+        """Calcula el margen a usar y delega la apertura al ejecutor."""
         if not self._active_trend: return
+
+        # Calcular el número de slots disponibles
+        open_positions_count = len(self._position_state.get_open_logical_positions(side))
+        available_slots = self._max_logical_positions - open_positions_count
+        if available_slots <= 0: return
+
+        # Calcular margen por slot basado en el capital DISPONIBLE en este momento
+        available_margin = self._balance_manager.get_available_margin(side)
+        margin_per_slot = self._utils.safe_division(available_margin, available_slots)
+        
+        # El margen a usar es el MÍNIMO entre el tamaño base configurado y lo que hay disponible por slot.
+        # Esto asegura que no se arriesgue más de lo configurado y se adapte dinámicamente al capital real.
+        margin_to_use = min(self._initial_base_position_size_usdt, margin_per_slot)
+
+        # Doble verificación para evitar montos demasiado pequeños que la API podría rechazar
+        if margin_to_use < 1.0: # Umbral mínimo de 1 USDT para una orden
+            self._memory_logger.log(f"Apertura omitida: Margen a usar ({margin_to_use:.4f} USDT) es menor al umbral mínimo.", level="WARN")
+            return
+
         trend_config = self._active_trend['config']
-        margin_to_use = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
         result = self._executor.execute_open(
             side=side, entry_price=entry_price, timestamp=timestamp, 
             margin_to_use=margin_to_use, sl_pct=trend_config.individual_sl_pct

@@ -97,8 +97,12 @@ class BalanceManager:
         print(f"[Balance Manager] Balances LÓGICOS inicializados -> OpLong: {self.operational_long_margin:.4f}, OpShort: {self.operational_short_margin:.4f}")
         self._initialized = True
         
-        if self._state_manager:
-            self.recalculate_dynamic_base_sizes()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # El concepto de "tamaño base dinámico" era propenso a errores y ha sido eliminado.
+        # La lógica para determinar el tamaño de la posición ahora reside directamente en el PositionManager.
+        # if self._state_manager:
+        #     self.recalculate_dynamic_base_sizes()
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def _reset_logical_balances(self):
         """Método privado para resetear todos los atributos de balance."""
@@ -170,7 +174,10 @@ class BalanceManager:
             self.operational_long_margin = max(base_size * new_max_slots, self.used_long_margin)
         if trading_mode != "LONG_ONLY":
             self.operational_short_margin = max(base_size * new_max_slots, self.used_short_margin)
-        self.recalculate_dynamic_base_sizes()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # La llamada a recalculate_dynamic_base_sizes ya no es necesaria.
+        # self.recalculate_dynamic_base_sizes()
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def record_real_profit_transfer(self, amount_transferred: float):
         if not self._initialized or not isinstance(amount_transferred, (int, float)) or amount_transferred < 0: return
@@ -191,18 +198,21 @@ class BalanceManager:
     def get_initial_total_capital(self) -> float:
         return self.initial_operational_long_margin + self.initial_operational_short_margin
 
-    def recalculate_dynamic_base_sizes(self):
-        if not self._initialized or not self._state_manager: return
-        try:
-            max_pos = self._state_manager.get_max_logical_positions()
-            base_size_ref = self._state_manager.get_initial_base_position_size()
-            long_size = max(base_size_ref, self._utils.safe_division(self.get_available_margin('long'), max_pos))
-            short_size = max(base_size_ref, self._utils.safe_division(self.get_available_margin('short'), max_pos))
-            self._state_manager.set_dynamic_base_size(long_size, short_size)
-        except Exception:
-            pass
-      
     # --- INICIO DE LA MODIFICACIÓN ---
+    # La función recalculate_dynamic_base_sizes se ha eliminado para simplificar la lógica
+    # de capital y evitar errores de estado obsoleto. La lógica ahora reside en el PositionManager.
+    # def recalculate_dynamic_base_sizes(self):
+    #     if not self._initialized or not self._state_manager: return
+    #     try:
+    #         max_pos = self._state_manager.get_max_logical_positions()
+    #         base_size_ref = self._state_manager.get_initial_base_position_size()
+    #         long_size = max(base_size_ref, self._utils.safe_division(self.get_available_margin('long'), max_pos))
+    #         short_size = max(base_size_ref, self._utils.safe_division(self.get_available_margin('short'), max_pos))
+    #         self._state_manager.set_dynamic_base_size(long_size, short_size)
+    #     except Exception:
+    #         pass
+    # --- FIN DE LA MODIFICACIÓN ---
+      
     def force_update_real_balances_cache(self):
         """
         Fuerza la actualización de la caché de balances reales desde el exchange.
@@ -230,7 +240,6 @@ class BalanceManager:
         
         self._real_balances_cache = new_cache
         self._real_balances_last_update = now
-    # --- FIN DE LA MODIFICACIÓN ---
     
     def get_real_balances_cache(self) -> Dict[str, Any]:
         """Devuelve una copia de la caché de balances reales."""

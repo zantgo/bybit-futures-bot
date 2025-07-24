@@ -3,11 +3,6 @@ Interfaz Pública del Position Manager (PM API).
 
 Este módulo actúa como una fachada (proxy) que expone los métodos de una instancia
 de la clase PositionManager.
-
-v3.0 (Refactor de Hitos):
-- Se eliminan los métodos relacionados con el antiguo modo manual.
-- La API se centra en la gestión de Hitos y en acciones atómicas sobre la sesión
-  y las posiciones, reflejando el nuevo modelo de control jerárquico.
 """
 import datetime
 from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
@@ -138,6 +133,7 @@ def remove_milestone(milestone_id: str) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.remove_milestone(milestone_id)
 
+
 def update_milestone(milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
     """Actualiza los datos de un hito existente."""
     if not _pm_instance: return False, "PM no instanciado"
@@ -157,12 +153,10 @@ def force_end_trend(close_positions: bool = False) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.force_end_trend(close_positions=close_positions)
 
-# --- INICIO DE LA MODIFICACIÓN ---
 def force_balance_update():
     """Delega la llamada para forzar una actualización de la caché de balances reales."""
     if _pm_instance:
         _pm_instance.force_balance_update()
-# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Funciones para uso interno del sistema (Workflow) ---
 
@@ -186,5 +180,4 @@ def end_current_trend_and_ask():
 def get_current_market_price() -> Optional[float]:
     """Obtiene el precio de mercado más reciente conocido por el ticker."""
     if not _pm_instance: return None
-    # Cambiamos el nombre de la llamada para que coincida con el refactor
     return _pm_instance.get_current_market_price()
