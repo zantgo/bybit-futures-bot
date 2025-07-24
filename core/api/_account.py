@@ -28,6 +28,7 @@ try:
     from ._helpers import _handle_api_error_generic
     from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError as e:
+    # Este print se mantiene ya que el logger podría no estar disponible
     print(f"ERROR [Account API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
     utils = None; connection_manager = None
@@ -43,7 +44,7 @@ except ImportError as e:
 def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
     """Obtiene detalles del balance de la Cuenta Unificada (UTA)."""
     if not connection_manager or not config or not utils:
-        print("ERROR [Get Unified Balance]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Unified Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
     # --- MODIFICACIÓN: Usar selección de sesión específica ---
@@ -51,7 +52,7 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Get Unified Balance]: Sesión API no válida para '{account_name}'.")
+        memory_logger.log(f"ERROR [Get Unified Balance]: Sesión API no válida para '{account_name}'.", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
@@ -62,7 +63,7 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
     
     try:
         if not hasattr(session, 'get_wallet_balance'):
-            print("ERROR Fatal [Get Unified Balance]: Sesión API no tiene método 'get_wallet_balance'.")
+            memory_logger.log("ERROR Fatal [Get Unified Balance]: Sesión API no tiene método 'get_wallet_balance'.", level="ERROR")
             return None
             
         response = session.get_wallet_balance(accountType="UNIFIED")
@@ -98,17 +99,17 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
             
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Unified Balance] para '{account_used}': {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Unified Balance] para '{account_used}': {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Unified Balance] para '{account_used}': {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Unified Balance] para '{account_used}': {e}", level="ERROR")
         traceback.print_exc()
         return None
 
 def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Dict[str, float]]]:
     """Obtiene detalles del balance de la Cuenta de Fondos (FUND)."""
     if not connection_manager or not config or not utils:
-        print("ERROR [Get Funding Balance]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Funding Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
     # --- MODIFICACIÓN: Usar selección de sesión específica ---
@@ -116,7 +117,7 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Get Funding Balance]: Sesión API no válida para '{account_name}'.")
+        memory_logger.log(f"ERROR [Get Funding Balance]: Sesión API no válida para '{account_name}'.", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
@@ -127,7 +128,7 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
     
     try:
         if not hasattr(session, 'get_coins_balance'):
-            print("ERROR Fatal [Get Funding Balance]: Sesión API no tiene método 'get_coins_balance'.")
+            memory_logger.log("ERROR Fatal [Get Funding Balance]: Sesión API no tiene método 'get_coins_balance'.", level="ERROR")
             return None
             
         response = session.get_coins_balance(accountType="FUND")
@@ -153,10 +154,10 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
             
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Funding Balance] para '{account_used}': {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Funding Balance] para '{account_used}': {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Funding Balance] para '{account_used}': {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Funding Balance] para '{account_used}': {e}", level="ERROR")
         traceback.print_exc()
         return None
 
@@ -165,10 +166,10 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
 def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None, account_name: Optional[str] = None) -> Optional[dict]:
     """Obtiene el estado de una orden específica usando get_order_history (v5 API)."""
     if not connection_manager or not config:
-        print("ERROR [Get Order Status]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Order Status]: Dependencias no disponibles.", level="ERROR")
         return None
     if not order_id and not order_link_id:
-        print("ERROR [Get Order Status]: Debe proporcionar order_id o order_link_id.")
+        memory_logger.log("ERROR [Get Order Status]: Debe proporcionar order_id o order_link_id.", level="ERROR")
         return None
         
     # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
@@ -176,7 +177,7 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Get Order Status]: No se pudo obtener una sesión API válida (solicitada: {account_name}).")
+        memory_logger.log(f"ERROR [Get Order Status]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
@@ -196,7 +197,7 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
     
     try:
         if not hasattr(session, 'get_order_history'):
-            print("ERROR Fatal [Get Order Status]: Sesión API no tiene método 'get_order_history'.")
+            memory_logger.log("ERROR Fatal [Get Order Status]: Sesión API no tiene método 'get_order_history'.", level="ERROR")
             return None
             
         response = session.get_order_history(**params)
@@ -224,17 +225,17 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
                 
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Order Status]: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Order Status]: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Order Status]: {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Order Status]: {e}", level="ERROR")
         traceback.print_exc()
         return None
 
 def get_active_position_details_api(symbol: str, account_name: Optional[str] = None) -> Optional[List[dict]]:
     """Obtiene detalles de la(s) posición(es) activas para un símbolo (v5 API)."""
     if not connection_manager or not config or not utils:
-        print("ERROR [Get Position]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Position]: Dependencias no disponibles.", level="ERROR")
         return None
         
     # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
@@ -242,7 +243,7 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Get Position]: No se pudo obtener una sesión API válida (solicitada: {account_name}).")
+        memory_logger.log(f"ERROR [Get Position]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
@@ -254,7 +255,7 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
     
     try:
         if not hasattr(session, 'get_positions'):
-            print("ERROR Fatal [Get Position]: Sesión API no tiene método 'get_positions'.")
+            memory_logger.log("ERROR Fatal [Get Position]: Sesión API no tiene método 'get_positions'.", level="ERROR")
             return None
             
         response = session.get_positions(**params)
@@ -272,18 +273,18 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
                     # --- FIN DE LA MODIFICACIÓN ---
                     return active_positions
                 else:
-                    memory_logger.log(f"INFO [Get Position]: No hay posiciones activas para {symbol}.", level="INFO")
+                    memory_logger.log(f"INFO [Get Position]: No hay posiciones activas para {symbol} en '{account_used}'.", level="INFO")
                     return []
             else:
-                memory_logger.log(f"INFO [Get Position]: Lista de posiciones vacía para {symbol}.", level="INFO")
+                memory_logger.log(f"INFO [Get Position]: Lista de posiciones vacía para {symbol} en '{account_used}'.", level="INFO")
                 return []
                 
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Position]: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Position]: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Position]: {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Position]: {e}", level="ERROR")
         traceback.print_exc()
         return None
 
@@ -292,18 +293,18 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
     Obtiene el historial de ejecuciones (trades) para una orden específica (v5 API).
     """
     if not connection_manager or not config:
-        print("ERROR [Get Executions]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Executions]: Dependencias no disponibles.", level="ERROR")
         return None
         
     # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
     session, account_used = connection_manager.get_session_for_operation(purpose='general')
     if not session:
-        print("ERROR [Get Executions]: No se pudo obtener sesión API principal.")
+        memory_logger.log("ERROR [Get Executions]: No se pudo obtener sesión API principal.", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
     if not hasattr(session, 'get_executions'):
-        print("ERROR Fatal [Get Executions]: Sesión API no tiene método 'get_executions'.")
+        memory_logger.log("ERROR Fatal [Get Executions]: Sesión API no tiene método 'get_executions'.", level="ERROR")
         return None
 
     params = {
@@ -335,9 +336,9 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
             
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Executions] para orden {order_id}: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Executions] para orden {order_id}: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Executions] para orden {order_id}: {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Executions] para orden {order_id}: {e}", level="ERROR")
         traceback.print_exc()
         return None

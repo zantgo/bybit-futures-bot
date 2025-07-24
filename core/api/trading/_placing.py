@@ -1,5 +1,3 @@
-# core/api/trading/_placing.py
-
 """
 Módulo para la Colocación de Órdenes.
 
@@ -54,10 +52,10 @@ def place_market_order(
         Optional[dict]: La respuesta de la API si la orden es aceptada, o None si hay un error previo.
     """
     if not (connection_manager and config):
-        print("ERROR [Place Order]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Place Order]: Dependencias no disponibles.", level="ERROR")
         return None
     if side not in ["Buy", "Sell"]:
-        print(f"ERROR [Place Order]: Lado inválido '{side}'.")
+        memory_logger.log(f"ERROR [Place Order]: Lado inválido '{side}'.", level="ERROR")
         return None
 
     # 1. Validar y formatear la cantidad usando el helper
@@ -67,7 +65,7 @@ def place_market_order(
         reduce_only=reduce_only
     )
     if qty_str_api is None:
-        # El helper ya habrá impreso el error específico
+        # El helper ya habrá logueado el error específico
         return None
 
     # 2. Obtener la sesión API correcta para la operación
@@ -78,7 +76,7 @@ def place_market_order(
         specific_account=account_name
     )
     if not session:
-        print("ERROR [Place Order]: No se pudo obtener una sesión API válida para la operación.")
+        memory_logger.log("ERROR [Place Order]: No se pudo obtener una sesión API válida para la operación.", level="ERROR")
         return None
 
     # 3. Construir los parámetros de la orden
@@ -120,9 +118,9 @@ def place_market_order(
             
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Place Order]: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Place Order]: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Place Order]: {e}")
+        memory_logger.log(f"ERROR Inesperado [Place Order]: {e}", level="ERROR")
         traceback.print_exc()
         return None

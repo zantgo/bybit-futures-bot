@@ -34,7 +34,10 @@ def show_config_editor_screen(config_module: Any) -> bool:
     """
     Muestra la pantalla de edición y devuelve True si se guardaron cambios, False si no.
     """
+    logger = _deps.get("memory_logger_module")
     if not TerminalMenu:
+        if logger:
+            logger.log("Error: 'simple-term-menu' no está instalado. No se puede mostrar el editor.", level="ERROR")
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return False
 
     # 1. Crear un objeto temporal que es una copia PROFUNDA de la configuración actual.
@@ -91,14 +94,18 @@ def show_config_editor_screen(config_module: Any) -> bool:
         elif action == 'save_back':
             # 2. Si el usuario guarda, aplicamos los cambios al módulo original y al PM.
             pm_api = _deps.get("position_manager_api_module")
-            logger = _deps.get("memory_logger_module")
+            # logger ya fue obtenido al inicio de la función
             _apply_and_log_changes(temp_config, config_module, pm_api, logger)
+            if logger:
+                logger.log("Cambios guardados y aplicados en la sesión.", level="INFO")
             print("\nCambios guardados y aplicados en la sesión.")
             time.sleep(1.5)
             return True # Señaliza que se guardaron cambios
             
         elif action == 'cancel_back' or choice_index is None:
             # 3. Si cancela, simplemente salimos. La copia se descarta.
+            if logger:
+                logger.log("Cambios en la configuración descartados.", level="INFO")
             print("\nCambios descartados.")
             time.sleep(1.5)
             return False # Señaliza que no se guardaron cambios

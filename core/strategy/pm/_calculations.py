@@ -18,6 +18,7 @@ try:
     if project_root not in sys.path: sys.path.insert(0, project_root)
     import config as config
     from core import _utils
+    from core.logging import memory_logger
 except ImportError as e:
     print(f"ERROR [Position Calculations Import]: No se pudo importar core.config o core.utils: {e}")
     # Definir stubs/dummies si las importaciones fallan, para que las funciones no fallen catastróficamente
@@ -29,10 +30,16 @@ except ImportError as e:
     _utils = type('obj', (object,), {
         'safe_division': lambda num, den, default=0.0: (num / den) if den and den != 0 else default
     })()
+    class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+    memory_logger = MemoryLoggerFallback()
 except Exception as e_imp:
      print(f"ERROR inesperado importando en position_calculations: {e_imp}")
      config = type('obj', (object,), {})()
      _utils = None
+     class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+     memory_logger = MemoryLoggerFallback()
 
 
 # --- Funciones de Cálculo ---
@@ -73,10 +80,10 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
             sl_price = entry_price * (1 + sl_pct / 100.0)
             return sl_price
         else:
-            print(f"WARN [Calc SL]: Lado '{side}' inválido.")
+            memory_logger.log(f"WARN [Calc SL]: Lado '{side}' inválido.", level="WARN")
             return None
     except Exception as e:
-        print(f"ERROR [Calc SL]: Excepción calculando SL: {e}")
+        memory_logger.log(f"ERROR [Calc SL]: Excepción calculando SL: {e}", level="ERROR")
         return None
 
 def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: float) -> Optional[float]:
@@ -143,7 +150,7 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
                 amount_reinvested = pnl_net_usdt * reinvest_fraction
                 amount_transferable = pnl_net_usdt - amount_reinvested
         except Exception as e:
-            print(f"ERROR [Calc PNL]: Excepción calculando PNL: {e}")
+            memory_logger.log(f"ERROR [Calc PNL]: Excepción calculando PNL: {e}", level="ERROR")
             pnl_gross_usdt, commission_usdt, pnl_net_usdt, amount_reinvested, amount_transferable = 0.0, 0.0, 0.0, 0.0, 0.0
     
     return {

@@ -19,12 +19,16 @@ try:
     from ._logical_table import LogicalPositionTable
     from ._entities import LogicalPosition, PhysicalPosition
     from core.exchange import AbstractExchange
+    from core.logging import memory_logger
 except ImportError:
     # Fallbacks
     class LogicalPositionTable: pass
     class LogicalPosition: pass
     class PhysicalPosition: pass
     class AbstractExchange: pass
+    class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+    memory_logger = MemoryLoggerFallback()
 
 
 class PositionState:
@@ -64,7 +68,7 @@ class PositionState:
 
         # Validar dependencias para las tablas lógicas
         if not all([self._config, self._utils, self._exchange, LogicalPositionTable]):
-            print("ERROR CRITICO [PS Init]: Faltan dependencias para LogicalPositionTable.")
+            memory_logger.log("ERROR CRITICO [PS Init]: Faltan dependencias para LogicalPositionTable.", level="ERROR")
             return
 
         try:
@@ -87,7 +91,7 @@ class PositionState:
             print("[Position State] Estado y Tablas Lógicas inicializados.")
 
         except Exception as e:
-            print(f"ERROR CRITICO [PS Init]: Falló la inicialización de LogicalPositionTable: {e}")
+            memory_logger.log(f"ERROR CRITICO [PS Init]: Falló la inicialización de LogicalPositionTable: {e}", level="ERROR")
             traceback.print_exc()
             self._initialized = False
 

@@ -26,9 +26,11 @@ try:
     from ._helpers import _handle_api_error_generic
     from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError as e:
+    # Este print se mantiene ya que el logger podría no estar disponible
     print(f"ERROR [Market Data API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
     connection_manager = None
+    # Usamos un logger de fallback si el principal falla
     memory_logger = type('obj', (object,), {'log': print})()
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
@@ -47,7 +49,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
     """Obtiene información del instrumento (precisión, mínimos) desde la API o caché."""
     global _instrument_info_cache
     if not connection_manager or not config:
-        print("ERROR [Get Instrument Info]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Get Instrument Info]: Dependencias no disponibles.", level="ERROR")
         return None
         
     cache_key = f"{category}_{symbol}"
@@ -63,7 +65,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         purpose='market_data'
     )
     if not session:
-        print("ERROR [Get Instrument Info]: No se pudo obtener una sesión API válida.")
+        memory_logger.log("ERROR [Get Instrument Info]: No se pudo obtener una sesión API válida.", level="ERROR")
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
@@ -75,7 +77,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
     
     try:
         if not hasattr(session, 'get_instruments_info'):
-            print("ERROR Fatal [Get Instrument Info]: Sesión API no tiene método 'get_instruments_info'.")
+            memory_logger.log("ERROR Fatal [Get Instrument Info]: Sesión API no tiene método 'get_instruments_info'.", level="ERROR")
             return None
             
         response = session.get_instruments_info(**params)
@@ -99,7 +101,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
                 }
                 
                 if not extracted_info.get('qtyStep') or not extracted_info.get('minOrderQty'):
-                    print(f"WARN [Get Instrument Info]: Datos qtyStep/minOrderQty incompletos para {symbol}.")
+                    memory_logger.log(f"WARN [Get Instrument Info]: Datos qtyStep/minOrderQty incompletos para {symbol}.", level="WARN")
                 
                 memory_logger.log(f"ÉXITO [Get Instrument Info]: Datos obtenidos para {symbol}.", level="INFO")
                 _instrument_info_cache[cache_key] = {'timestamp': now, 'data': extracted_info}
@@ -110,9 +112,9 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
                 
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Get Instrument Info] para {symbol}: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Get Instrument Info] para {symbol}: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Get Instrument Info] para {symbol}: {e}")
+        memory_logger.log(f"ERROR Inesperado [Get Instrument Info] para {symbol}: {e}", level="ERROR")
         traceback.print_exc()
         return None

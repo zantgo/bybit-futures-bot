@@ -1,5 +1,3 @@
-# core/api/trading/_canceling.py
-
 """
 Módulo para la Cancelación de Órdenes.
 
@@ -49,10 +47,10 @@ def cancel_order(
                          Devuelve None si ocurre un error antes de la llamada a la API.
     """
     if not connection_manager or not config:
-        print("ERROR [Cancel Order]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Cancel Order]: Dependencias no disponibles.", level="ERROR")
         return None
     if not order_id and not order_link_id:
-        print("ERROR [Cancel Order]: Debe proporcionar order_id o order_link_id.")
+        memory_logger.log("ERROR [Cancel Order]: Debe proporcionar order_id o order_link_id.", level="ERROR")
         return None
         
     # 1. Obtener la sesión API correcta para la operación
@@ -61,7 +59,7 @@ def cancel_order(
         specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Cancel Order]: No se pudo obtener sesión API válida (solicitada: {account_name}).")
+        memory_logger.log(f"ERROR [Cancel Order]: No se pudo obtener sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
         
     # 2. Construir los parámetros
@@ -95,9 +93,9 @@ def cancel_order(
             
     except (InvalidRequestError, FailedRequestError) as api_err:
         status_code = getattr(api_err, 'status_code', 'N/A')
-        print(f"ERROR API [Cancel Order]: {api_err} (Status: {status_code})")
+        memory_logger.log(f"ERROR API [Cancel Order]: {api_err} (Status: {status_code})", level="ERROR")
         return None
     except Exception as e:
-        print(f"ERROR Inesperado [Cancel Order]: {e}")
+        memory_logger.log(f"ERROR Inesperado [Cancel Order]: {e}", level="ERROR")
         traceback.print_exc()
         return None

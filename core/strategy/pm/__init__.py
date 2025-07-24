@@ -20,7 +20,7 @@ from . import _api as api
 from ._balance import BalanceManager
 from ._position_state import PositionState
 from ._executor import PositionExecutor
-from ._manager import PositionManager
+from .manager import PositionManager
 
 # --- Control de lo que se exporta con 'from core.strategy.pm import *' ---
 # Definir __all__ para una API de paquete limpia y explícita.

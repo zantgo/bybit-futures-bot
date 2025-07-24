@@ -1,5 +1,3 @@
-# core/api/_helpers.py
-
 """
 Módulo de funciones auxiliares para el paquete de la API.
 
@@ -25,6 +23,7 @@ if __name__ != "__main__":
 try:
     from core.logging import memory_logger
 except ImportError as e:
+    # Este print es aceptable, ya que el logger no estaría disponible para loguear su propio error de importación.
     print(f"ERROR [API Helpers Import]: No se pudo importar módulo necesario: {e}")
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
@@ -41,7 +40,7 @@ def _get_qty_precision_from_step(step_str: str) -> int:
     para mayor robustez y precisión.
     """
     if not isinstance(step_str, str) or not step_str.strip():
-        print(f"WARN [_get_qty_precision]: qtyStep inválido o vacío ('{step_str}'). Asumiendo 0 decimales.")
+        memory_logger.log(f"WARN [_get_qty_precision]: qtyStep inválido o vacío ('{step_str}'). Asumiendo 0 decimales.", level="WARN")
         return 0
     try:
         # Usar Decimal para manejar correctamente todos los formatos numéricos
@@ -49,7 +48,7 @@ def _get_qty_precision_from_step(step_str: str) -> int:
 
         # Si el valor no es finito (inf, nan) o es cero, no se puede determinar la precisión.
         if not step_decimal.is_finite():
-            print(f"WARN [_get_qty_precision]: qtyStep no es un número finito ('{step_str}'). Asumiendo 0.")
+            memory_logger.log(f"WARN [_get_qty_precision]: qtyStep no es un número finito ('{step_str}'). Asumiendo 0.", level="WARN")
             return 0
 
         # El exponente del Decimal nos da directamente el número de decimales.
@@ -60,7 +59,7 @@ def _get_qty_precision_from_step(step_str: str) -> int:
             return 0
 
     except InvalidOperation:
-        print(f"WARN [_get_qty_precision]: No se pudo convertir qtyStep ('{step_str}') a Decimal. Asumiendo 0.")
+        memory_logger.log(f"WARN [_get_qty_precision]: No se pudo convertir qtyStep ('{step_str}') a Decimal. Asumiendo 0.", level="WARN")
         return 0
 
 def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool:

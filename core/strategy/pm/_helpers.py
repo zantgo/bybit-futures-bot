@@ -15,9 +15,13 @@ from typing import Optional, Dict, Any, List, TYPE_CHECKING
 # Estas dependencias son inyectadas/configuradas por el runner al inicio.
 try:
     from core.exchange import AbstractExchange, StandardPosition
+    from core.logging import memory_logger
 except ImportError:
     class AbstractExchange: pass
     class StandardPosition: pass
+    class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+    memory_logger = MemoryLoggerFallback()
 
 if TYPE_CHECKING:
     import config as cfg_mod
@@ -39,7 +43,7 @@ def set_dependencies(config_module: Any, utils_module: Any):
 def format_pos_for_summary(pos: Dict[str, Any]) -> Dict[str, Any]:
     """Formatea un diccionario de posición lógica para el resumen de la TUI."""
     if not _utils or not _config: 
-         print("WARN [Helper Format Summary]: Módulo utils o config no disponible.")
+         memory_logger.log("WARN [Helper Format Summary]: Módulo utils o config no disponible.", level="WARN")
          return pos 
 
     try:
@@ -68,7 +72,7 @@ def format_pos_for_summary(pos: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         pos_id_raw_err = pos.get('id', 'N/A')
         pos_id_str_err = str(pos_id_raw_err)
-        print(f"ERROR [Helper Format Summary]: Formateando posición {pos_id_str_err}: {e}")
+        memory_logger.log(f"ERROR [Helper Format Summary]: Formateando posición {pos_id_str_err}: {e}", level="ERROR")
         return {'id': pos_id_str_err[-6:], 'error': f'Formato fallido: {e}'}
 
 def calculate_and_round_quantity(
@@ -109,7 +113,7 @@ def calculate_and_round_quantity(
         min_order_qty = instrument_info.min_order_size
     else:
         # Fallback a la configuración si la llamada a la API falla
-        print(f"WARN [Helper Qty]: No se pudo obtener instrument info. Usando defaults de config.py.")
+        memory_logger.log(f"WARN [Helper Qty]: No se pudo obtener instrument info. Usando defaults de config.py.", level="WARN")
         qty_precision = int(getattr(_config, 'DEFAULT_QTY_PRECISION', 3))
         min_order_qty = float(getattr(_config, 'DEFAULT_MIN_ORDER_QTY', 0.001))
 
@@ -158,7 +162,7 @@ def format_quantity_for_api(
     if instrument_info:
         qty_precision = instrument_info.quantity_precision
     else:
-        print(f"WARN [Helper Format Qty]: No se pudo obtener instrument info. Usando default de config.py.")
+        memory_logger.log(f"WARN [Helper Format Qty]: No se pudo obtener instrument info. Usando default de config.py.", level="WARN")
         qty_precision = int(getattr(_config, 'DEFAULT_QTY_PRECISION', 3))
 
     result['precision'] = qty_precision
@@ -185,7 +189,7 @@ def extract_physical_state_from_standard_positions(
     Extrae y calcula el estado físico agregado desde una lista de objetos StandardPosition.
     """
     if not utils_module:
-        print("ERROR [Helper Extract Standard]: Módulo utils no disponible.")
+        memory_logger.log("ERROR [Helper Extract Standard]: Módulo utils no disponible.", level="ERROR")
         return None
 
     if not positions:
@@ -207,7 +211,7 @@ def extract_physical_state_from_standard_positions(
             'timestamp': datetime.datetime.now()
         }
     except Exception as e:
-         print(f"ERROR [Helper Extract Standard]: Excepción calculando agregados: {e}")
+         memory_logger.log(f"ERROR [Helper Extract Standard]: Excepción calculando agregados: {e}", level="ERROR")
          import traceback
          traceback.print_exc()
          return None

@@ -43,6 +43,10 @@ def _handle_ticker_change(config_module: Any):
     exchange_adapter = _deps.get('exchange_adapter')
     logger = _deps.get('memory_logger_module')
     if not exchange_adapter or not logger:
+        # --- INICIO DE LA CORRECCIÓN ---
+        if logger:
+            logger.log("ERROR INTERNO: No se pudo acceder al adaptador de exchange para validar el ticker.", level="ERROR")
+        # --- FIN DE LA CORRECCIÓN ---
         print("\nERROR INTERNO: No se pudo acceder al adaptador de exchange para validar el ticker.")
         time.sleep(3)
         return

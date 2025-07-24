@@ -1,5 +1,3 @@
-# core/api/trading/_helpers.py
-
 """
 Módulo de Ayuda para las Operaciones de Trading.
 
@@ -13,6 +11,7 @@ from decimal import Decimal, ROUND_DOWN, InvalidOperation
 # --- Dependencias del Proyecto ---
 # Estas importaciones acceden a módulos que ya están en el sys.path
 import config
+from core.logging import memory_logger
 # Importamos los módulos "primos" en lugar de la fachada `api` completa
 from .._market_data import get_instrument_info
 from .._helpers import _get_qty_precision_from_step
@@ -51,20 +50,20 @@ def _validate_and_round_quantity(
                 # Utiliza el helper de la capa superior de la API para consistencia
                 qty_precision = _get_qty_precision_from_step(qty_step_str)
             except Exception as e:
-                print(f"WARN [_validate_and_round_quantity]: Error procesando qtyStep ({e}). Usando default.")
+                memory_logger.log(f"WARN [_validate_and_round_quantity]: Error procesando qtyStep ({e}). Usando default.", level="WARN")
         if min_qty_str:
             try:
                 min_qty = float(min_qty_str)
             except (ValueError, TypeError):
-                 print(f"WARN [_validate_and_round_quantity]: minOrderQty inválido ({min_qty_str}). Usando default.")
+                 memory_logger.log(f"WARN [_validate_and_round_quantity]: minOrderQty inválido ({min_qty_str}). Usando default.", level="WARN")
     else:
-        print(f"WARN [_validate_and_round_quantity]: No se pudo obtener instrument info. Usando defaults.")
+        memory_logger.log(f"WARN [_validate_and_round_quantity]: No se pudo obtener instrument info. Usando defaults.", level="WARN")
 
     # Realizar el redondeo y la validación
     try:
         qty_float = float(quantity)
         if qty_float <= 1e-9:
-            print(f"ERROR [_validate_and_round_quantity]: Cantidad debe ser positiva '{quantity}'.")
+            memory_logger.log(f"ERROR [_validate_and_round_quantity]: Cantidad debe ser positiva '{quantity}'.", level="ERROR")
             return None
             
         qty_decimal = Decimal(str(qty_float))
@@ -74,15 +73,15 @@ def _validate_and_round_quantity(
         # Validar contra la cantidad mínima de la orden
         if qty_rounded < Decimal(str(min_qty)):
             if not reduce_only:
-                print(f"ERROR [_validate_and_round_quantity]: Cantidad redondeada ({qty_rounded}) es menor que el mínimo requerido ({min_qty}).")
+                memory_logger.log(f"ERROR [_validate_and_round_quantity]: Cantidad redondeada ({qty_rounded}) es menor que el mínimo requerido ({min_qty}).", level="ERROR")
                 return None
             else:
                 # Se permite para órdenes de cierre, incluso si son muy pequeñas
-                print(f"WARN [_validate_and_round_quantity]: Cantidad de cierre ({qty_rounded}) < mínimo ({min_qty}), permitido por reduce_only=True.")
+                memory_logger.log(f"WARN [_validate_and_round_quantity]: Cantidad de cierre ({qty_rounded}) < mínimo ({min_qty}), permitido por reduce_only=True.", level="WARN")
         
         # Devolver el string formateado final
         return str(qty_rounded)
 
     except (ValueError, TypeError, InvalidOperation) as e:
-        print(f"ERROR [_validate_and_round_quantity]: Cantidad inválida o error de redondeo para '{quantity}': {e}.")
+        memory_logger.log(f"ERROR [_validate_and_round_quantity]: Cantidad inválida o error de redondeo para '{quantity}': {e}.", level="ERROR")
         return None

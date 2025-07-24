@@ -8,7 +8,7 @@ import datetime
 from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ._manager import PositionManager
+    from .manager import PositionManager
     from ._entities import Milestone
 
 _pm_instance: Optional['PositionManager'] = None

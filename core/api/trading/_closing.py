@@ -1,5 +1,3 @@
-# core/api/trading/_closing.py
-
 """
 Módulo para el Cierre de Posiciones.
 
@@ -29,7 +27,7 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
         bool: True si todas las órdenes de cierre se enviaron con éxito, False en caso contrario.
     """
     if not (connection_manager and config and get_active_position_details_api):
-        print("ERROR [Close All Positions]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Close All Positions]: Dependencias no disponibles.", level="ERROR")
         return False
         
     # Usamos `get_session_for_operation` para obtener la cuenta correcta.
@@ -38,7 +36,7 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Close All Positions]: No se pudo obtener sesión API válida (solicitada: {account_name}).")
+        memory_logger.log(f"ERROR [Close All Positions]: No se pudo obtener sesión API válida (solicitada: {account_name}).", level="ERROR")
         return False
         
     memory_logger.log(f"Intentando cerrar TODAS las posiciones para {symbol} en cuenta '{target_account}'...", level="INFO")
@@ -46,7 +44,7 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
     # Obtenemos las posiciones activas de la cuenta objetivo
     active_positions = get_active_position_details_api(symbol=symbol, account_name=target_account)
     if active_positions is None:
-        print(f"  ERROR [Close All Positions]: No se pudieron obtener posiciones para '{target_account}'.")
+        memory_logger.log(f"ERROR [Close All Positions]: No se pudieron obtener posiciones para '{target_account}'.", level="ERROR")
         return False
     if not active_positions:
         memory_logger.log(f"INFO [Close All Positions]: No hay posiciones activas para {symbol} en '{target_account}'.", level="INFO")
@@ -77,13 +75,13 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
             account_name=target_account
         )
         if not close_response or close_response.get('retCode') != 0:
-            print(f"  -> FALLO al intentar cerrar {pos_side} PosIdx={pos_idx} en '{target_account}'.")
+            memory_logger.log(f"FALLO al intentar cerrar {pos_side} PosIdx={pos_idx} en '{target_account}'.", level="ERROR")
             all_close_attempts_successful = False
 
     if all_close_attempts_successful:
         memory_logger.log(f"ÉXITO [Close All Positions]: Órdenes de cierre enviadas para todas las posiciones de {symbol} en '{target_account}'.", level="INFO")
     else:
-        print(f"WARN [Close All Positions]: Fallaron algunos intentos de cierre para {symbol}. Verifica los logs.")
+        memory_logger.log(f"WARN [Close All Positions]: Fallaron algunos intentos de cierre para {symbol}. Verifica los logs.", level="WARN")
         
     return all_close_attempts_successful
 
@@ -100,10 +98,10 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
         bool: True si la orden de cierre se envió con éxito o no había posición, False si falló.
     """
     if not (connection_manager and config and get_active_position_details_api):
-        print("ERROR [Close Position By Side]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Close Position By Side]: Dependencias no disponibles.", level="ERROR")
         return False
     if side_to_close not in ["Buy", "Sell"]:
-        print(f"ERROR [Close Position By Side]: Lado a cerrar inválido '{side_to_close}'. Debe ser 'Buy' o 'Sell'.")
+        memory_logger.log(f"ERROR [Close Position By Side]: Lado a cerrar inválido '{side_to_close}'. Debe ser 'Buy' o 'Sell'.", level="ERROR")
         return False
         
     # Obtenemos la sesión para la cuenta objetivo
@@ -111,14 +109,14 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
         purpose='general', specific_account=account_name
     )
     if not session:
-        print(f"ERROR [Close Position By Side]: No se pudo obtener sesión API válida (solicitada: {account_name}).")
+        memory_logger.log(f"ERROR [Close Position By Side]: No se pudo obtener sesión API válida (solicitada: {account_name}).", level="ERROR")
         return False
         
     memory_logger.log(f"Buscando posición del lado '{side_to_close}' para {symbol} en cuenta '{target_account}'...", level="INFO")
 
     active_positions = get_active_position_details_api(symbol=symbol, account_name=target_account)
     if active_positions is None:
-        print(f"  ERROR [Close Position By Side]: No se pudieron obtener posiciones.")
+        memory_logger.log(f"ERROR [Close Position By Side]: No se pudieron obtener posiciones.", level="ERROR")
         return False
 
     # Encontrar la posición específica que coincide con el lado
@@ -149,5 +147,5 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
         memory_logger.log(f"ÉXITO [Close Position By Side]: Orden de cierre para el lado '{side_to_close}' enviada.", level="INFO")
         return True
     else:
-        print(f"  FALLO [Close Position By Side]: No se pudo enviar orden de cierre para el lado '{side_to_close}'.")
+        memory_logger.log(f"FALLO [Close Position By Side]: No se pudo enviar orden de cierre para el lado '{side_to_close}'.", level="ERROR")
         return False

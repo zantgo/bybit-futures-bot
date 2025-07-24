@@ -1,5 +1,3 @@
-# core/api/trading/_leverage.py
-
 """
 Módulo para la gestión del Apalancamiento.
 
@@ -49,7 +47,7 @@ def set_leverage(
         bool: True si la operación fue exitosa para todas las cuentas objetivo, False si alguna falló.
     """
     if not connection_manager or not config:
-        print("ERROR [Set Leverage]: Dependencias no disponibles.")
+        memory_logger.log("ERROR [Set Leverage]: Dependencias no disponibles.", level="ERROR")
         return False
         
     accounts_to_configure = []
@@ -63,7 +61,7 @@ def set_leverage(
         if short_acc: accounts_to_configure.append(short_acc)
 
     if not accounts_to_configure:
-        print("ERROR [Set Leverage]: No se encontraron cuentas de trading válidas para configurar.")
+        memory_logger.log("ERROR [Set Leverage]: No se encontraron cuentas de trading válidas para configurar.", level="ERROR")
         return False
 
     all_successful = True
@@ -71,7 +69,7 @@ def set_leverage(
     for acc_name in set(accounts_to_configure):
         session = connection_manager.get_client(acc_name)
         if not session:
-            print(f"ERROR [Set Leverage]: Sesión API no encontrada para la cuenta '{acc_name}'.")
+            memory_logger.log(f"ERROR [Set Leverage]: Sesión API no encontrada para la cuenta '{acc_name}'.", level="ERROR")
             all_successful = False
             continue
             
@@ -79,7 +77,7 @@ def set_leverage(
             buy_lev_str = str(float(buy_leverage))
             sell_lev_str = str(float(sell_leverage))
         except (ValueError, TypeError):
-            print(f"ERROR [Set Leverage]: Valor de apalancamiento inválido ({buy_leverage}, {sell_leverage}).")
+            memory_logger.log(f"ERROR [Set Leverage]: Valor de apalancamiento inválido ({buy_leverage}, {sell_leverage}).", level="ERROR")
             return False # Es un error de entrada, fallar inmediatamente.
             
         params = {

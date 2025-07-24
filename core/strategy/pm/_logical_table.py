@@ -15,8 +15,13 @@ import pandas as pd
 # --- Dependencias (se inyectan en __init__) ---
 try:
     from core.exchange import AbstractExchange
+    from core.logging import memory_logger
 except ImportError:
     class AbstractExchange: pass
+    class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+    memory_logger = MemoryLoggerFallback()
+
 
 if TYPE_CHECKING:
     import config as cfg_mod
@@ -44,7 +49,7 @@ class LogicalPositionTable:
         """
         if side not in ['long', 'short']: raise ValueError(f"Lado inválido '{side}'.")
         if is_live_mode and not exchange_adapter: 
-            print(f"WARN [LPT Init {side}]: Modo Live pero exchange_adapter no fue proporcionado.")
+            memory_logger.log(f"WARN [LPT Init {side}]: Modo Live pero exchange_adapter no fue proporcionado.", level="WARN")
 
         self.side = side
         self.is_live_mode = is_live_mode
@@ -53,14 +58,14 @@ class LogicalPositionTable:
         self._exchange = exchange_adapter # <-- CAMBIO CLAVE
         self._positions: List[Dict[str, Any]] = []
 
-        print(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}")
+        memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
 
     # --- Métodos de Gestión Básica ---
     def add_position(self, position_data: Dict[str, Any]) -> bool:
         if not isinstance(position_data, dict): 
-            print(f"ERROR [LPT {self.side.upper()} Add]: Dato no es dict."); return False
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: Dato no es dict.", level="ERROR"); return False
         if 'id' not in position_data: 
-            print(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'."); return False
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'.", level="ERROR"); return False
         
         self._positions.append(copy.deepcopy(position_data))
         
@@ -92,9 +97,9 @@ class LogicalPositionTable:
                 # --- FIN DE LA MODIFICACIÓN ---
                 return copy.deepcopy(removed_position)
             else: 
-                print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango."); return None
+                memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango.", level="ERROR"); return None
         except Exception as e: 
-            print(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}"); traceback.print_exc(); return None
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}", level="ERROR"); traceback.print_exc(); return None
 
     def remove_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
         index_to_remove = -1
@@ -105,11 +110,11 @@ class LogicalPositionTable:
         if index_to_remove != -1: 
             return self.remove_position_by_index(index_to_remove)
         else: 
-            print(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado."); return None
+            memory_logger.log(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado.", level="WARN"); return None
 
     def update_position_details(self, position_id: str, details_to_update: Dict[str, Any]) -> bool:
         if not isinstance(details_to_update, dict): 
-            print(f"ERROR [LPT {self.side.upper()} Update]: details no es dict."); return False
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: details no es dict.", level="ERROR"); return False
         found = False
         for i, pos in enumerate(self._positions):
             if pos.get('id') == position_id:
@@ -128,9 +133,9 @@ class LogicalPositionTable:
                     found = True
                     break
                 except Exception as e: 
-                    print(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}"); traceback.print_exc(); return False
+                    memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR"); traceback.print_exc(); return False
         if not found: 
-            print(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.")
+            memory_logger.log(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.", level="WARN")
         return found
 
     # --- Métodos de Acceso y Cálculo ---
@@ -148,9 +153,9 @@ class LogicalPositionTable:
             if 0 <= index < len(self._positions): 
                 return copy.deepcopy(self._positions[index])
             else: 
-                print(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango."); return None
+                memory_logger.log(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango.", level="WARN"); return None
         except Exception as e: 
-            print(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}"); return None
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}", level="ERROR"); return None
 
     def get_count(self) -> int:
         return len(self._positions)
@@ -204,7 +209,7 @@ class LogicalPositionTable:
                  price_prec = int(getattr(config_to_use, 'PRICE_PRECISION', 4))
                  qty_prec = int(getattr(config_to_use, 'DEFAULT_QTY_PRECISION', 3))
              except Exception: 
-                 print("WARN [LPT Display]: Error obteniendo precisiones config."); price_prec = 4; qty_prec = 3
+                 memory_logger.log("WARN [LPT Display]: Error obteniendo precisiones config.", level="WARN"); price_prec = 4; qty_prec = 3
         
         for pos in self._positions:
             entry_ts = pos.get('entry_timestamp')
@@ -232,5 +237,5 @@ class LogicalPositionTable:
                  print("(Tabla vacía)")
                  print("-" * 60)
         except Exception as e_df: 
-            print(f"ERROR [LPT Display]: Creando DataFrame: {e_df}")
+            memory_logger.log(f"ERROR [LPT Display]: Creando DataFrame: {e_df}", level="ERROR")
             print("-" * 60)

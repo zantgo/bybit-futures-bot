@@ -17,9 +17,13 @@ from typing import Optional, Dict, Any
 try:
     from core.exchange import AbstractExchange
     from core.exchange._models import StandardBalance
+    from core.logging import memory_logger
 except ImportError:
     class AbstractExchange: pass
     class StandardBalance: pass
+    class MemoryLoggerFallback:
+        def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
+    memory_logger = MemoryLoggerFallback()
 
 class BalanceManager:
     """Gestiona los balances lógicos y una caché de balances reales."""
@@ -73,7 +77,7 @@ class BalanceManager:
         Inicializa o resetea los balances lógicos para una nueva sesión en vivo.
         """
         if not all([self._config, self._utils, self._exchange]):
-            print("ERROR CRITICO [BM Init]: Faltan dependencias core.")
+            memory_logger.log("ERROR CRITICO [BM Init]: Faltan dependencias core.", level="ERROR")
             self._initialized = False
             return
 
@@ -127,20 +131,20 @@ class BalanceManager:
         real_long_margin = real_long_balance.total_equity_usd if real_long_balance else 0.0
         real_short_margin = real_short_balance.total_equity_usd if real_short_balance else 0.0
 
-        if real_long_balance is None: print("    ADVERTENCIA (Long): No se pudo obtener el balance real.")
-        if real_short_balance is None: print("    ADVERTENCIA (Short): No se pudo obtener el balance real.")
+        if real_long_balance is None: memory_logger.log("ADVERTENCIA (Long): No se pudo obtener el balance real.", level="WARN")
+        if real_short_balance is None: memory_logger.log("ADVERTENCIA (Short): No se pudo obtener el balance real.", level="WARN")
 
         logical_capital_needed = base_size * slots
         
         if trading_mode in ["LONG_ONLY", "LONG_SHORT"]:
             self.operational_long_margin = min(logical_capital_needed, real_long_margin)
             if logical_capital_needed > real_long_margin:
-                print(f"    ADVERTENCIA (Long): Capital lógico ({logical_capital_needed:.2f}) > real ({real_long_margin:.2f}). Usando real.")
+                memory_logger.log(f"ADVERTENCIA (Long): Capital lógico ({logical_capital_needed:.2f}) > real ({real_long_margin:.2f}). Usando real.", level="WARN")
 
         if trading_mode in ["SHORT_ONLY", "LONG_SHORT"]:
             self.operational_short_margin = min(logical_capital_needed, real_short_margin)
             if logical_capital_needed > real_short_margin:
-                print(f"    ADVERTENCIA (Short): Capital lógico ({logical_capital_needed:.2f}) > real ({real_short_margin:.2f}). Usando real.")
+                memory_logger.log(f"ADVERTENCIA (Short): Capital lógico ({logical_capital_needed:.2f}) > real ({real_short_margin:.2f}). Usando real.", level="WARN")
 
     # --- Métodos Públicos (sin cambios en su lógica interna) ---
     
