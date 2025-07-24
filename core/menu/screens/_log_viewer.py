@@ -1,5 +1,3 @@
-# core/menu/_screens/_log_viewer.py
-
 """
 Módulo para la pantalla "Visor de Logs" de la TUI.
 
@@ -52,7 +50,6 @@ def show_log_viewer():
     """
     if not TerminalMenu or not memory_logger:
         print("\nError: Dependencias de menú no disponibles (TerminalMenu o MemoryLogger).")
-        # Usamos time.sleep aquí porque press_enter_to_continue puede no estar disponible
         import time
         time.sleep(2)
         return
@@ -64,22 +61,21 @@ def show_log_viewer():
         clear_screen()
         print_tui_header("Visor de Logs en Tiempo Real")
         
-        try:
-            # Obtener el tamaño de la terminal para ajustar la cantidad de logs
-            terminal_height = os.get_terminal_size().lines
-            # Dejar espacio para cabecera, título y menú
-            lines_for_logs = max(5, terminal_height - 10)
-        except OSError:
-            # Fallback si no se puede obtener el tamaño de la terminal
-            lines_for_logs = 20
-
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se obtiene el historial completo de logs. El límite de 1000 ya está
+        # gestionado por el propio `memory_logger`.
         logs = memory_logger.get_logs()
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if not logs:
             print("\n  (No hay logs para mostrar)")
         else:
-            logs_to_show = logs[-lines_for_logs:]
-            print("\n  --- Últimos Mensajes (más recientes al final) ---")
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina la lógica de slicing para mostrar todos los logs disponibles.
+            # logs_to_show = logs[-max_lines_to_show:]
+            logs_to_show = logs
+            # --- FIN DE LA MODIFICACIÓN ---
+            print(f"\n  --- Mostrando las últimas {len(logs_to_show)} entradas (más recientes al final) ---")
             for timestamp, level, message in logs_to_show:
                 color_code = ""
                 if level == "ERROR": color_code = "\x1b[91m"  # Rojo brillante
@@ -87,8 +83,9 @@ def show_log_viewer():
                 elif level == "DEBUG": color_code = "\x1b[90m" # Gris
                 reset_code = "\x1b[0m"
                 
-                # Truncar mensajes largos para que no rompan el formato
-                print(f"  {timestamp} [{color_code}{level:<5}{reset_code}] {message[:120]}")
+                # Truncar mensajes largos para que no rompan el formato visual en una sola línea.
+                # El usuario puede hacer scroll horizontal si la terminal lo permite.
+                print(f"  {timestamp} [{color_code}{level:<5}{reset_code}] {message[:200]}")
 
         menu_items = ["[r] Refrescar", "[b] Volver al Menú Principal"]
         title = "\n[r] Refrescar | [b] o [ESC] Volver"

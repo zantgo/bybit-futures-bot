@@ -10,6 +10,11 @@ import time
 import copy
 from typing import Optional, Dict, Any, Tuple, List
 
+# --- INICIO DE LA MODIFICACIÓN ---
+# Importamos timezone para crear datetimes "aware"
+from datetime import timezone
+# --- FIN DE LA MODIFICACIÓN ---
+
 # --- Dependencias del Proyecto (inyectadas) ---
 try:
     from ._entities import Milestone, MilestoneCondition, MilestoneAction, TrendConfig
@@ -87,7 +92,10 @@ class PositionManager:
         self._leverage = getattr(self._config, 'POSITION_LEVERAGE', 1.0)
         self._max_logical_positions = max_pos
         self._initial_base_position_size_usdt = base_size
-        self._session_start_time = datetime.datetime.now()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se crea el timestamp de inicio de sesión como "aware" en UTC.
+        self._session_start_time = datetime.datetime.now(timezone.utc)
+        # --- FIN DE LA MODIFICACIÓN ---
         
         # Límites globales de la sesión (disyuntores)
         self._global_stop_loss_roi_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
@@ -148,17 +156,9 @@ class PositionManager:
         """
         if not self._initialized: return {"error": "PM no inicializado"}
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la llamada a la actualización de balances para que esta función sea rápida
-        # self._balance_manager.force_update_real_balances_cache()
-        # --- FIN DE LA MODIFICACIÓN ---
-        
-        # Forzar obtención del precio de mercado más reciente (bloqueante).
         ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
-        # Usar el precio recién obtenido, o el último conocido como fallback.
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
 
-        # Ensamblar el resto de la información.
         open_longs = self._position_state.get_open_logical_positions('long')
         open_shorts = self._position_state.get_open_logical_positions('short')
         
@@ -186,7 +186,6 @@ class PositionManager:
             "all_milestones": milestones_as_dicts,
             "current_market_price": current_market_price,
         }
-
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         total_pnl = 0.0
@@ -241,12 +240,10 @@ class PositionManager:
     # --- MÉTODOS DE LA API PÚBLICA (SETTERS Y ACCIONES) ---
     # ==============================================================================
     
-    # --- INICIO DE LA MODIFICACIÓN ---
     def force_balance_update(self):
         """Delega la llamada para forzar una actualización de la caché de balances reales."""
         if self._initialized and self._balance_manager:
             self._balance_manager.force_update_real_balances_cache()
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def set_global_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
         """Establece el disyuntor de SL global de la sesión."""
@@ -372,7 +369,7 @@ class PositionManager:
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         price = self.get_current_market_price()
         if not price: return False, "No se pudo obtener el precio de mercado actual."
-        success = self._close_logical_position(side, index, price, datetime.datetime.now(), reason="MANUAL")
+        success = self._close_logical_position(side, index, price, datetime.datetime.now(timezone.utc), reason="MANUAL")
         return (True, f"Orden de cierre para {side.upper()} #{index} enviada.") if success else (False, f"Fallo al enviar orden de cierre.")
 
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> bool:
@@ -383,7 +380,7 @@ class PositionManager:
         if count == 0: return True
         
         for i in range(count - 1, -1, -1):
-            self._close_logical_position(side, i, price, datetime.datetime.now(), reason)
+            self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
         return True
 
     def get_current_market_price(self) -> Optional[float]:
@@ -393,19 +390,16 @@ class PositionManager:
             return None
     
     def add_max_logical_position_slot(self) -> Tuple[bool, str]:
-        """Incrementa el número máximo de posiciones simultáneas."""
         self._max_logical_positions += 1
         return True, f"Slot añadido. Máximo ahora: {self._max_logical_positions}"
 
     def remove_max_logical_position_slot(self) -> Tuple[bool, str]:
-        """Decrementa el número máximo de posiciones, si es seguro hacerlo."""
         if self._max_logical_positions <= 1:
             return False, "No se puede reducir más (mínimo 1)."
         self._max_logical_positions -= 1
         return True, f"Slot eliminado. Máximo ahora: {self._max_logical_positions}"
 
     def set_base_position_size(self, new_size_usdt: float) -> Tuple[bool, str]:
-        """Establece el tamaño base de las nuevas posiciones."""
         if new_size_usdt <= 0:
             return False, "El tamaño debe ser positivo."
         self._initial_base_position_size_usdt = new_size_usdt
@@ -413,7 +407,6 @@ class PositionManager:
         return True, f"Tamaño base actualizado a {new_size_usdt:.2f} USDT."
 
     def set_leverage(self, new_leverage: float) -> Tuple[bool, str]:
-        """Establece el apalancamiento para futuras operaciones."""
         if not (1.0 <= new_leverage <= 100.0):
             return False, "Apalancamiento debe estar entre 1.0 y 100.0."
         self._leverage = new_leverage
@@ -436,9 +429,14 @@ class PositionManager:
         if self._active_trend:
             self._memory_logger.log(f"ADVERTENCIA: Se intentó iniciar una nueva tendencia mientras otra estaba activa.", "WARN")
             self._end_trend("Iniciando nueva tendencia")
+        
         self._active_trend = {
             "milestone_id": milestone.id, "config": milestone.action.params,
-            "start_time": datetime.datetime.now(), "trades_executed": 0,
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se crea el timestamp de inicio de tendencia como "aware" en UTC.
+            "start_time": datetime.datetime.now(timezone.utc),
+            # --- FIN DE LA MODIFICACIÓN ---
+            "trades_executed": 0,
             "initial_pnl": self.get_total_pnl_realized()
         }
         mode = self._active_trend['config'].mode

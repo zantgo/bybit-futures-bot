@@ -71,11 +71,15 @@ def initialize(
 
     ta.initialize()
 
-    if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
-        try:
-            signal_logger.initialize_logger()
-        except Exception as e:
-            memory_logger.log(f"ERROR: Inicializando signal_logger: {e}", level="ERROR")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # La inicialización del logger de archivos ahora se gestiona de forma centralizada
+    # al inicio del bot en main.py. Esta llamada ya no es necesaria y causa un error.
+    # if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
+    #     try:
+    #         signal_logger.initialize_logger()
+    #     except Exception as e:
+    #         memory_logger.log(f"ERROR: Inicializando signal_logger: {e}", level="ERROR")
+    # --- FIN DE LA MODIFICACIÓN ---
 
     memory_logger.log("Event Processor: Orquestador inicializado.", level="INFO")
 
@@ -169,11 +173,14 @@ def _print_tick_status_to_console(signal_data: Optional[Dict], current_timestamp
             if getattr(config, 'POSITION_MANAGEMENT_ENABLED', False) and position_manager_api.is_initialized():
                 summary = position_manager_api.get_position_summary()
                 if summary and 'error' not in summary:
-                    manual_status = summary.get('manual_mode_status', {})
-                    limit_str = manual_status.get('limit') or 'inf'
-                    print(f"    Modo Manual: {manual_status.get('mode', 'N/A')} (Trades: {manual_status.get('executed', 0)}/{limit_str})")
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Se reemplaza la lógica obsoleta del "modo manual" por la del estado de la tendencia.
+                    trend_status = summary.get('trend_status', {})
+                    trend_mode = trend_status.get('mode', 'NEUTRAL')
+                    print(f"    Modo de Tendencia: {trend_mode}")
                     print(f"    Longs: {summary.get('open_long_positions_count', 0)}/{summary.get('max_logical_positions', 0)} | Shorts: {summary.get('open_short_positions_count', 0)}/{summary.get('max_logical_positions', 0)}")
                     print(f"    PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
+                    # --- FIN DE LA MODIFICACIÓN ---
                 else:
                     print(f"    Error obteniendo resumen del PM: {summary.get('error', 'N/A')}")
             else:

@@ -8,6 +8,10 @@ v4.0 (Refactor de Hitos):
 """
 import time
 import datetime
+# --- INICIO DE LA MODIFICACIÓN ---
+# Importamos timezone para crear datetimes "aware"
+from datetime import timezone
+# --- FIN DE LA MODIFICACIÓN ---
 from typing import Dict, Any, List
 
 try:
@@ -47,7 +51,7 @@ def _handle_ticker_change(config_module: Any):
     default_symbol = "BTCUSDT"
 
     print(f"\nValidando nuevo ticker '{new_symbol}' con el exchange...")
-    time.sleep(1) # Pequeña pausa para que el usuario lea el mensaje
+    time.sleep(1) 
 
     validation_ticker = exchange_adapter.get_ticker(new_symbol)
 
@@ -157,7 +161,10 @@ def show_dashboard_screen():
             current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
             
             session_start_time = pm_api.get_session_start_time()
-            duration_seconds = (datetime.datetime.now() - session_start_time).total_seconds() if session_start_time else 0
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Usamos datetime.now(timezone.utc) para que ambos objetos sean "aware" y se puedan restar.
+            duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds() if session_start_time else 0
+            # --- FIN DE LA MODIFICACIÓN ---
             duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
             
             ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
