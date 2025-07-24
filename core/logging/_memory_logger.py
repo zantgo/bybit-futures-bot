@@ -1,5 +1,3 @@
-# core/logging/_memory_logger.py
-
 """
 Módulo para capturar y almacenar logs en memoria.
 
@@ -9,10 +7,11 @@ bajo demanda por la TUI.
 """
 import collections
 import datetime
+from datetime import timezone
 from typing import List, Tuple
 
 # --- Estado del Módulo ---
-# Aumentado el tamaño máximo para tener más historial en la TUI
+# Se mantiene el tamaño máximo de 1000 entradas para el historial de la TUI.
 _log_deque = collections.deque(maxlen=1000)
 _is_verbose_mode = False # Por defecto, no se imprimen logs informativos
 
@@ -26,7 +25,10 @@ def log(message: str, level: str = "INFO"):
     Registra un mensaje en la cola de memoria y opcionalmente lo imprime.
     """
     global _log_deque, _is_verbose_mode
-    timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se genera el timestamp en UTC y se formatea para incluir la zona horaria.
+    timestamp = datetime.datetime.now(timezone.utc).strftime('%H:%M:%S (UTC)')
+    # --- FIN DE LA MODIFICACIÓN ---
     log_entry = (timestamp, level, message)
     _log_deque.append(log_entry)
 

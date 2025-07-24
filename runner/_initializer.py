@@ -53,8 +53,12 @@ def initialize_core_components(
 
         ta_manager_module.initialize()
 
-        if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-            open_snapshot_logger_module.initialize_logger()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # La inicialización de los loggers de archivo ahora se maneja centralmente en main.py al inicio.
+        # Esta llamada ya no es necesaria y causaba el AttributeError.
+        # if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
+        #     open_snapshot_logger_module.initialize_logger()
+        # --- FIN DE LA MODIFICACIÓN ---
         
         # Inyectar dependencias en el módulo de helpers del PM
         pm_helpers_module.set_dependencies(config_module, utils_module)

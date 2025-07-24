@@ -78,10 +78,8 @@ def launch_bot(dependencies: Dict[str, Any]):
         if not success:
             raise RuntimeError(f"Fallo en la inicialización del backend: {message}")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         # Inyectamos la instancia del adaptador en las dependencias para que esté disponible para las pantallas.
         _deps['exchange_adapter'] = exchange_adapter
-        # --- FIN DE LA MODIFICACIÓN ---
 
         bot_started = True
         print("\nComponentes Core del bot inicializados con éxito.")
@@ -136,6 +134,14 @@ def launch_bot(dependencies: Dict[str, Any]):
                 position_manager_module=_deps.get("position_manager_api_module"),
                 open_snapshot_logger_module=_deps.get("open_snapshot_logger_module")
             )
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Apagar los hilos de logging de archivos de forma segura
+        logging_package = _deps.get("logging_package")
+        if logging_package and hasattr(logging_package, 'shutdown_loggers'):
+            print("[Main Controller] Deteniendo hilos de logging de archivos...")
+            logging_package.shutdown_loggers()
+        # --- FIN DE LA MODIFICACIÓN ---
         
         print("\nPrograma finalizado. ¡Hasta luego!")
         os._exit(0)

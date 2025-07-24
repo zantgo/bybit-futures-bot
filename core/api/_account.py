@@ -1,5 +1,3 @@
-# core/api/_account.py
-
 """
 Módulo para consultar información de la cuenta desde la API de Bybit.
 
@@ -57,7 +55,10 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
-    memory_logger.log(f"Obteniendo balance UNIFIED para '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido.
+    # memory_logger.log(f"Obteniendo balance UNIFIED para '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         if not hasattr(session, 'get_wallet_balance'):
@@ -89,7 +90,10 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
                 balance_info['usdt_balance'] = utils.safe_float_convert(usdt_data.get('walletBalance'), 0.0)
                 balance_info['usdt_available'] = utils.safe_float_convert(usdt_data.get('availableToWithdraw', usdt_data.get('walletBalance')), 0.0)
             
-            memory_logger.log(f"ÉXITO [Get Unified Balance]: Balance obtenido para '{account_used}'.", level="DEBUG")
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Comentamos el log de nivel DEBUG para reducir el ruido.
+            # memory_logger.log(f"ÉXITO [Get Unified Balance]: Balance obtenido para '{account_used}'.", level="DEBUG")
+            # --- FIN DE LA MODIFICACIÓN ---
             return balance_info
             
     except (InvalidRequestError, FailedRequestError) as api_err:
@@ -116,7 +120,10 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
-    memory_logger.log(f"Obteniendo balance FUND para '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido.
+    # memory_logger.log(f"Obteniendo balance FUND para '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         if not hasattr(session, 'get_coins_balance'):
@@ -136,7 +143,10 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
                     wallet_balance = utils.safe_float_convert(coin_data.get('walletBalance'), 0.0)
                     if coin_symbol and wallet_balance > 1e-9:
                         funding_balances[coin_symbol] = {'walletBalance': wallet_balance}
-                memory_logger.log(f"ÉXITO [Get Funding Balance]: Balances obtenidos para '{account_used}'. {len(funding_balances)} activo(s).", level="DEBUG")
+                # --- INICIO DE LA MODIFICACIÓN ---
+                # Comentamos el log de nivel DEBUG para reducir el ruido.
+                # memory_logger.log(f"ÉXITO [Get Funding Balance]: Balances obtenidos para '{account_used}'. {len(funding_balances)} activo(s).", level="DEBUG")
+                # --- FIN DE LA MODIFICACIÓN ---
             else:
                 memory_logger.log(f"INFO [Get Funding Balance]: Sin datos de balance para '{account_used}'.", level="WARN")
             return funding_balances
@@ -179,7 +189,10 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         params["orderLinkId"] = order_link_id
         id_type = f"LinkID={order_link_id}"
         
-    memory_logger.log(f"Buscando estado orden {id_type} en '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido.
+    # memory_logger.log(f"Buscando estado orden {id_type} en '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         if not hasattr(session, 'get_order_history'):
@@ -197,7 +210,10 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
                 found_id = order_details.get('orderId')
                 found_link_id = order_details.get('orderLinkId')
                 if (order_id and found_id == order_id) or (order_link_id and found_link_id == order_link_id):
-                    memory_logger.log(f"ÉXITO [Get Order Status]: Orden {id_type} encontrada. Estado: {order_details.get('orderStatus', 'N/A')}", level="DEBUG")
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Comentamos el log de nivel DEBUG para reducir el ruido.
+                    # memory_logger.log(f"ÉXITO [Get Order Status]: Orden {id_type} encontrada. Estado: {order_details.get('orderStatus', 'N/A')}", level="DEBUG")
+                    # --- FIN DE LA MODIFICACIÓN ---
                     return order_details
                 else:
                     memory_logger.log(f"INFO [Get Order Status]: Orden encontrada ({found_id}/{found_link_id}) no coincide con buscada ({id_type}).", level="WARN")
@@ -231,7 +247,10 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
     # --- FIN DE LA MODIFICACIÓN ---
         
     params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "symbol": symbol}
-    memory_logger.log(f"Obteniendo detalles de posición para {symbol} en '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido.
+    # memory_logger.log(f"Obteniendo detalles de posición para {symbol} en '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         if not hasattr(session, 'get_positions'):
@@ -247,7 +266,10 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
             if position_list:
                 active_positions = [pos for pos in position_list if utils.safe_float_convert(pos.get('size'), 0.0) > 1e-12]
                 if active_positions:
-                    memory_logger.log(f"ÉXITO [Get Position]: {len(active_positions)} posición(es) activa(s) encontrada(s) para {symbol}.", level="DEBUG")
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Comentamos el log de nivel DEBUG para reducir el ruido.
+                    # memory_logger.log(f"ÉXITO [Get Position]: {len(active_positions)} posición(es) activa(s) encontrada(s) para {symbol}.", level="DEBUG")
+                    # --- FIN DE LA MODIFICACIÓN ---
                     return active_positions
                 else:
                     memory_logger.log(f"INFO [Get Position]: No hay posiciones activas para {symbol}.", level="INFO")
@@ -290,7 +312,10 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
         "orderId": order_id,
         "limit": min(limit, 100)
     }
-    memory_logger.log(f"Consultando API para ejecuciones de Orden ID: {order_id} en '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido.
+    # memory_logger.log(f"Consultando API para ejecuciones de Orden ID: {order_id} en '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         response = session.get_executions(**params)
@@ -302,7 +327,10 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
             return []
         else:
             executions_list = response.get('result', {}).get('list', [])
-            memory_logger.log(f"ÉXITO [Get Executions]: {len(executions_list)} ejecuciones encontradas para Orden ID {order_id}.", level="DEBUG")
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Comentamos el log de nivel DEBUG para reducir el ruido.
+            # memory_logger.log(f"ÉXITO [Get Executions]: {len(executions_list)} ejecuciones encontradas para Orden ID {order_id}.", level="DEBUG")
+            # --- FIN DE LA MODIFICACIÓN ---
             return executions_list
             
     except (InvalidRequestError, FailedRequestError) as api_err:

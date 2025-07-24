@@ -1,5 +1,3 @@
-# core/api/_market_data.py
-
 """
 Módulo para obtener datos de mercado desde la API de Bybit.
 
@@ -69,7 +67,10 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         return None
     # --- FIN DE LA MODIFICACIÓN ---
         
-    memory_logger.log(f"Consultando API para info de {symbol} ({category}) usando '{account_used}'...", level="DEBUG")
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Comentamos el log de nivel DEBUG para reducir el ruido en la consola y logs.
+    # memory_logger.log(f"Consultando API para info de {symbol} ({category}) usando '{account_used}'...", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
     params = {"category": category, "symbol": symbol}
     
     try:

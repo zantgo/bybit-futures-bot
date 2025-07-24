@@ -24,6 +24,7 @@ try:
     from core import api as live_operations
     
     # Paquete de Logging
+    from core import logging as logging_package
     from core.logging import open_position_logger, closed_position_logger, signal_logger, memory_logger
     
     # Componentes de Estrategia
@@ -43,7 +44,7 @@ try:
     # Paquete Runner
     from runner import initialize_bot_backend, shutdown_bot_backend
     
-    # --- NUEVO: Capa de Abstracción de Exchange ---
+    # Capa de Abstracción de Exchange
     from core.exchange import AbstractExchange
     from core.exchange._bybit_adapter import BybitAdapter
 
@@ -61,6 +62,9 @@ if __name__ == "__main__":
     Ensambla el diccionario de dependencias y lanza el controlador principal de la TUI.
     """
     
+    # Inicializar el sistema de logging asíncrono de archivos ANTES que cualquier otra cosa.
+    logging_package.initialize_loggers()
+
     dependencies = {
         # Módulos base
         "config_module": config,
@@ -71,7 +75,10 @@ if __name__ == "__main__":
         "connection_ticker_module": connection_ticker,
         "live_operations_module": live_operations,
         
-        # Módulos de logging
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Módulos de logging (se añade el paquete completo para el apagado)
+        "logging_package": logging_package,
+        # --- FIN DE LA MODIFICACIÓN ---
         "memory_logger_module": memory_logger,
         "open_snapshot_logger_module": open_position_logger,
         "closed_position_logger_module": closed_position_logger,
@@ -98,8 +105,7 @@ if __name__ == "__main__":
         "initialize_bot_backend": initialize_bot_backend,
         "shutdown_bot_backend": shutdown_bot_backend,
 
-        # --- NUEVO: Clases de la capa de Exchange ---
-        # El inicializador las usará para construir el adaptador correcto.
+        # Clases de la capa de Exchange
         "AbstractExchange": AbstractExchange,
         "BybitAdapter": BybitAdapter,
     }
