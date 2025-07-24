@@ -60,9 +60,7 @@ class PositionExecutor:
         
         memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
-    # --- INICIO DE LA CORRECCIÓN ---
     def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float) -> Dict[str, Any]:
-    # --- FIN DE LA CORRECCIÓN ---
         """Orquesta la apertura de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'api_order_id': None, 'logical_position_id': None, 'message': 'Error no especificado'}
         leverage = self._state_manager.get_leverage()
@@ -98,11 +96,8 @@ class PositionExecutor:
         # --- 2. Crear Datos de la Posición Lógica ---
         logical_position_id = str(uuid.uuid4())
         
-        # --- INICIO DE LA CORRECCIÓN ---
         # El `sl_pct` ahora viene como argumento, delegado desde la tendencia activa.
-        # sl_pct = self._state_manager.get_individual_stop_loss_pct() # LÍNEA ORIGINAL
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
-        # --- FIN DE LA CORRECCIÓN ---
 
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
@@ -127,9 +122,6 @@ class PositionExecutor:
                 reduce_only=False
             )
             
-            # NOTA: La lógica de `place_order` en el adaptador ahora debe aceptar el propósito
-            # de la cuenta para saber a qué cuenta de Bybit/Binance enviar la orden.
-            # Asumimos que esta lógica ya está implementada en el adaptador.
             account_purpose = 'longs' if side == 'long' else 'shorts'
             success, order_id_or_error = self._exchange.place_order(order_to_place, account_purpose=account_purpose)
             
@@ -201,9 +193,10 @@ class PositionExecutor:
             if success:
                 execution_success = True
             else:
+                # Comprobar si el error es porque la posición ya no existe
                 if "position does not exist" in response_msg.lower() or "110001" in response_msg:
-                    execution_success = True
-                    memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}).", level="WARN")
+                    execution_success = True # Consideramos éxito si la posición ya está cerrada.
+                    memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
                 else:
                     result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
         except Exception as e:

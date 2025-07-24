@@ -138,12 +138,9 @@ def remove_milestone(milestone_id: str) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.remove_milestone(milestone_id)
 
-
-# --- INICIO DEL CÓDIGO AÑADIDO ---
 def update_milestone(milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
     """Actualiza los datos de un hito existente."""
     if not _pm_instance: return False, "PM no instanciado"
-    # Esta función deberá ser implementada en _manager.py
     if hasattr(_pm_instance, 'update_milestone'):
         return _pm_instance.update_milestone(milestone_id, condition_data, action_data)
     return False, "Función 'update_milestone' no implementada en el manager."
@@ -151,17 +148,21 @@ def update_milestone(milestone_id: str, condition_data: Dict, action_data: Dict)
 def force_trigger_milestone(milestone_id: str) -> Tuple[bool, str]:
     """Fuerza la activación de un hito, ignorando su condición de precio."""
     if not _pm_instance: return False, "PM no instanciado"
-    # Esta función deberá ser implementada en _manager.py
     if hasattr(_pm_instance, 'force_trigger_milestone'):
         return _pm_instance.force_trigger_milestone(milestone_id)
     return False, "Función 'force_trigger_milestone' no implementada en el manager."
 
-# --- INICIO DE LA CORRECCIÓN ---
 def force_end_trend(close_positions: bool = False) -> Tuple[bool, str]:
     """Fuerza la finalización de la tendencia activa y vuelve a NEUTRAL."""
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.force_end_trend(close_positions=close_positions)
-# --- FIN DE LA CORRECCIÓN ---
+
+# --- INICIO DE LA MODIFICACIÓN ---
+def force_balance_update():
+    """Delega la llamada para forzar una actualización de la caché de balances reales."""
+    if _pm_instance:
+        _pm_instance.force_balance_update()
+# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Funciones para uso interno del sistema (Workflow) ---
 
@@ -182,7 +183,8 @@ def end_current_trend_and_ask():
 
 # --- Funciones de Ayuda y Visualización ---
 
-def get_current_price_for_exit() -> Optional[float]:
-    """Obtiene el último precio del ticker para cierres manuales."""
+def get_current_market_price() -> Optional[float]:
+    """Obtiene el precio de mercado más reciente conocido por el ticker."""
     if not _pm_instance: return None
-    return _pm_instance.get_current_price_for_exit()
+    # Cambiamos el nombre de la llamada para que coincida con el refactor
+    return _pm_instance.get_current_market_price()

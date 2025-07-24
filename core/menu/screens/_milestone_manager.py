@@ -127,7 +127,7 @@ def _create_milestone_wizard(pm_api: Any, update_mode: bool = False, milestone_t
     title = "Asistente de Modificación de Hitos" if update_mode else "Asistente de Creación de Hitos"
     clear_screen(); print_tui_header(title)
     
-    current_price = pm_api.get_current_price_for_exit() or 0.0
+    current_price = pm_api.get_current_market_price() or 0.0
     print(f"\nPrecio de Mercado Actual: {current_price:.4f} USDT\n")
     
     default_cond_value = 0.0

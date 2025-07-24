@@ -1,16 +1,13 @@
 """
 Módulo para la Pantalla de Edición de Configuración.
 
-v3.3: Implementado un sistema de estado temporal. Los cambios solo se
-guardan si el usuario selecciona explícitamente "Volver (Cambios guardados)",
-solucionando el bug de guardado no intencionado al cancelar.
+v3.4: Refactorizado para no llamar a la API del PM en vivo y para loguear
+los cambios solo al guardar, mejorando la UX y la consistencia. Implementado
+un sistema de estado temporal.
 """
 from typing import Any, Dict
 import time
-# --- INICIO DE LA CORRECCIÓN ---
-# Necesitamos `copy` para crear una copia temporal de la configuración.
 import copy
-# --- FIN DE LA CORRECCIÓN ---
 
 try:
     from simple_term_menu import TerminalMenu
@@ -33,21 +30,29 @@ def init(dependencies: Dict[str, Any]):
 
 # --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
-def show_config_editor_screen(config_module: Any):
+def show_config_editor_screen(config_module: Any) -> bool:
+    """
+    Muestra la pantalla de edición y devuelve True si se guardaron cambios, False si no.
+    """
     if not TerminalMenu:
-        print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
+        print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return False
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # 1. Crear un objeto temporal que es una copia de la configuración actual.
-    # Usamos un objeto simple para facilitar la copia y modificación.
+    # 1. Crear un objeto temporal que es una copia PROFUNDA de la configuración actual.
     class TempConfig:
         pass
     
     temp_config = TempConfig()
+
+    # Iteramos sobre los atributos del módulo config, pero aplicamos un filtro estricto.
     for attr in dir(config_module):
-        if not attr.startswith('__'):
-            setattr(temp_config, attr, getattr(config_module, attr))
-    # --- FIN DE LA CORRECCIÓN ---
+        # La condición clave: solo nos interesan los atributos en mayúsculas,
+        # que no sean "privados" (no empiecen con '_'), y que no sean funciones.
+        if attr.isupper() and not attr.startswith('_'):
+            value = getattr(config_module, attr)
+            # Una capa extra de seguridad: no intentar copiar funciones o métodos.
+            if not callable(value):
+                # Usamos deepcopy para asegurar que listas o diccionarios se copien por valor.
+                setattr(temp_config, attr, copy.deepcopy(value))
 
     while True:
         menu_items = [
@@ -79,33 +84,68 @@ def show_config_editor_screen(config_module: Any):
         elif action == 'capital':
             _show_pm_capital_config_menu(temp_config)
         elif action == 'limits':
-            pm_api = _deps.get("position_manager_api_module")
-            if pm_api:
-                _show_session_limits_menu(temp_config, pm_api)
-            else:
-                print("\nERROR: No se pudo acceder a la API del Position Manager."); time.sleep(2)
+            _show_session_limits_menu(temp_config)
         elif action == 'help':
             show_help_popup("config_editor")
         
-        # --- INICIO DE LA CORRECCIÓN ---
         elif action == 'save_back':
-            # 2. Si el usuario guarda, aplicamos los cambios al módulo original.
-            for attr in dir(temp_config):
-                if not attr.startswith('__'):
-                    setattr(config_module, attr, getattr(temp_config, attr))
-            print("\nCambios guardados en la configuración de la sesión.")
+            # 2. Si el usuario guarda, aplicamos los cambios al módulo original y al PM.
+            pm_api = _deps.get("position_manager_api_module")
+            logger = _deps.get("memory_logger_module")
+            _apply_and_log_changes(temp_config, config_module, pm_api, logger)
+            print("\nCambios guardados y aplicados en la sesión.")
             time.sleep(1.5)
-            break
+            return True # Señaliza que se guardaron cambios
+            
         elif action == 'cancel_back' or choice_index is None:
-            # 3. Si cancela o usa ESC, simplemente salimos. La copia se descarta.
+            # 3. Si cancela, simplemente salimos. La copia se descarta.
             print("\nCambios descartados.")
             time.sleep(1.5)
-            break
-        # --- FIN DE LA CORRECCIÓN ---
+            return False # Señaliza que no se guardaron cambios
+
+# --- Lógica de Aplicación de Cambios (del v3.4) ---
+
+def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: Any):
+    """Compara la config temporal con la real, aplica los cambios y los loguea."""
+    if not logger: return
+
+    logger.log("Aplicando cambios de configuración desde la TUI...", "WARN")
+    changes_found = False
+
+    for attr in dir(temp_cfg):
+        if not attr.startswith('__') and not callable(getattr(temp_cfg, attr)):
+            new_value = getattr(temp_cfg, attr)
+            old_value = getattr(real_cfg, attr, None)
+            
+            # Comparamos para ver si hubo un cambio real
+            if new_value != old_value:
+                changes_found = True
+                logger.log(f"  -> {attr}: '{old_value}' -> '{new_value}'", "WARN")
+                setattr(real_cfg, attr, new_value)
+                
+                # Lógica para aplicar cambios en vivo en el PM
+                if pm_api:
+                    if attr == 'SESSION_STOP_LOSS_ROI_PCT':
+                        if getattr(real_cfg, 'SESSION_ROI_SL_ENABLED', False):
+                            pm_api.set_global_stop_loss_pct(new_value)
+                    elif attr == 'SESSION_TAKE_PROFIT_ROI_PCT':
+                         if getattr(real_cfg, 'SESSION_ROI_TP_ENABLED', False):
+                            pm_api.set_global_take_profit_pct(new_value)
+
+                    elif attr == 'SESSION_ROI_SL_ENABLED':
+                        pm_api.set_global_stop_loss_pct(getattr(temp_cfg, 'SESSION_STOP_LOSS_ROI_PCT') if new_value else 0)
+                    elif attr == 'SESSION_ROI_TP_ENABLED':
+                        pm_api.set_global_take_profit_pct(getattr(temp_cfg, 'SESSION_TAKE_PROFIT_ROI_PCT') if new_value else 0)
+                        
+                    # Aquí se podrían añadir más llamadas al PM si fuera necesario
+                    # ej: pm_api.set_leverage(new_value) si existiera esa función.
+
+    if not changes_found:
+        logger.log("No se detectaron cambios en la configuración.", "INFO")
 
 # --- SUBMENÚS DE CONFIGURACIÓN ---
-# Todas estas funciones ahora reciben `cfg` que es el objeto `temp_config`.
-# El resto de la lógica interna no necesita cambios.
+# Ahora los submenús solo modifican el objeto `cfg` temporal.
+# No llaman a la API del PM directamente.
 
 def _show_ticker_config_menu(cfg: Any):
     while True:
@@ -194,7 +234,7 @@ def _show_pm_capital_config_menu(cfg: Any):
         else:
             break
 
-def _show_session_limits_menu(cfg: Any, pm_api: Any):
+def _show_session_limits_menu(cfg: Any):
     while True:
         action = getattr(cfg, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
         duration = getattr(cfg, 'SESSION_MAX_DURATION_MINUTES', 0)
@@ -205,6 +245,7 @@ def _show_session_limits_menu(cfg: Any, pm_api: Any):
         tp_roi_status = "Activado" if tp_roi_enabled else "Desactivado"
         sl_roi_val = getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         tp_roi_val = getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
+        
         menu_items = [
             f"[1] Límite de Duración (minutos) (Actual: {duration_str})",
             f"[2] Límite de Trades Totales (Actual: {'Ilimitados' if getattr(cfg, 'SESSION_MAX_TRADES', 0) == 0 else getattr(cfg, 'SESSION_MAX_TRADES', 0)})",
@@ -232,48 +273,19 @@ def _show_session_limits_menu(cfg: Any, pm_api: Any):
             new_val = get_input("\nNuevo límite de trades (0 para ilimitados)", int, getattr(cfg, 'SESSION_MAX_TRADES', 0), min_val=0)
             if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_MAX_TRADES', new_val)
         elif choice == 3:
-            current_status = getattr(cfg, 'SESSION_ROI_SL_ENABLED', False)
-            menu_choice = TerminalMenu(["[1] Activado", "[2] Desactivado"], title=f"\nEstado actual del SL de Sesión: { 'Activado' if current_status else 'Desactivado' }").show()
-            if menu_choice is not None:
-                new_status = (menu_choice == 0)
-                setattr(cfg, 'SESSION_ROI_SL_ENABLED', new_status)
-                if not new_status:
-                    pm_api.set_global_stop_loss_pct(0)
-                    print("\nSL de Sesión DESACTIVADO en el Position Manager.")
-                else:
-                    current_val = getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
-                    pm_api.set_global_stop_loss_pct(current_val)
-                    print(f"\nSL de Sesión ACTIVADO en el PM con valor -{current_val}%.")
-                time.sleep(1.5)
+            setattr(cfg, 'SESSION_ROI_SL_ENABLED', not getattr(cfg, 'SESSION_ROI_SL_ENABLED', False))
         elif choice == 4:
             new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, sl_roi_val, min_val=0.1)
-            if not isinstance(new_val, CancelInput):
-                setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
-                if getattr(cfg, 'SESSION_ROI_SL_ENABLED', False):
-                    pm_api.set_global_stop_loss_pct(new_val)
-                    print(f"\nUmbral de SL en el PM actualizado a -{new_val}%.")
-                    time.sleep(1.5)
-        elif choice == 6:
-            current_status = getattr(cfg, 'SESSION_ROI_TP_ENABLED', False)
-            menu_choice = TerminalMenu(["[1] Activado", "[2] Desactivado"], title=f"\nEstado actual del TP de Sesión: { 'Activado' if current_status else 'Desactivado' }").show()
-            if menu_choice is not None:
-                new_status = (menu_choice == 0)
-                setattr(cfg, 'SESSION_ROI_TP_ENABLED', new_status)
-                if not new_status:
-                    pm_api.set_global_take_profit_pct(0)
-                    print("\nTP de Sesión DESACTIVADO en el Position Manager.")
-                else:
-                    current_val = getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
-                    pm_api.set_global_take_profit_pct(current_val)
-                    print(f"\nTP de Sesión ACTIVADO en el PM con valor +{current_val}%.")
-                time.sleep(1.5)
-        elif choice == 7:
+            if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se ajustan los índices para que coincidan con la posición en la lista menu_items
+        elif choice == 6:  # El botón [5] está en el índice 6 de la lista
+            setattr(cfg, 'SESSION_ROI_TP_ENABLED', not getattr(cfg, 'SESSION_ROI_TP_ENABLED', False))
+        elif choice == 7:  # El botón [6] está en el índice 7 de la lista
             new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, tp_roi_val, min_val=0.1)
-            if not isinstance(new_val, CancelInput):
-                setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
-                if getattr(cfg, 'SESSION_ROI_TP_ENABLED', False):
-                    pm_api.set_global_take_profit_pct(new_val)
-                    print(f"\nUmbral de TP en el PM actualizado a +{new_val}%.")
-                    time.sleep(1.5)
+            if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
+        # --- FIN DE LA CORRECCIÓN ---
+            
         else:
             break

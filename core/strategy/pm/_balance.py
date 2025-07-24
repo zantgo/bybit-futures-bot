@@ -201,14 +201,18 @@ class BalanceManager:
             self._state_manager.set_dynamic_base_size(long_size, short_size)
         except Exception:
             pass
-
-    def update_real_balances_cache(self):
-        """Actualiza la caché de balances reales si ha expirado, usando el adaptador."""
-        if not self._initialized or not self._exchange: return
-        now = time.time()
-        if (now - self._real_balances_last_update) < self._REAL_BALANCES_CACHE_EXPIRY_SECONDS:
+      
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def force_update_real_balances_cache(self):
+        """
+        Fuerza la actualización de la caché de balances reales desde el exchange.
+        Esta función SIEMPRE realiza una llamada a la API si es invocada.
+        """
+        if not self._initialized or not self._exchange:
             return
             
+        now = time.time()
+        
         new_cache = {}
         # Mapeo de nombre de cuenta a propósito para la caché
         account_purposes = {
@@ -226,7 +230,8 @@ class BalanceManager:
         
         self._real_balances_cache = new_cache
         self._real_balances_last_update = now
-
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     def get_real_balances_cache(self) -> Dict[str, Any]:
         """Devuelve una copia de la caché de balances reales."""
         return self._real_balances_cache.copy()

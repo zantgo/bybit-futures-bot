@@ -1,14 +1,9 @@
 """
 Módulo del Position Manager Principal.
 
-v4.1 (Refactor de Hitos y API de Control Completa):
-- Se refactoriza para operar bajo un modelo jerárquico Sesión > Hito > Tendencia.
-- Se elimina el estado de `_manual_mode` y se reemplaza por el estado `_active_trend`.
-- La lógica de apertura de posiciones y gestión de riesgo ahora depende de la
-  configuración de la tendencia activa.
-- Se adapta la gestión de hitos para trabajar con la nueva entidad `TrendConfig`.
-- Se implementan las funciones de control de hitos y tendencias (update, force_trigger, force_end).
-- Se restauran los setters para límites de sesión globales (SL/TP) para completar la API de control estratégico.
+v4.2: get_position_summary ahora realiza una llamada bloqueante para obtener
+el precio de mercado más reciente, asegurando que los datos del dashboard
+sean siempre consistentes y eliminando el lag. API de control completada.
 """
 import datetime
 import time
@@ -120,28 +115,22 @@ class PositionManager:
 
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """Revisa SL y TS para todas las posiciones abiertas en cada tick."""
-        if not self._initialized or not self._executor:
-            return
+        if not self._initialized or not self._executor: return
 
         for side in ['long', 'short']:
             open_positions = self._position_state.get_open_logical_positions(side)
-            if not open_positions:
-                continue
+            if not open_positions: continue
 
-            indices_to_close = []
-            reasons = {}
+            indices_to_close, reasons = [], {}
             for i, pos in enumerate(open_positions):
                 sl_price = pos.get('stop_loss_price')
                 if sl_price and ((side == 'long' and current_price <= sl_price) or (side == 'short' and current_price >= sl_price)):
-                    indices_to_close.append(i)
-                    reasons[i] = "SL"
-                    continue
+                    indices_to_close.append(i); reasons[i] = "SL"; continue
 
                 self._update_trailing_stop(side, pos, current_price)
                 ts_stop_price = pos.get('ts_stop_price')
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or (side == 'short' and current_price >= ts_stop_price)):
-                    indices_to_close.append(i)
-                    reasons[i] = "TS"
+                    indices_to_close.append(i); reasons[i] = "TS"
 
             for index in sorted(list(set(indices_to_close)), reverse=True):
                 self._close_logical_position(side, index, current_price, timestamp, reason=reasons.get(index, "UNKNOWN"))
@@ -153,15 +142,28 @@ class PositionManager:
     def is_initialized(self) -> bool: return self._initialized
 
     def get_position_summary(self) -> dict:
+        """
+        Obtiene un resumen completo y FRESCO del estado del PM.
+        Esta función es la fuente única de datos para el dashboard.
+        """
         if not self._initialized: return {"error": "PM no inicializado"}
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la llamada a la actualización de balances para que esta función sea rápida
+        # self._balance_manager.force_update_real_balances_cache()
+        # --- FIN DE LA MODIFICACIÓN ---
+        
+        # Forzar obtención del precio de mercado más reciente (bloqueante).
+        ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
+        # Usar el precio recién obtenido, o el último conocido como fallback.
+        current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
+
+        # Ensamblar el resto de la información.
         open_longs = self._position_state.get_open_logical_positions('long')
         open_shorts = self._position_state.get_open_logical_positions('short')
         
-        # Usamos asdict para serializar los dataclasses para la TUI
         from dataclasses import asdict
         milestones_as_dicts = [asdict(m) for m in self._milestones]
-        
-        self._balance_manager.update_real_balances_cache()
 
         return {
             "initialized": True,
@@ -181,8 +183,10 @@ class PositionManager:
             "initial_total_capital": self._balance_manager.get_initial_total_capital(),
             "real_account_balances": self._balance_manager.get_real_balances_cache(),
             "session_limits": { "time_limit": self.get_session_time_limit() },
-            "all_milestones": milestones_as_dicts
+            "all_milestones": milestones_as_dicts,
+            "current_market_price": current_market_price,
         }
+
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         total_pnl = 0.0
@@ -237,6 +241,13 @@ class PositionManager:
     # --- MÉTODOS DE LA API PÚBLICA (SETTERS Y ACCIONES) ---
     # ==============================================================================
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def force_balance_update(self):
+        """Delega la llamada para forzar una actualización de la caché de balances reales."""
+        if self._initialized and self._balance_manager:
+            self._balance_manager.force_update_real_balances_cache()
+    # --- FIN DE LA MODIFICACIÓN ---
+
     def set_global_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
         """Establece el disyuntor de SL global de la sesión."""
         self._global_stop_loss_roi_pct = value
@@ -316,23 +327,17 @@ class PositionManager:
         triggered_milestone = next((m for m in self._milestones if m.id == milestone_id), None)
         if not triggered_milestone: return
         
-        # 1. Finalizar la tendencia actual (si la hay)
         self._end_trend("Hito completado")
-        
-        # 2. Actualizar estados del árbol
         parent_id = triggered_milestone.parent_id
         for m in self._milestones:
             if m.id == milestone_id:
                 m.status = 'COMPLETED'
             elif m.parent_id == parent_id and m.status in ['PENDING', 'ACTIVE']:
-                m.status = 'CANCELLED' # Cancela hermanos
+                m.status = 'CANCELLED'
             elif m.parent_id == milestone_id and m.status == 'PENDING':
-                m.status = 'ACTIVE' # Activa hijos directos
+                m.status = 'ACTIVE'
 
-        # 3. Iniciar la nueva tendencia definida por el hito
         self._start_trend(triggered_milestone)
-        
-        # 4. Limpiar hitos antiguos que ya no son relevantes
         self._cleanup_completed_milestones()
         
     def force_trigger_milestone(self, milestone_id: str) -> Tuple[bool, str]:
@@ -365,13 +370,13 @@ class PositionManager:
         return True, "Tendencia activa finalizada."
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
-        price = self.get_current_price_for_exit()
+        price = self.get_current_market_price()
         if not price: return False, "No se pudo obtener el precio de mercado actual."
         success = self._close_logical_position(side, index, price, datetime.datetime.now(), reason="MANUAL")
         return (True, f"Orden de cierre para {side.upper()} #{index} enviada.") if success else (False, f"Fallo al enviar orden de cierre.")
 
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> bool:
-        price = self.get_current_price_for_exit()
+        price = self.get_current_market_price()
         if not price: self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR"); return False
         
         count = len(self._position_state.get_open_logical_positions(side))
@@ -381,42 +386,59 @@ class PositionManager:
             self._close_logical_position(side, i, price, datetime.datetime.now(), reason)
         return True
 
-    def get_current_price_for_exit(self) -> Optional[float]:
+    def get_current_market_price(self) -> Optional[float]:
         try:
             return self._exchange.get_latest_price()
         except (AttributeError, TypeError):
             return None
+    
+    def add_max_logical_position_slot(self) -> Tuple[bool, str]:
+        """Incrementa el número máximo de posiciones simultáneas."""
+        self._max_logical_positions += 1
+        return True, f"Slot añadido. Máximo ahora: {self._max_logical_positions}"
+
+    def remove_max_logical_position_slot(self) -> Tuple[bool, str]:
+        """Decrementa el número máximo de posiciones, si es seguro hacerlo."""
+        if self._max_logical_positions <= 1:
+            return False, "No se puede reducir más (mínimo 1)."
+        self._max_logical_positions -= 1
+        return True, f"Slot eliminado. Máximo ahora: {self._max_logical_positions}"
+
+    def set_base_position_size(self, new_size_usdt: float) -> Tuple[bool, str]:
+        """Establece el tamaño base de las nuevas posiciones."""
+        if new_size_usdt <= 0:
+            return False, "El tamaño debe ser positivo."
+        self._initial_base_position_size_usdt = new_size_usdt
+        self._balance_manager.recalculate_dynamic_base_sizes()
+        return True, f"Tamaño base actualizado a {new_size_usdt:.2f} USDT."
+
+    def set_leverage(self, new_leverage: float) -> Tuple[bool, str]:
+        """Establece el apalancamiento para futuras operaciones."""
+        if not (1.0 <= new_leverage <= 100.0):
+            return False, "Apalancamiento debe estar entre 1.0 y 100.0."
+        self._leverage = new_leverage
+        return True, f"Apalancamiento actualizado a {new_leverage:.1f}x."
     
     # ==============================================================================
     # --- MÉTODOS PRIVADOS DE GESTIÓN DE ESTADO ---
     # ==============================================================================
     
     def _reset_all_states(self):
-        self._initialized = False
-        self._operation_mode = "unknown"
-        self._leverage = 1.0
-        self._max_logical_positions = 1
-        self._initial_base_position_size_usdt = 0.0
-        self._total_realized_pnl_long = 0.0
-        self._total_realized_pnl_short = 0.0
-        self._session_tp_hit = False
-        self._session_start_time = None
-        self._global_stop_loss_roi_pct = None
-        self._global_take_profit_roi_pct = None
-        self._milestones = []
-        self._active_trend = None
+        self._initialized = False; self._operation_mode = "unknown"; self._leverage = 1.0
+        self._max_logical_positions = 1; self._initial_base_position_size_usdt = 0.0
+        self._total_realized_pnl_long = 0.0; self._total_realized_pnl_short = 0.0
+        self._session_tp_hit = False; self._session_start_time = None
+        self._global_stop_loss_roi_pct = None; self._global_take_profit_roi_pct = None
+        self._milestones = []; self._active_trend = None
 
     def _start_trend(self, milestone: Milestone):
         """Activa una nueva tendencia basada en la configuración de un hito."""
         if self._active_trend:
             self._memory_logger.log(f"ADVERTENCIA: Se intentó iniciar una nueva tendencia mientras otra estaba activa.", "WARN")
             self._end_trend("Iniciando nueva tendencia")
-        
         self._active_trend = {
-            "milestone_id": milestone.id,
-            "config": milestone.action.params,
-            "start_time": datetime.datetime.now(),
-            "trades_executed": 0,
+            "milestone_id": milestone.id, "config": milestone.action.params,
+            "start_time": datetime.datetime.now(), "trades_executed": 0,
             "initial_pnl": self.get_total_pnl_realized()
         }
         mode = self._active_trend['config'].mode
@@ -430,61 +452,44 @@ class PositionManager:
             self._active_trend = None
 
     def _can_open_new_position(self, side: str) -> bool:
-        if self._session_tp_hit or not self._active_trend:
-            return False
-            
+        if self._session_tp_hit or not self._active_trend: return False
         trend_config = self._active_trend['config']
-        
         if trend_config.limit_trade_count is not None and self._active_trend['trades_executed'] >= trend_config.limit_trade_count:
             return False
-        
         if len(self._position_state.get_open_logical_positions(side)) >= self._max_logical_positions:
             return False
-            
         margin_needed = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
         if self._balance_manager.get_available_margin(side) < margin_needed - 1e-6:
             return False
-            
         return True
 
     def _open_logical_position(self, side: str, entry_price: float, timestamp: datetime.datetime):
         if not self._active_trend: return
-
-        # Aplicar SL y TS de la tendencia activa
         trend_config = self._active_trend['config']
-        
         margin_to_use = self._dynamic_base_size_long if side == 'long' else self._dynamic_base_size_short
         result = self._executor.execute_open(
-            side=side, 
-            entry_price=entry_price, 
-            timestamp=timestamp, 
-            margin_to_use=margin_to_use,
-            sl_pct=trend_config.individual_sl_pct
+            side=side, entry_price=entry_price, timestamp=timestamp, 
+            margin_to_use=margin_to_use, sl_pct=trend_config.individual_sl_pct
         )
         if result and result.get('success'):
             self._active_trend['trades_executed'] += 1
 
     def _update_trailing_stop(self, side, position_data, current_price):
         if not self._active_trend: return
-
         trend_config = self._active_trend['config']
         activation_pct = trend_config.trailing_stop_activation_pct
         distance_pct = trend_config.trailing_stop_distance_pct
-        
         is_ts_active = position_data.get('ts_is_active', False)
         entry_price = position_data.get('entry_price')
-        
         if not is_ts_active and activation_pct > 0 and entry_price:
             activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
             if (side == 'long' and current_price >= activation_price) or (side == 'short' and current_price <= activation_price):
                 position_data['ts_is_active'] = True
                 position_data['ts_peak_price'] = current_price
-
         if position_data.get('ts_is_active'):
             peak_price = position_data.get('ts_peak_price', current_price)
             if (side == 'long' and current_price > peak_price) or (side == 'short' and current_price < peak_price):
                 position_data['ts_peak_price'] = current_price
-            
             new_stop_price = position_data['ts_peak_price'] * (1 - distance_pct / 100) if side == 'long' else position_data['ts_peak_price'] * (1 + distance_pct / 100)
             position_data['ts_stop_price'] = new_stop_price
             self._position_state.update_logical_position_details(side, position_data['id'], position_data)
@@ -519,13 +524,8 @@ class PositionManager:
         last_completed = completed_milestones[0] if completed_milestones else None
         
         def should_keep(milestone: Milestone) -> bool:
-            # Mantener siempre los hitos que están por cumplirse
-            if milestone.status in ['PENDING', 'ACTIVE']:
-                return True
-            # Mantener el último hito completado para referencia histórica
-            if milestone == last_completed:
-                return True
-            # El resto se puede descartar
+            if milestone.status in ['PENDING', 'ACTIVE']: return True
+            if milestone == last_completed: return True
             return False
 
         initial_count = len(self._milestones)

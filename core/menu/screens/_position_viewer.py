@@ -89,7 +89,7 @@ def _manage_side_positions(side: str, pm_api: Any):
                 return
             
             open_positions = summary.get(f'open_{side}_positions', [])
-            current_price = pm_api.get_current_price_for_exit() or 0.0
+            current_price = pm_api.get_current_market_price() or 0.0
         except Exception as e:
             print(f"Error refrescando datos de posiciones: {e}")
             time.sleep(2)

@@ -13,6 +13,15 @@ import config
 from ._interface import AbstractExchange
 from ._models import StandardOrder, StandardPosition, StandardBalance, StandardInstrumentInfo, StandardTicker
 
+# --- INICIO DE LA MODIFICACIÓN ---
+# Importamos las excepciones que vamos a manejar
+try:
+    from pybit.exceptions import InvalidRequestError, FailedRequestError
+except ImportError:
+    class InvalidRequestError(Exception): pass
+    class FailedRequestError(Exception): pass
+# --- FIN DE LA MODIFICACIÓN ---
+
 class BybitAdapter(AbstractExchange):
     """Implementación del protocolo de Exchange para Bybit."""
 
@@ -43,10 +52,8 @@ class BybitAdapter(AbstractExchange):
         return True
 
     def get_instrument_info(self, symbol: str) -> Optional[StandardInstrumentInfo]:
-        # Esta llamada no depende de la cuenta, así que es simple
         bybit_info = bybit_api.get_instrument_info(symbol)
         if not bybit_info: return None
-        # (El resto de la lógica de traducción permanece igual)
         try:
             qty_step = utils.safe_float_convert(bybit_info.get('qtyStep'), 0.001)
             qty_precision = 0
@@ -104,18 +111,38 @@ class BybitAdapter(AbstractExchange):
         if not session: return None
         
         category = getattr(config, 'CATEGORY_LINEAR', 'linear')
-        response = session.get_tickers(category=category, symbol=symbol)
         
-        if not response or response.get('retCode') != 0: return None
-            
+        # --- INICIO DE LA MODIFICACIÓN ---
         try:
+            response = session.get_tickers(category=category, symbol=symbol)
+            
+            if not response or response.get('retCode') != 0: 
+                # Si la API devuelve un código de error conocido (ej. símbolo no encontrado)
+                # lo logueamos pero no dejamos que crashee.
+                if response:
+                    msg = response.get('retMsg', 'Error desconocido')
+                    code = response.get('retCode', -1)
+                    memory_logger.log(f"[BybitAdapter get_ticker] Error API para '{symbol}': {msg} (Code: {code})", "WARN")
+                return None
+            
             ticker_data = response.get('result', {}).get('list', [])[0]
             price = utils.safe_float_convert(ticker_data.get('lastPrice'))
+            
             if price and price > 0:
                 self._latest_price = price
                 return StandardTicker(timestamp=datetime.datetime.now(datetime.timezone.utc), symbol=symbol, price=price)
+            
             return None
-        except (IndexError, TypeError, KeyError): return None
+
+        except (InvalidRequestError, FailedRequestError) as api_err:
+            # Capturamos la excepción de la librería pybit aquí.
+            memory_logger.log(f"[BybitAdapter get_ticker] Excepción API para '{symbol}': {api_err}", "ERROR")
+            return None
+        except (IndexError, TypeError, KeyError) as e:
+            # Capturamos errores de parseo de la respuesta.
+            memory_logger.log(f"[BybitAdapter get_ticker] Error parseando respuesta para '{symbol}': {e}", "WARN")
+            return None
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def place_order(self, order: StandardOrder, account_purpose: str) -> Tuple[bool, str]:
         account_name = self._purpose_to_account_name_map.get(account_purpose)

@@ -23,11 +23,8 @@ from .._helpers import (
 )
 from .. import _helpers as helpers_module
 
-# --- INICIO DE LA CORRECCIÓN ---
 # Importamos el nuevo gestor de hitos y eliminamos los antiguos.
 from . import _config_editor, _position_viewer, _log_viewer, _milestone_manager
-# from . import _config_editor, _manual_mode, _auto_mode, _position_viewer, _log_viewer
-# --- FIN DE LA CORRECCIÓN ---
 
 try:
     from core.exchange._models import StandardBalance
@@ -36,7 +33,36 @@ except ImportError:
 
 _deps: Dict[str, Any] = {}
 
-# --- Funciones de Ayuda para Renderizado (sin cambios) ---
+
+def _handle_ticker_change(config_module: Any):
+    """Valida y aplica un cambio de ticker, con fallback en caso de error."""
+    exchange_adapter = _deps.get('exchange_adapter')
+    logger = _deps.get('memory_logger_module')
+    if not exchange_adapter or not logger:
+        print("\nERROR INTERNO: No se pudo acceder al adaptador de exchange para validar el ticker.")
+        time.sleep(3)
+        return
+
+    new_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
+    default_symbol = "BTCUSDT"
+
+    print(f"\nValidando nuevo ticker '{new_symbol}' con el exchange...")
+    time.sleep(1) # Pequeña pausa para que el usuario lea el mensaje
+
+    validation_ticker = exchange_adapter.get_ticker(new_symbol)
+
+    if validation_ticker and validation_ticker.price > 0:
+        logger.log(f"TICKER UPDATE: Símbolo cambiado exitosamente a '{new_symbol}'.", "WARN")
+        print(f"ÉXITO: Ticker '{new_symbol}' validado y aplicado correctamente.")
+        time.sleep(2)
+    else:
+        logger.log(f"TICKER UPDATE FAILED: El símbolo '{new_symbol}' no es válido. Revertiendo a '{default_symbol}'.", "ERROR")
+        print(f"\nERROR: El ticker '{new_symbol}' no es válido o no se pudo obtener su precio.")
+        print(f"Revirtiendo al ticker por defecto: '{default_symbol}'.")
+        setattr(config_module, 'TICKER_SYMBOL', default_symbol)
+        time.sleep(3.5)
+
+
 def _print_positions_table(title: str, positions: List[Dict[str, Any]], current_price: float, side: str):
     """Imprime una tabla formateada para las posiciones abiertas."""
     print(f"\n--- {title} ({len(positions)}) " + "-" * (76 - len(title) - 4 - len(str(len(positions)))))
@@ -102,7 +128,7 @@ def show_dashboard_screen():
     wait_animation = ['|', '/', '-', '\\']
     i = 0
     while True:
-        current_price = pm_api.get_current_price_for_exit()
+        current_price = pm_api.get_current_market_price()
         if current_price and current_price > 0:
             print("\n¡Precio recibido! Cargando dashboard...")
             time.sleep(1.5)
@@ -113,8 +139,10 @@ def show_dashboard_screen():
         time.sleep(0.2)
 
     while True:
+        pm_api.force_balance_update()
+
         try:
-            current_price = pm_api.get_current_price_for_exit() or 0.0
+            current_price = pm_api.get_current_market_price() or 0.0
             
             summary = pm_api.get_position_summary()
             if not summary or summary.get('error'):
@@ -133,9 +161,7 @@ def show_dashboard_screen():
             duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
             
             ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Leemos el estado de la tendencia actual para mostrarlo
-            # (Anticipando el cambio en el PM que devolverá esta información)
+            
             trend_status = summary.get('trend_status', {})
             trend_mode = trend_status.get('mode', 'NEUTRAL')
             milestone_id = trend_status.get('milestone_id', None)
@@ -155,7 +181,6 @@ def show_dashboard_screen():
         clear_screen()
         
         header_title = f"Dashboard: {ticker_symbol} @ {current_price:.4f} USDT | {status_display}"
-        # --- FIN DE LA CORRECCIÓN ---
         print_tui_header(header_title)
         
         print("\n--- Estado General y Configuración de la Sesión " + "-"*31)
@@ -170,14 +195,21 @@ def show_dashboard_screen():
         tp_roi_enabled = getattr(config_module, 'SESSION_ROI_TP_ENABLED', False)
         sl_roi_val = getattr(config_module, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         tp_roi_val = getattr(config_module, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
-        sl_roi_str = f"Activo (-{sl_roi_val}%)" if sl_roi_enabled else "Desactivado"
-        tp_roi_str = f"Activo (+{tp_roi_val}%)" if tp_roi_enabled else "Desactivado"
+        sl_roi_str = f"Activo (-{sl_roi_val:.1f}%)" if sl_roi_enabled else "Desactivado"
+        tp_roi_str = f"Activo (+{tp_roi_val:.1f}%)" if tp_roi_enabled else "Desactivado"
+        
+        duration_limit = getattr(config_module, 'SESSION_MAX_DURATION_MINUTES', 0)
+        action_on_limit = getattr(config_module, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
+        duration_limit_str = f"{duration_limit} min (Acción: {action_on_limit})" if duration_limit > 0 else "Desactivado"
 
+        trades_limit = getattr(config_module, 'SESSION_MAX_TRADES', 0)
+        trades_limit_str = str(trades_limit) if trades_limit > 0 else "Ilimitados"
+        
         col2_data = {
             "Apalancamiento": f"{getattr(config_module, 'POSITION_LEVERAGE', 0.0):.1f}x",
             "Tamaño Base / Max Pos": f"{getattr(config_module, 'POSITION_BASE_SIZE_USDT', 0.0):.2f}$ / {getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 0)}",
-            "SL Individual": f"{getattr(config_module, 'POSITION_INDIVIDUAL_STOP_LOSS_PCT', 0.0)}%",
-            "Trailing Stop (A/D)": f"{getattr(config_module, 'TRAILING_STOP_ACTIVATION_PCT', 0.0)}% / {getattr(config_module, 'TRAILING_STOP_DISTANCE_PCT', 0.0)}%",
+            "Límite de Duración": duration_limit_str,
+            "Límite de Trades": trades_limit_str,
             "SL Sesión (ROI)": sl_roi_str,
             "TP Sesión (ROI)": tp_roi_str,
         }
@@ -216,8 +248,6 @@ def show_dashboard_screen():
         _print_positions_table("Posiciones LONG", summary.get('open_long_positions', []), current_price, 'long')
         _print_positions_table("Posiciones SHORT", summary.get('open_short_positions', []), current_price, 'short')
 
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Actualizamos la lista de ítems del menú
         menu_items = [
             "[1] Refrescar", 
             "[2] Gestionar Posiciones", 
@@ -237,7 +267,6 @@ def show_dashboard_screen():
         menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
         choice = menu.show()
         
-        # Actualizamos el mapeo de acciones para que coincida con el nuevo menú
         action_map = {
             0: 'refresh', 1: 'view_positions', 2: 'milestone_manager',
             4: 'edit_config', 5: 'view_logs', 7: 'help', 8: 'exit'
@@ -250,8 +279,19 @@ def show_dashboard_screen():
             _position_viewer.show_position_viewer_screen(pm_api)
         elif action == 'milestone_manager': 
             _milestone_manager.show_milestone_manager_screen()
+        
         elif action == 'edit_config': 
-            _config_editor.show_config_editor_screen(config_module)
+            original_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
+            
+            changes_saved = _config_editor.show_config_editor_screen(config_module)
+            
+            if changes_saved:
+                new_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
+                if new_symbol != original_symbol:
+                    _handle_ticker_change(config_module)
+            
+            continue
+            
         elif action == 'view_logs': 
             _log_viewer.show_log_viewer()
         elif action == 'help': 
@@ -260,4 +300,3 @@ def show_dashboard_screen():
             confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="¿Confirmas apagar el bot?", **helpers_module.MENU_STYLE)
             if confirm_menu.show() == 0: 
                 break
-        # --- FIN DE LA CORRECCIÓN ---
