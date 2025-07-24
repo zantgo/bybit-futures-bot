@@ -17,7 +17,8 @@ from .._helpers import (
     print_tui_header,
     get_input,
     MENU_STYLE,
-    show_help_popup
+    show_help_popup,
+    CancelInput # Importamos CancelInput para poder comprobarlo
 )
 
 _deps: Dict[str, Any] = {}
@@ -130,11 +131,28 @@ def _create_milestone_wizard(pm_api: Any, update_mode: bool = False, milestone_t
     current_price = pm_api.get_current_market_price() or 0.0
     print(f"\nPrecio de Mercado Actual: {current_price:.4f} USDT\n")
     
-    default_cond_value = 0.0
-    default_trend_config = {}
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Inicializar variables con valores por defecto o del hito a actualizar
+    cond_value = 0.0
+    ind_sl = 0.0
+    ts_act = 0.0
+    ts_dist = 0.0
+    trade_limit = 0
+    duration = 0
+    tp_roi = 0.0
+    sl_roi = 0.0
+
     if update_mode and milestone_to_update:
-        default_cond_value = milestone_to_update.condition.value
+        cond_value = milestone_to_update.condition.value
         default_trend_config = asdict(milestone_to_update.action.params)
+        ind_sl = default_trend_config.get('individual_sl_pct', 0.0)
+        ts_act = default_trend_config.get('trailing_stop_activation_pct', 0.0)
+        ts_dist = default_trend_config.get('trailing_stop_distance_pct', 0.0)
+        trade_limit = default_trend_config.get('limit_trade_count', 0) or 0
+        duration = default_trend_config.get('limit_duration_minutes', 0) or 0
+        tp_roi = default_trend_config.get('limit_tp_roi_pct', 0.0) or 0.0
+        sl_roi = default_trend_config.get('limit_sl_roi_pct', 0.0) or 0.0
+    # --- FIN DE LA MODIFICACIÓN ---
 
     parent_id: Optional[str] = None
     if not update_mode:
@@ -150,7 +168,14 @@ def _create_milestone_wizard(pm_api: Any, update_mode: bool = False, milestone_t
     cond_type_idx = TerminalMenu(["[1] Precio SUBE POR ENCIMA DE", "[2] Precio BAJA POR DEBAJO DE"], title="\nPaso 2/3: Elige la condición que activará el hito:").show()
     if cond_type_idx is None: return
     cond_type = "PRICE_ABOVE" if cond_type_idx == 0 else "PRICE_BELOW"
-    cond_value = get_input(f"Introduce el precio objetivo para '{cond_type.replace('_', ' ')}'", float, default=default_cond_value, min_val=0.0)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Guardar la entrada en una variable temporal y comprobar si se canceló
+    temp_val = get_input(f"Introduce el precio objetivo para '{cond_type.replace('_', ' ')}'", float, default=cond_value, min_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    cond_value = temp_val
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     condition_data = {"type": cond_type, "value": cond_value}
 
     print("\n" + "="*80); print("Paso 3/3: Configura la TENDENCIA resultante."); print("="*80)
@@ -160,15 +185,38 @@ def _create_milestone_wizard(pm_api: Any, update_mode: bool = False, milestone_t
     if mode_idx is None: return
     
     print("\n--- Parámetros de Riesgo para esta Tendencia ---")
-    ind_sl = get_input("SL Individual (%)", float, default=default_trend_config.get('individual_sl_pct', 0.0), min_val=0.0)
-    ts_act = get_input("Activación TS (%)", float, default=default_trend_config.get('trailing_stop_activation_pct', 0.0), min_val=0.0)
-    ts_dist = get_input("Distancia TS (%)", float, default=default_trend_config.get('trailing_stop_distance_pct', 0.0), min_val=0.0)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Aplicar la comprobación de CancelInput para todas las entradas
+    temp_val = get_input("SL Individual (%)", float, default=ind_sl, min_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    ind_sl = temp_val
+
+    temp_val = get_input("Activación TS (%)", float, default=ts_act, min_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    ts_act = temp_val
+
+    temp_val = get_input("Distancia TS (%)", float, default=ts_dist, min_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    ts_dist = temp_val
     
     print("\n--- Condiciones de finalización para esta Tendencia ---")
-    trade_limit = get_input("Límite de trades", int, default=default_trend_config.get('limit_trade_count', 0), min_val=0)
-    duration = get_input("Duración máxima (min)", int, default=default_trend_config.get('limit_duration_minutes', 0), min_val=0)
-    tp_roi = get_input("Objetivo de TP por ROI (%)", float, default=default_trend_config.get('limit_tp_roi_pct', 0.0), min_val=0.0)
-    sl_roi = get_input("Stop Loss por ROI (%)", float, default=default_trend_config.get('limit_sl_roi_pct', 0.0), max_val=0.0)
+    temp_val = get_input("Límite de trades", int, default=trade_limit, min_val=0)
+    if isinstance(temp_val, CancelInput): return
+    trade_limit = temp_val
+
+    temp_val = get_input("Duración máxima (min)", int, default=duration, min_val=0)
+    if isinstance(temp_val, CancelInput): return
+    duration = temp_val
+
+    temp_val = get_input("Objetivo de TP por ROI (%)", float, default=tp_roi, min_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    tp_roi = temp_val
+
+    temp_val = get_input("Stop Loss por ROI (%)", float, default=sl_roi, max_val=0.0)
+    if isinstance(temp_val, CancelInput): return
+    sl_roi = temp_val
+    # --- FIN DE LA MODIFICACIÓN ---
 
     trend_config = {"mode": mode_map[mode_idx], "individual_sl_pct": ind_sl, "trailing_stop_activation_pct": ts_act, "trailing_stop_distance_pct": ts_dist, "limit_trade_count": trade_limit or None, "limit_duration_minutes": duration or None, "limit_tp_roi_pct": tp_roi or None, "limit_sl_roi_pct": sl_roi or None}
     action_data = {"type": "START_TREND", "params": trend_config}
@@ -182,10 +230,7 @@ def _create_milestone_wizard(pm_api: Any, update_mode: bool = False, milestone_t
 
 def _update_milestone_wizard(pm_api: Any):
     """Selecciona un hito y lanza el asistente de creación en modo edición."""
-    # --- INICIO DE LA CORRECCIÓN ---
-    # La lista de hitos modificables son aquellos que AÚN NO han terminado.
     milestones = [m for m in pm_api.get_all_milestones() if m.status not in ['COMPLETED', 'CANCELLED']]
-    # --- FIN DE LA CORRECCIÓN ---
     if not milestones: print("\nNo hay hitos modificables (pendientes o activos)."); time.sleep(2); return
     
     menu_items = [f"Lvl {m.level} - ...{m.id[-12:]}" for m in milestones] + [None, "[b] Cancelar"]
