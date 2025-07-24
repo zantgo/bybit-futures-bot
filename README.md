@@ -1,150 +1,160 @@
-# Bybit Futures Bot - Versión 31 (Modo Automático y Gestión de Riesgo Mejorada)
 
-!!! IMPORTANTE: LEE ESTO ANTES DE CADA EJECUCIÓN !!!
+**Aspectos Destacados del Nuevo README:**
 
-**SIEMPRE VERIFICA QUE LOS PARÁMETROS EN `config.py` Y `.env` CORRESPONDAN CON LA INFORMACIÓN EN EL NAVEGADOR DE BYBIT.**
-
--   **SÍMBOLO:** `TICKER_SYMBOL` debe coincidir con el par que operarás (ej. `BTCUSDT`).
--   **APALANCAMIENTO:** `POSITION_LEVERAGE` debe ser el mismo que tienes configurado en la web de Bybit para ese símbolo.
--   **CAPITAL:** Asegúrate de que hay suficiente balance en las subcuentas de `longs` y `shorts` para cubrir las operaciones.
--   **HEDGE MODE:** El bot está diseñado para **Hedge Mode**. Asegúrate de que esté activado en la configuración de futuros de Bybit para el par a operar. El bot intentará verificarlo, pero es mejor confirmarlo manualmente.
-
-**PRUEBA SIEMPRE EL BOT CON LA OPCIÓN DE "PROBAR CICLO COMPLETO" ANTES DE INICIAR UNA SESIÓN DE TRADING REAL.**
+*   **Enfoque en la Arquitectura Actual:** Se explica el modelo de **Hitos y Tendencias**, que es el corazón de la nueva estrategia.
+*   **Instrucciones Claras y Modernas:** Pasos de instalación actualizados, configuración de `.env` simplificada y explicación de los parámetros clave en `config.py`.
+*   **Guía de Uso de la TUI:** Se describe el flujo de operación a través de la interfaz de usuario, desde la pantalla de bienvenida hasta el dashboard y el gestor de hitos.
+*   **Sección de "Conceptos Clave":** Explica de forma sencilla la jerarquía de `Sesión -> Hito -> Tendencia -> Posición` para que el usuario entienda cómo piensa el bot.
+*   **Estructura Profesional:** Utiliza encabezados, listas y bloques de código para que la lectura sea fácil y agradable.
 
 ---
 
-## MANUAL DE USUARIO (v13)
+Aquí tienes el `README.md` completo. Puedes copiarlo y pegarlo directamente en tu archivo `README.md`.
 
-### 1. Configuración Inicial (Solo una vez)
+```markdown
+# Bybit Futures Bot - Versión 30+ (Modelo de Hitos y Tendencias)
 
-#### Pasos de Instalación
-1.  **Navega a la raíz del proyecto:**
+Este es un bot de trading algorítmico avanzado para futuros de Bybit, diseñado con una arquitectura modular y una potente interfaz de usuario en la terminal (TUI) para un control total en tiempo real.
+
+El bot opera bajo un modelo estratégico jerárquico:
+-   **Sesión:** El ciclo de vida completo de una ejecución, con disyuntores de seguridad globales.
+-   **Hitos (Milestones):** Reglas condicionales ("SI el precio cruza X...") que activan modos operativos.
+-   **Tendencias (Trends):** Modos operativos con reglas específicas de riesgo y finalización que se ejecutan cuando un hito se activa.
+
+---
+
+## !! Advertencia de Seguridad y Riesgo !!
+
+**EL TRADING DE FUTUROS CON APALANCAMIENTO ES EXTREMADAMENTE RIESGOSO Y PUEDE RESULTAR EN LA PÉRDIDA TOTAL DE SU CAPITAL.**
+
+-   Este software se proporciona "tal cual", sin ninguna garantía.
+-   El autor no se hace responsable de ninguna pérdida financiera.
+-   **NUNCA** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET** (`UNIVERSAL_TESTNET_MODE = True` en `config.py`).
+-   Comprenda completamente el código y los riesgos antes de depositar fondos reales.
+
+---
+
+## 1. Configuración Inicial (Solo una vez)
+
+### 1.1. Prerrequisitos
+-   Python 3.10 o superior.
+-   Una cuenta en [Bybit](https://www.bybit.com/).
+
+### 1.2. Pasos de Instalación
+1.  **Clona el repositorio:**
     ```bash
-    cd ruta/a/tu/proyecto/DFE-Futures-Bot-B
+    git clone <URL_DEL_REPOSITORIO>
+    cd <NOMBRE_DEL_DIRECTORIO>
     ```
-2.  **Crea un entorno virtual:**
+2.  **Crea y activa un entorno virtual:**
     ```bash
     python -m venv venv
+    source venv/bin/activate  # En macOS/Linux
+    # .\venv\Scripts\Activate.ps1 # En Windows PowerShell
     ```
-3.  **Activa el entorno virtual:**
-    *   **Windows (PowerShell):** `.\venv\Scripts\Activate.ps1`
-    *   **macOS / Linux:** `source venv/bin/activate`
-4.  **Instala las dependencias:**
+3.  **Instala las dependencias:**
     ```bash
     pip install -r requirements.txt
     ```
 
-#### Configuración de Cuentas y API
-1.  **Crea Subcuentas en Bybit:** Para un aislamiento de riesgo óptimo, se recomienda crear tres subcuentas además de tu cuenta principal:
-    *   Una para posiciones `LONG`.
-    *   Una para posiciones `SHORT`.
-    *   Una para acumular las `GANANCIAS` (profit).
+### 1.3. Configuración de Cuentas y API en Bybit
+El bot está diseñado para operar con subcuentas para un aislamiento de riesgo superior.
+
+1.  **Crea Subcuentas en Bybit:** En tu panel de Bybit, ve a "Subcuentas" y crea tres subcuentas de tipo "Cuenta de Trading Unificado". Dales nombres descriptivos como:
+    *   `longs`
+    *   `shorts`
+    *   `profit` (para acumular ganancias)
 2.  **Genera Claves API:**
-    *   **Cuenta Principal:** Genera una clave API con permisos de "Leer/Escribir" para **Transferencia entre Subcuentas**.
-    *   **Subcuentas (Long, Short, Profit):** Genera una clave API para cada una con permisos de "Leer/Escribir" para **Contrato -> Trading Unificado** y **Activos**.
-3.  **Configura el archivo `.env`:**
-    *   Crea un archivo llamado `.env` en la raíz del proyecto.
-    *   Copia y pega el siguiente contenido y rellénalo con tus UIDs y claves API.
+    *   **Cuenta Principal:** Crea una clave API con permisos de **"Leer/Escribir"** para **Activos -> Transferencia**. Esta clave es **esencial** para mover las ganancias a la subcuenta de `profit`.
+    *   **Subcuentas (`longs`, `shorts`, `profit`):** Para cada una, crea una clave API con permisos de **"Leer/Escribir"** para **Contrato -> Trading Unificado**.
+3.  **Obtén los UIDs:** En la sección de "Gestión de Subcuentas", anota el UID de cada una de tus subcuentas.
+
+### 1.4. Configuración del Archivo `.env`
+1.  En la raíz del proyecto, crea un archivo llamado `.env`.
+2.  Copia, pega y rellena el siguiente contenido con tus claves y UIDs:
 
     ```dotenv
-    # IN .env FILE:
-
     # --- UIDs (Encuéntralos en la sección de Subcuentas de Bybit) ---
-    BYBIT_LONGS_UID=
-    BYBIT_SHORTS_UID=
-    BYBIT_PROFIT_UID=
+    BYBIT_LONGS_UID=1234567
+    BYBIT_SHORTS_UID=2345678
+    BYBIT_PROFIT_UID=3456789
 
-    # --- Claves Cuenta Principal (NECESARIAS PARA TRANSFERENCIAS) ---
-    BYBIT_MAIN_API_KEY=""
-    BYBIT_MAIN_API_SECRET=""
+    # --- Claves Cuenta Principal (SOLO para transferencias) ---
+    BYBIT_MAIN_API_KEY="YOUR_MAIN_API_KEY"
+    BYBIT_MAIN_API_SECRET="YOUR_MAIN_API_SECRET"
 
     # --- Claves Subcuenta Futuros Long ---
-    BYBIT_LONGS_API_KEY=""
-    BYBIT_LONGS_API_SECRET=""
+    BYBIT_LONGS_API_KEY="YOUR_LONGS_API_KEY"
+    BYBIT_LONGS_API_SECRET="YOUR_LONGS_API_SECRET"
 
     # --- Claves Subcuenta Futuros Short ---
-    BYBIT_SHORTS_API_KEY=""
-    BYBIT_SHORTS_API_SECRET=""
+    BYBIT_SHORTS_API_KEY="YOUR_SHORTS_API_KEY"
+    BYBIT_SHORTS_API_SECRET="YOUR_SHORTS_API_SECRET"
 
-    # --- Claves Subcuenta Ganancias ---
-    BYBIT_PROFIT_API_KEY=""
-    BYBIT_PROFIT_API_SECRET=""
-    ```
-4.  **Deposita Fondos:** Transfiere USDT a tus subcuentas `longs` y `shorts` desde tu cuenta principal.
-
-### 2. Configuración del Bot (`config.py`)
-
-Abre el archivo `config.py` y ajusta los parámetros según tu estrategia. Los más importantes son:
-
--   `UNIVERSAL_TESTNET_MODE`: Ponlo en `True` para usar la testnet de Bybit.
--   `TICKER_SYMBOL`: El par a operar (ej. `"BTCUSDT"`).
--   `POSITION_LEVERAGE`: Tu apalancamiento.
--   `POSITION_BASE_SIZE_USDT`: El margen en USDT para cada posición lógica individual.
--   `POSITION_MAX_LOGICAL_POSITIONS`: El número de "slots" o posiciones lógicas que puede abrir por lado.
--   **`POSITION_PHYSICAL_STOP_LOSS_PCT`**: **¡MUY IMPORTANTE!** El porcentaje de pérdida sobre la posición física total que activará el cierre de emergencia de todas las posiciones de ese lado. **Ej: `5.0` para un 5% de Stop Loss.**
-
-### 3. Modos de Operación
-
-Puedes ejecutar el bot de tres maneras.
-
-#### A. Modo Automático (Recomendado)
-
-Este modo utiliza una estrategia de alto nivel (UT Bot Alerts) para decidir la dirección general del mercado (alcista o bajista) y una estrategia de bajo nivel para ejecutar las entradas.
-
-1.  **En `config.py`, establece:**
-    ```python
-    AUTOMATIC_MODE_ENABLED = True
-    ```
-2.  **Ajusta los parámetros del UT Bot:**
-    *   `UT_BOT_SIGNAL_INTERVAL_SECONDS`: Frecuencia de la señal de alto nivel (ej. `3600` para 1 hora).
-    *   `UT_BOT_KEY_VALUE`, `UT_BOT_ATR_PERIOD`: Parámetros del indicador.
-    *   `AUTOMATIC_FLIP_OPENS_NEW_POSITIONS`: `True` para reabrir posiciones al cambiar de dirección.
-    *   `AUTOMATIC_SL_COOLDOWN_SECONDS`: Tiempo de espera después de un Stop Loss.
-3.  **Ejecuta el bot:**
-    ```bash
-    python main.py
+    # --- Claves Subcuenta Ganancias (para obtener el ticker) ---
+    BYBIT_PROFIT_API_KEY="YOUR_PROFIT_API_KEY"
+    BYBIT_PROFIT_API_SECRET="YOUR_PROFIT_API_SECRET"
     ```
 
-#### B. Modo Live Interactivo
-
-Este modo ejecuta solo la estrategia de bajo nivel. Tú decides si operar en `LONG_ONLY`, `SHORT_ONLY` o `BOTH`.
-
-1.  **En `config.py`, establece:**
-    ```python
-    AUTOMATIC_MODE_ENABLED = False
-    ```
-2.  **Ejecuta el bot y sigue los menús:**
-    ```bash
-    python main.py
-    ```
-    *   Selecciona "Modo Live Interactivo".
-    *   Selecciona el modo de trading para la sesión (LONG_ONLY, etc.).
-    *   Define el tamaño base y los slots.
-
-#### C. Modo Backtesting
-
-Simula la estrategia de bajo nivel usando datos históricos.
-
-1.  **Prepara tus datos:** Asegúrate de tener un archivo CSV en la carpeta `data/` con columnas de `timestamp` y `close`.
-2.  **Ejecuta el bot y sigue los menús:**
-    ```bash
-    python main.py
-    ```
-    *   Selecciona "Modo Backtesting".
-
-### 4. Intervención Manual (Durante la ejecución Live o Automática)
-
-Mientras el bot está corriendo, puedes presionar la tecla `m` y luego `Enter` para acceder al menú de intervención.
-
--   **Ver Estadísticas en Vivo:** Muestra un resumen del rendimiento actual (PNL, ROI, etc.).
--   **Cambiar Visualización de Ticks:** Activa o desactiva la impresión de información en la consola para cada tick.
--   **Ajustar Slots Máximos:** Aumenta o disminuye el número de posiciones lógicas que el bot puede abrir.
--   **Cambiar Tamaño Base:** Modifica el margen que se usará para las *próximas* posiciones que se abran. No afecta a las que ya están abiertas.
+### 1.5. Deposita Fondos
+Desde tu Cuenta Principal en Bybit, transfiere los fondos (USDT) que deseas operar a tus subcuentas `longs` y `shorts`.
 
 ---
 
-### Mantenimiento y Buenas Prácticas
+## 2. Ejecución y Uso del Bot
 
--   **Revisión Periódica:** Aunque el bot es automático, revisa su estado y el de tus cuentas en Bybit periódicamente.
--   **Logs:** La carpeta `logs/` contiene un registro detallado de todas las señales y posiciones cerradas. Revísala para analizar el rendimiento y depurar problemas.
--   **Reportes:** La carpeta `result/` contendrá un archivo de texto con el resumen final de cada ejecución y un gráfico si se ejecutó en modo backtest.
+El bot se opera a través de una única interfaz interactiva.
+
+### 2.1. Iniciar el Bot
+Abre una terminal, activa tu entorno virtual (`source venv/bin/activate`) y ejecuta:
+```bash
+python main.py
+```
+
+### 2.2. Pantalla de Bienvenida
+-   Verás una pantalla de bienvenida con un resumen de la configuración actual cargada desde `config.py`.
+-   **[1] Iniciar Bot:** Comienza la sesión de trading.
+-   **[2] Modificar configuración:** Te permite cambiar parámetros clave para la sesión actual **sin modificar permanentemente tu `config.py`**.
+-   **[3] Salir:** Cierra el programa.
+
+### 2.3. El Dashboard Principal
+Una vez iniciado, el Dashboard es tu centro de control en tiempo real.
+-   **Cabecera:** Muestra el ticker, el precio actual y el estado de la **Tendencia** activa (`LONG_ONLY`, `SHORT_ONLY` o `NEUTRAL`).
+-   **Estado General:** PNL, ROI, capital inicial y duración de la sesión.
+-   **Configuración:** Parámetros de riesgo y capital con los que está operando el bot.
+-   **Cuentas Reales:** Balances actualizados de tus subcuentas.
+-   **Posiciones:** Tablas detalladas de las posiciones lógicas abiertas.
+
+### 2.4. Menú de Acciones
+Desde el Dashboard, puedes acceder a las siguientes pantallas:
+
+-   **[2] Gestionar Posiciones:** Visualiza en detalle las posiciones abiertas y ciérralas manualmente si es necesario (individualmente o todas a la vez).
+-   **[3] Gestionar Hitos (Árbol de Decisiones):** El corazón de tu estrategia.
+    -   **Crear Hito:** Define una condición de precio (`SI precio > X...`) y la **Tendencia** que se activará.
+    -   **Configurar Tendencia:** Para cada hito, defines el modo (`LONG_ONLY`, etc.), el riesgo (SL/TS individual) y las condiciones de finalización (límite de trades, duración, TP/SL por ROI de la tendencia).
+    -   **Anidar Hitos:** Puedes crear hitos que solo se activen después de que su "padre" se haya cumplido, creando árboles de decisión complejos.
+-   **[4] Editar Configuración de Sesión:** Abre un editor para modificar los parámetros globales del bot en tiempo real (ej. cambiar el ticker, ajustar el apalancamiento, modificar los disyuntores de seguridad de la sesión).
+-   **[5] Ver Logs en Tiempo Real:** Muestra los últimos 1000 mensajes de eventos del bot.
+
+---
+
+## 3. Parámetros Clave en `config.py`
+
+Aunque muchos parámetros se pueden ajustar en la TUI, estos son los valores iniciales que el bot carga.
+
+-   `UNIVERSAL_TESTNET_MODE`: `True` para operar en la Testnet de Bybit, `False` para dinero real. **¡EMPIEZA SIEMPRE CON `True`!**
+-   `TICKER_SYMBOL`: El par de trading por defecto (ej. `"BTCUSDT"`).
+-   `POSITION_LEVERAGE`: Apalancamiento. **Debe coincidir con tu configuración en la web de Bybit.**
+-   `POSITION_BASE_SIZE_USDT`: El margen en USDT que se usará para cada nueva posición lógica.
+-   `POSITION_MAX_LOGICAL_POSITIONS`: El número de "slots" u operaciones simultáneas por lado.
+-   `SESSION_STOP_LOSS_ROI_PCT` / `SESSION_TAKE_PROFIT_ROI_PCT`: Disyuntores de seguridad. Si el ROI total de la sesión alcanza `+5.0%` o `-10.0%`, el bot detiene las operaciones.
+
+## 4. Archivos de Log
+
+El bot genera varios archivos en la carpeta `logs/` para auditoría y análisis:
+-   `signals_log.jsonl`: Un registro de cada señal de trading generada.
+-   `closed_positions.jsonl`: Un registro detallado de cada posición que se ha cerrado, incluyendo PNL.
+-   `open_positions_snapshot.jsonl`: Una instantánea de las posiciones que quedaron abiertas al cerrar el bot.
+
+Estos archivos están limitados a las últimas 1000 entradas para evitar consumir espacio en disco excesivo.
+```
