@@ -1,17 +1,3 @@
-
-**Aspectos Destacados del Nuevo README:**
-
-*   **Enfoque en la Arquitectura Actual:** Se explica el modelo de **Hitos y Tendencias**, que es el corazón de la nueva estrategia.
-*   **Instrucciones Claras y Modernas:** Pasos de instalación actualizados, configuración de `.env` simplificada y explicación de los parámetros clave en `config.py`.
-*   **Guía de Uso de la TUI:** Se describe el flujo de operación a través de la interfaz de usuario, desde la pantalla de bienvenida hasta el dashboard y el gestor de hitos.
-*   **Sección de "Conceptos Clave":** Explica de forma sencilla la jerarquía de `Sesión -> Hito -> Tendencia -> Posición` para que el usuario entienda cómo piensa el bot.
-*   **Estructura Profesional:** Utiliza encabezados, listas y bloques de código para que la lectura sea fácil y agradable.
-
----
-
-Aquí tienes el `README.md` completo. Puedes copiarlo y pegarlo directamente en tu archivo `README.md`.
-
-```markdown
 # Bybit Futures Bot - Versión 30+ (Modelo de Hitos y Tendencias)
 
 Este es un bot de trading algorítmico avanzado para futuros de Bybit, diseñado con una arquitectura modular y una potente interfaz de usuario en la terminal (TUI) para un control total en tiempo real.
@@ -31,6 +17,21 @@ El bot opera bajo un modelo estratégico jerárquico:
 -   El autor no se hace responsable de ninguna pérdida financiera.
 -   **NUNCA** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET** (`UNIVERSAL_TESTNET_MODE = True` en `config.py`).
 -   Comprenda completamente el código y los riesgos antes de depositar fondos reales.
+
+---
+
+## !!! IMPORTANTE: Checklist Antes de Cada Ejecución !!!
+
+**SIEMPRE VERIFICA QUE TU CONFIGURACIÓN LOCAL COINCIDA CON LA DE LA PLATAFORMA DE BYBIT.**
+
+-   **HEDGE MODE:** El bot está diseñado para operar exclusivamente en **Modo Hedge**. Asegúrate de que esta opción esté activada en Bybit para el par que vas a operar.
+    -   *Cómo verificar:* En la interfaz de trading de Bybit, busca el icono de configuración (engranaje) y en "Preferencias de Trading" -> "Modo de Posición", selecciona "Modo Hedge".
+
+-   **APALANCAMIENTO:** El valor de `POSITION_LEVERAGE` en tu archivo `config.py` debe ser **exactamente el mismo** que tienes configurado en la interfaz de Bybit para los lados Long y Short de ese símbolo.
+
+-   **SÍMBOLO:** Confirma que el `TICKER_SYMBOL` en `config.py` (o el que selecciones en la TUI) es el par correcto que deseas operar.
+
+-   **CAPITAL:** Asegúrate de que haya suficiente balance (USDT) en las subcuentas de `longs` y `shorts` para cubrir las operaciones que el bot pueda abrir.
 
 ---
 
@@ -157,4 +158,3 @@ El bot genera varios archivos en la carpeta `logs/` para auditoría y análisis:
 -   `open_positions_snapshot.jsonl`: Una instantánea de las posiciones que quedaron abiertas al cerrar el bot.
 
 Estos archivos están limitados a las últimas 1000 entradas para evitar consumir espacio en disco excesivo.
-```
