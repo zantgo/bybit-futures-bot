@@ -30,13 +30,10 @@ except ImportError as e:
     print(f"ERROR [Market Data API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
     connection_manager = None
-    # Usamos un logger de fallback si el principal falla
     memory_logger = type('obj', (object,), {'log': print})()
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
     class FailedRequestError(Exception): pass
-# --- FIN DE CAMBIOS: Importaciones Adaptadas ---
-
 
 # --- Caché Simple para Instrument Info ---
 _instrument_info_cache: Dict[str, Dict[str, Any]] = {}
@@ -58,21 +55,12 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         cached_data = _instrument_info_cache[cache_key]
         if (now - cached_data.get('timestamp', 0)) < _INSTRUMENT_INFO_CACHE_EXPIRY_SECONDS:
             return cached_data.get('data')
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se reemplaza la lógica de selección de cuenta manual con la llamada centralizada.
     session, account_used = connection_manager.get_session_for_operation(
         purpose='market_data'
     )
     if not session:
         memory_logger.log("ERROR [Get Instrument Info]: No se pudo obtener una sesión API válida.", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
-        
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido en la consola y logs.
-    # memory_logger.log(f"Consultando API para info de {symbol} ({category}) usando '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
     params = {"category": category, "symbol": symbol}
     
     try:
@@ -116,5 +104,5 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Instrument Info] para {symbol}: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None

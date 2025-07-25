@@ -36,8 +36,6 @@ except ImportError as e:
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
     class FailedRequestError(Exception): pass
-# --- FIN DE CAMBIOS: Importaciones Adaptadas ---
-
 
 # --- Funciones para Obtener Balances ---
 
@@ -47,20 +45,12 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
         memory_logger.log("ERROR [Get Unified Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
-    # --- MODIFICACIÓN: Usar selección de sesión específica ---
     session, account_used = connection_manager.get_session_for_operation(
         purpose='general', specific_account=account_name
     )
     if not session:
         memory_logger.log(f"ERROR [Get Unified Balance]: Sesión API no válida para '{account_name}'.", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
-        
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido.
-    # memory_logger.log(f"Obteniendo balance UNIFIED para '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
-    
     try:
         if not hasattr(session, 'get_wallet_balance'):
             memory_logger.log("ERROR Fatal [Get Unified Balance]: Sesión API no tiene método 'get_wallet_balance'.", level="ERROR")
@@ -90,11 +80,6 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
             if usdt_data:
                 balance_info['usdt_balance'] = utils.safe_float_convert(usdt_data.get('walletBalance'), 0.0)
                 balance_info['usdt_available'] = utils.safe_float_convert(usdt_data.get('availableToWithdraw', usdt_data.get('walletBalance')), 0.0)
-            
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Comentamos el log de nivel DEBUG para reducir el ruido.
-            # memory_logger.log(f"ÉXITO [Get Unified Balance]: Balance obtenido para '{account_used}'.", level="DEBUG")
-            # --- FIN DE LA MODIFICACIÓN ---
             return balance_info
             
     except (InvalidRequestError, FailedRequestError) as api_err:
@@ -103,7 +88,7 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Unified Balance] para '{account_used}': {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
 
 def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Dict[str, float]]]:
@@ -112,20 +97,12 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
         memory_logger.log("ERROR [Get Funding Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
-    # --- MODIFICACIÓN: Usar selección de sesión específica ---
     session, account_used = connection_manager.get_session_for_operation(
         purpose='general', specific_account=account_name
     )
     if not session:
         memory_logger.log(f"ERROR [Get Funding Balance]: Sesión API no válida para '{account_name}'.", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
-        
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido.
-    # memory_logger.log(f"Obteniendo balance FUND para '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
-    
     try:
         if not hasattr(session, 'get_coins_balance'):
             memory_logger.log("ERROR Fatal [Get Funding Balance]: Sesión API no tiene método 'get_coins_balance'.", level="ERROR")
@@ -144,10 +121,6 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
                     wallet_balance = utils.safe_float_convert(coin_data.get('walletBalance'), 0.0)
                     if coin_symbol and wallet_balance > 1e-9:
                         funding_balances[coin_symbol] = {'walletBalance': wallet_balance}
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Comentamos el log de nivel DEBUG para reducir el ruido.
-                # memory_logger.log(f"ÉXITO [Get Funding Balance]: Balances obtenidos para '{account_used}'. {len(funding_balances)} activo(s).", level="DEBUG")
-                # --- FIN DE LA MODIFICACIÓN ---
             else:
                 memory_logger.log(f"INFO [Get Funding Balance]: Sin datos de balance para '{account_used}'.", level="WARN")
             return funding_balances
@@ -158,11 +131,8 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Funding Balance] para '{account_used}': {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
-
-# --- Funciones para Órdenes y Posiciones ---
-
 def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None, account_name: Optional[str] = None) -> Optional[dict]:
     """Obtiene el estado de una orden específica usando get_order_history (v5 API)."""
     if not connection_manager or not config:
@@ -172,14 +142,12 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         memory_logger.log("ERROR [Get Order Status]: Debe proporcionar order_id o order_link_id.", level="ERROR")
         return None
         
-    # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
     session, account_used = connection_manager.get_session_for_operation(
         purpose='general', specific_account=account_name
     )
     if not session:
         memory_logger.log(f"ERROR [Get Order Status]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
         
     params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "limit": 1}
     id_type = ""
@@ -189,12 +157,6 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
     elif order_link_id:
         params["orderLinkId"] = order_link_id
         id_type = f"LinkID={order_link_id}"
-        
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido.
-    # memory_logger.log(f"Buscando estado orden {id_type} en '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
-    
     try:
         if not hasattr(session, 'get_order_history'):
             memory_logger.log("ERROR Fatal [Get Order Status]: Sesión API no tiene método 'get_order_history'.", level="ERROR")
@@ -211,10 +173,6 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
                 found_id = order_details.get('orderId')
                 found_link_id = order_details.get('orderLinkId')
                 if (order_id and found_id == order_id) or (order_link_id and found_link_id == order_link_id):
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Comentamos el log de nivel DEBUG para reducir el ruido.
-                    # memory_logger.log(f"ÉXITO [Get Order Status]: Orden {id_type} encontrada. Estado: {order_details.get('orderStatus', 'N/A')}", level="DEBUG")
-                    # --- FIN DE LA MODIFICACIÓN ---
                     return order_details
                 else:
                     memory_logger.log(f"INFO [Get Order Status]: Orden encontrada ({found_id}/{found_link_id}) no coincide con buscada ({id_type}).", level="WARN")
@@ -229,7 +187,7 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Order Status]: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
 
 def get_active_position_details_api(symbol: str, account_name: Optional[str] = None) -> Optional[List[dict]]:
@@ -238,20 +196,14 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
         memory_logger.log("ERROR [Get Position]: Dependencias no disponibles.", level="ERROR")
         return None
         
-    # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
     session, account_used = connection_manager.get_session_for_operation(
         purpose='general', specific_account=account_name
     )
     if not session:
         memory_logger.log(f"ERROR [Get Position]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
         
     params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "symbol": symbol}
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido.
-    # memory_logger.log(f"Obteniendo detalles de posición para {symbol} en '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         if not hasattr(session, 'get_positions'):
@@ -267,10 +219,6 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
             if position_list:
                 active_positions = [pos for pos in position_list if utils.safe_float_convert(pos.get('size'), 0.0) > 1e-12]
                 if active_positions:
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Comentamos el log de nivel DEBUG para reducir el ruido.
-                    # memory_logger.log(f"ÉXITO [Get Position]: {len(active_positions)} posición(es) activa(s) encontrada(s) para {symbol}.", level="DEBUG")
-                    # --- FIN DE LA MODIFICACIÓN ---
                     return active_positions
                 else:
                     memory_logger.log(f"INFO [Get Position]: No hay posiciones activas para {symbol} en '{account_used}'.", level="INFO")
@@ -285,7 +233,7 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Position]: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
 
 def get_order_execution_history(category: str, symbol: str, order_id: str, limit: int = 50) -> Optional[List[Dict[str, Any]]]:
@@ -296,12 +244,10 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
         memory_logger.log("ERROR [Get Executions]: Dependencias no disponibles.", level="ERROR")
         return None
         
-    # --- MODIFICACIÓN: Usar selección de sesión centralizada ---
     session, account_used = connection_manager.get_session_for_operation(purpose='general')
     if not session:
         memory_logger.log("ERROR [Get Executions]: No se pudo obtener sesión API principal.", level="ERROR")
         return None
-    # --- FIN DE LA MODIFICACIÓN ---
         
     if not hasattr(session, 'get_executions'):
         memory_logger.log("ERROR Fatal [Get Executions]: Sesión API no tiene método 'get_executions'.", level="ERROR")
@@ -313,10 +259,6 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
         "orderId": order_id,
         "limit": min(limit, 100)
     }
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Comentamos el log de nivel DEBUG para reducir el ruido.
-    # memory_logger.log(f"Consultando API para ejecuciones de Orden ID: {order_id} en '{account_used}'...", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         response = session.get_executions(**params)
@@ -328,10 +270,6 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
             return []
         else:
             executions_list = response.get('result', {}).get('list', [])
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Comentamos el log de nivel DEBUG para reducir el ruido.
-            # memory_logger.log(f"ÉXITO [Get Executions]: {len(executions_list)} ejecuciones encontradas para Orden ID {order_id}.", level="DEBUG")
-            # --- FIN DE LA MODIFICACIÓN ---
             return executions_list
             
     except (InvalidRequestError, FailedRequestError) as api_err:
@@ -340,5 +278,5 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Get Executions] para orden {order_id}: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None

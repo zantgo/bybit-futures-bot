@@ -10,8 +10,6 @@ from decimal import Decimal, InvalidOperation
 import sys
 import os
 
-# --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
-
 # Ajustar sys.path para importaciones absolutas
 if __name__ != "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,9 +26,6 @@ except ImportError as e:
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
-
-# --- FIN DE CAMBIOS: Importaciones Adaptadas ---
-
 
 # --- Funciones Auxiliares ---
 

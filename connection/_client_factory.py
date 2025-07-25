@@ -57,7 +57,7 @@ def create_client(account_name: str, api_creds: Dict[str, str]) -> Optional[HTTP
             return None
     except Exception as e:
         memory_logger.log(f" -> ERROR crítico creando cliente '{account_name}': {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
 
 def configure_account_mode(session: HTTP, account_name: str) -> bool:
@@ -112,5 +112,5 @@ def configure_account_mode(session: HTTP, account_name: str) -> bool:
         return False
     except Exception as e:
         memory_logger.log(f" -> ERROR Inesperado configurando modo para '{account_name}': {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return False

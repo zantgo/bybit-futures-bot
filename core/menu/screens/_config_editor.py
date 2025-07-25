@@ -143,17 +143,11 @@ def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: An
                         pm_api.set_global_stop_loss_pct(getattr(temp_cfg, 'SESSION_STOP_LOSS_ROI_PCT') if new_value else 0)
                     elif attr == 'SESSION_ROI_TP_ENABLED':
                         pm_api.set_global_take_profit_pct(getattr(temp_cfg, 'SESSION_TAKE_PROFIT_ROI_PCT') if new_value else 0)
-                        
-                    # Aquí se podrían añadir más llamadas al PM si fuera necesario
-                    # ej: pm_api.set_leverage(new_value) si existiera esa función.
 
     if not changes_found:
         logger.log("No se detectaron cambios en la configuración.", "INFO")
 
 # --- SUBMENÚS DE CONFIGURACIÓN ---
-# Ahora los submenús solo modifican el objeto `cfg` temporal.
-# No llaman a la API del PM directamente.
-
 def _show_ticker_config_menu(cfg: Any):
     while True:
         menu_items = [
@@ -285,14 +279,12 @@ def _show_session_limits_menu(cfg: Any):
             new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, sl_roi_val, min_val=0.1)
             if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
         
-        # --- INICIO DE LA CORRECCIÓN ---
         # Se ajustan los índices para que coincidan con la posición en la lista menu_items
         elif choice == 6:  # El botón [5] está en el índice 6 de la lista
             setattr(cfg, 'SESSION_ROI_TP_ENABLED', not getattr(cfg, 'SESSION_ROI_TP_ENABLED', False))
         elif choice == 7:  # El botón [6] está en el índice 7 de la lista
             new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, tp_roi_val, min_val=0.1)
             if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
-        # --- FIN DE LA CORRECCIÓN ---
             
         else:
             break

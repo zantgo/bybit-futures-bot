@@ -14,7 +14,6 @@ except ImportError:
     TerminalMenu = None
 
 # --- Dependencias del Menú ---
-# <<< INICIO MODIFICACIÓN: Importar la nueva función de ayuda >>>
 from .._helpers import (
     clear_screen, 
     print_tui_header, 
@@ -22,7 +21,6 @@ from .._helpers import (
     MENU_STYLE,
     show_help_popup # <-- NUEVA IMPORTACIÓN
 )
-# <<< FIN MODIFICACIÓN >>>
 
 def show_position_viewer_screen(pm_api: Any):
     """
@@ -70,7 +68,6 @@ def show_position_viewer_screen(pm_api: Any):
             show_help_popup("position_viewer")
         else: # Volver o ESC
             break
-        # <<< FIN MODIFICACIÓN >>>
 
 
 def _manage_side_positions(side: str, pm_api: Any):
@@ -122,7 +119,6 @@ def _manage_side_positions(side: str, pm_api: Any):
                 entry_str = f"Idx {i:<2} | PNL: {pnl:>+8.2f} USDT | Entrada: {entry_price:>9.4f} | Tamaño: {size_contracts:>8.4f} | SL: {sl_str:<9} | {ts_info}"
                 menu_items.append(f"[Cerrar] {entry_str}")
 
-        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al submenú >>>
         menu_items.extend([
             None,
             f"[Cerrar TODAS] las {len(open_positions)} posiciones {side.upper()}" if open_positions else "(No hay posiciones para cerrar)",
@@ -142,7 +138,6 @@ def _manage_side_positions(side: str, pm_api: Any):
         if choice_index is None:
             break
 
-        # Evitar IndexError si se presiona ESC y la lista está vacía
         try:
             action_text = menu_items[choice_index]
         except IndexError:
@@ -150,16 +145,13 @@ def _manage_side_positions(side: str, pm_api: Any):
 
         if action_text is None or "Volver" in action_text:
             break
-        # <<< FIN MODIFICACIÓN >>>
 
         if "[r] Refrescar" in action_text:
             continue
         
-        # <<< INICIO MODIFICACIÓN: Añadir manejo para la opción de ayuda >>>
         if "[h] Ayuda" in action_text:
             show_help_popup("position_viewer")
             continue
-        # <<< FIN MODIFICACIÓN >>>
         
         if "[Cerrar] Idx" in action_text:
             try:

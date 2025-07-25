@@ -74,11 +74,6 @@ class LogicalPositionTable:
         if self._config_param:
             log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Comentamos la impresión de nivel DEBUG para reducir el ruido.
-        # if log_level == "DEBUG":
-        #     print(f"DEBUG [LPT {self.side.upper()} Add]: Posición ID ...{str(position_data['id'])[-6:]} añadida. Total: {len(self._positions)}")
-        # --- FIN DE LA MODIFICACIÓN ---
         return True
 
     def remove_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
@@ -90,16 +85,13 @@ class LogicalPositionTable:
                 if self._config_param:
                     log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
                 
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Comentamos la impresión de nivel DEBUG para reducir el ruido.
-                # if log_level == "DEBUG":
-                #     print(f"DEBUG [LPT {self.side.upper()} Remove Idx]: Posición índice {index} (ID ...{str(removed_position.get('id','N/A'))[-6:]}) eliminada. Total: {len(self._positions)}")
-                # --- FIN DE LA MODIFICACIÓN ---
                 return copy.deepcopy(removed_position)
             else: 
                 memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango.", level="ERROR"); return None
-        except Exception as e: 
-            memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}", level="ERROR"); traceback.print_exc(); return None
+        except Exception as e:
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}", level="ERROR")
+            memory_logger.log(traceback.format_exc(), level="ERROR")
+            return None
 
     def remove_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
         index_to_remove = -1
@@ -125,15 +117,12 @@ class LogicalPositionTable:
                     if self._config_param:
                         log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
 
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Comentamos la impresión de nivel DEBUG para reducir el ruido.
-                    # if log_level == "DEBUG":
-                    #     print(f"DEBUG [LPT {self.side.upper()} Update]: Pos ID ...{str(position_id)[-6:]} actualizada con: {details_to_update}")
-                    # --- FIN DE LA MODIFICACIÓN ---
                     found = True
                     break
-                except Exception as e: 
-                    memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR"); traceback.print_exc(); return False
+                except Exception as e:
+                    memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR")
+                    memory_logger.log(traceback.format_exc(), level="ERROR")
+                    return False
         if not found: 
             memory_logger.log(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.", level="WARN")
         return found
@@ -193,11 +182,6 @@ class LogicalPositionTable:
             log_level = getattr(config_to_use, 'LOG_LEVEL', 'INFO').upper()
 
         if not self._positions:
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Comentamos la impresión de nivel DEBUG para reducir el ruido.
-            # if log_level == "DEBUG":
-            #     print(f"\n--- Tabla Posiciones Lógicas {self.side.upper()} ---\n(Vacía)\n" + "-" * 60)
-            # --- FIN DE LA MODIFICACIÓN ---
             return
         
         data_for_df = []

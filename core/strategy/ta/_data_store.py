@@ -11,6 +11,7 @@ import numpy as np
 # Dependencias del proyecto
 import config
 from core import utils
+from core.logging import memory_logger # Importar el logger
 
 # --- Estado del Módulo (Privado) ---
 
@@ -71,8 +72,7 @@ def add_event(raw_event_data: dict):
             _raw_data_df = _raw_data_df.iloc[-window_size:]
 
     except Exception as e:
-        # Se mantiene el log de errores para depuración.
-        print(f"ERROR [TA Data Store - Add Event]: {e}")
+        memory_logger.log(f"ERROR [TA Data Store - Add Event]: {e}", level="ERROR")
 
 def get_data() -> pd.DataFrame:
     """

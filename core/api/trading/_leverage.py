@@ -1,6 +1,6 @@
 """
 Módulo para la gestión del Apalancamiento.
-
+ 
 Su única responsabilidad es contener la lógica para establecer el apalancamiento
 en las cuentas de trading relevantes a través de la API de Bybit.
 """
@@ -126,5 +126,5 @@ def _execute_leverage_call(session, params: dict, account_name: str) -> bool:
         return False
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Set Leverage] en '{account_name}': {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return False

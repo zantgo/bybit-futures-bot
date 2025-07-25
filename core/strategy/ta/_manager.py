@@ -16,6 +16,7 @@ import traceback
 # Dependencias del proyecto
 import config
 from core import utils
+from core.logging import memory_logger # Importar el logger
 from . import _data_store
 from . import _calculator
 
@@ -68,8 +69,9 @@ def process_raw_price_event(raw_event_data: dict) -> dict:
             calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
         except Exception as e:
             ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
-            print(f"ERROR [TA Manager - Calculator Call @ {ts_str}]: {e}")
-            traceback.print_exc()
+            memory_logger.log(f"ERROR [TA Manager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
+            memory_logger.log(traceback.format_exc(), level="ERROR")
+
             # En caso de error, devolver los datos base sin indicadores
             calculated_indicators = {
                 'timestamp': raw_event_data.get('timestamp', pd.NaT),

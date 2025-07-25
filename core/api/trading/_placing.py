@@ -1,6 +1,6 @@
 """
 Módulo para la Colocación de Órdenes.
-
+ 
 Su única responsabilidad es contener la lógica para enviar nuevas órdenes
 de mercado a la API de Bybit.
 """
@@ -122,5 +122,5 @@ def place_market_order(
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Place Order]: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None

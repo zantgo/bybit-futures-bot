@@ -55,5 +55,5 @@ def execute_transfer(
 
     except Exception as e:
         memory_logger.log(f"ERROR [Transfer Executor]: Excepción inesperada: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return 0.0

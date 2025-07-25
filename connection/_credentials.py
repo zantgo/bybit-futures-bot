@@ -74,7 +74,6 @@ def load_and_validate_uids():
 
 def _find_and_load_env():
     """Función de ayuda para encontrar y cargar el archivo .env una sola vez."""
-    # find_dotenv es eficiente y solo busca una vez.
     env_path = find_dotenv(filename='.env', raise_error_if_not_found=False, usecwd=True)
     if env_path:
         load_dotenv(dotenv_path=env_path, override=True)

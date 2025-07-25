@@ -16,14 +16,7 @@ from ._config_editor import show_config_editor_screen
 from ._dashboard import show_dashboard_screen
 from ._position_viewer import show_position_viewer_screen
 from ._log_viewer import show_log_viewer
-# --- INICIO DE LA CORRECCIÓN ---
-# Importamos el nuevo gestor de hitos.
 from ._milestone_manager import show_milestone_manager_screen
-# Eliminamos las importaciones de los módulos que ya no existen.
-# from ._manual_mode import show_manual_mode_screen
-# from ._auto_mode import show_auto_mode_screen
-# --- FIN DE LA CORRECCIÓN ---
-
 
 # --- Inyección de Dependencias ---
 
@@ -40,14 +33,10 @@ def init_screens(dependencies: Dict[str, Any]):
     if hasattr(_config_editor, 'init'):
         _config_editor.init(dependencies)
     
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Añadimos la inicialización para el nuevo gestor de hitos.
     # El módulo se llama _milestone_manager, por lo que usamos esa variable.
     from . import _milestone_manager
     if hasattr(_milestone_manager, 'init'):
         _milestone_manager.init(dependencies)
-    # --- FIN DE LA CORRECCIÓN ---
-
 
 # --- Control de lo que se exporta con 'from . import *' ---
 __all__ = [
@@ -57,11 +46,5 @@ __all__ = [
     'show_dashboard_screen',
     'show_position_viewer_screen',
     'show_log_viewer',
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Añadimos la nueva pantalla a la lista pública.
     'show_milestone_manager_screen',
-    # Eliminamos las pantallas antiguas.
-    # 'show_manual_mode_screen',
-    # 'show_auto_mode_screen',
-    # --- FIN DE LA CORRECCIÓN ---
 ]

@@ -101,9 +101,6 @@ def _fetch_price_loop():
         memory_logger.log("Ticker ERROR FATAL: Adaptador de exchange no disponible en el hilo.", "ERROR")
         return
 
-    # No leemos el símbolo aquí
-    # symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
-    
     fetch_interval = getattr(config, 'TICKER_INTERVAL_SECONDS', 1)
     
     if not callable(_raw_event_callback):
@@ -117,7 +114,6 @@ def _fetch_price_loop():
     while not _ticker_stop_event.is_set():
         start_time = time.monotonic()
         
-        # --- INICIO DE LA CORRECCIÓN ---
         # 1. Leer el símbolo desde config DENTRO del bucle.
         #    Esto asegura que siempre usemos el valor más reciente.
         symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
@@ -137,7 +133,6 @@ def _fetch_price_loop():
 
         # 2. Obtener el ticker estandarizado desde el adaptador con el símbolo actual
         standard_ticker = _exchange_adapter.get_ticker(symbol)
-        # --- FIN DE LA CORRECCIÓN ---
         
         if standard_ticker and isinstance(standard_ticker, StandardTicker):
             _handle_new_price(standard_ticker)
@@ -157,7 +152,6 @@ def _handle_new_price(ticker_data: StandardTicker):
     symbol = ticker_data.symbol
     
     with threading.Lock():
-        # Actualizamos el símbolo también, para consistencia
         _latest_price_info.update({"price": price, "timestamp": timestamp, "symbol": symbol})
         
         current_tick_info = {"price": price, "timestamp": timestamp}

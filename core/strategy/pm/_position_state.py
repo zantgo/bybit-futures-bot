@@ -92,7 +92,7 @@ class PositionState:
 
         except Exception as e:
             memory_logger.log(f"ERROR CRITICO [PS Init]: Falló la inicialización de LogicalPositionTable: {e}", level="ERROR")
-            traceback.print_exc()
+            memory_logger.log(traceback.format_exc(), level="ERROR")
             self._initialized = False
 
     def _get_table_for_side(self, side: str) -> Optional[LogicalPositionTable]:

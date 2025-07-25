@@ -97,5 +97,5 @@ def cancel_order(
         return None
     except Exception as e:
         memory_logger.log(f"ERROR Inesperado [Cancel Order]: {e}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
         return None

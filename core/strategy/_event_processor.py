@@ -37,7 +37,8 @@ except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación de dependencias: {e}")
     config=None; utils=None; memory_logger=None; position_manager_api=None;
     ta=None; signal=None; workflow=None; signal_logger=None
-    traceback.print_exc()
+    # Aquí print está bien porque si falla la importación, el logger puede no estar disponible
+    traceback.print_exc() # Esto también está bien en este contexto de fallo de arranque.
     sys.exit(1)
 
 
@@ -70,17 +71,6 @@ def initialize(
     workflow.initialize_limit_checks()
 
     ta.initialize()
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # La inicialización del logger de archivos ahora se gestiona de forma centralizada
-    # al inicio del bot en main.py. Esta llamada ya no es necesaria y causa un error.
-    # if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
-    #     try:
-    #         signal_logger.initialize_logger()
-    #     except Exception as e:
-    #         memory_logger.log(f"ERROR: Inicializando signal_logger: {e}", level="ERROR")
-    # --- FIN DE LA MODIFICACIÓN ---
-
     memory_logger.log("Event Processor: Orquestador inicializado.", level="INFO")
 
 
@@ -187,5 +177,6 @@ def _print_tick_status_to_console(signal_data: Optional[Dict], current_timestamp
                 print("    (Gestión desactivada o PM no inicializado)")
             print("=" * len(hdr))
         except Exception as e_print:
-            print(f"ERROR [Print Tick Status]: {e_print}")
+            # Aquí print está bien porque es un error de la función de imprimir
+            print(f"ERROR [Print Tick Status]: {e_print}") 
             traceback.print_exc()

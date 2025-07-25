@@ -26,11 +26,14 @@ def initialize_core_components(
     y la instancia del adaptador de exchange creada.
     """
     print("\n--- Inicializando Componentes Core para la Sesión Live ---")
+    
+    # Extraer el logger al principio para usarlo en el bloque except
+    memory_logger_module = dependencies.get('memory_logger_module')
+    
     try:
         # --- Extracción de dependencias ---
         config_module = dependencies['config_module']
         utils_module = dependencies['utils_module']
-        memory_logger_module = dependencies['memory_logger_module']
         connection_manager_module = dependencies['connection_manager_module']
         open_snapshot_logger_module = dependencies.get('open_snapshot_logger_module')
         closed_position_logger_module = dependencies.get('closed_position_logger_module')
@@ -53,13 +56,6 @@ def initialize_core_components(
 
         ta_manager_module.initialize()
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # La inicialización de los loggers de archivo ahora se maneja centralmente en main.py al inicio.
-        # Esta llamada ya no es necesaria y causaba el AttributeError.
-        # if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-        #     open_snapshot_logger_module.initialize_logger()
-        # --- FIN DE LA MODIFICACIÓN ---
-        
         # Inyectar dependencias en el módulo de helpers del PM
         pm_helpers_module.set_dependencies(config_module, utils_module)
 
@@ -78,11 +74,6 @@ def initialize_core_components(
             return False, f"Exchange '{exchange_name}' no soportado.", None # <-- CAMBIO
         
         print(f"Adaptador para '{exchange_name.upper()}' creado e inicializado con éxito.")
-
-        # NOTA: Ya no es necesario inyectar el adaptador en el diccionario 'dependencies'
-        # porque ahora lo devolvemos explícitamente. Se mantiene por si otro
-        # componente interno lo necesitara, pero es una buena práctica eliminarlo si no se usa.
-        # dependencies['exchange_adapter'] = exchange_adapter
 
         # --- 3. Construcción del Grafo de Objetos del PM (Arquitectura Limpia) ---
         print("Construyendo grafo de objetos del Position Manager...")
@@ -150,5 +141,11 @@ def initialize_core_components(
         return True, "Inicialización completa.", exchange_adapter # <-- CAMBIO CLAVE
 
     except Exception as e:
-        traceback.print_exc()
-        return False, f"Fallo catastrófico durante la inicialización de componentes: {e}", None # <-- CAMBIO
+        # Aplicamos la corrección de logging que discutimos
+        if memory_logger_module:
+            memory_logger_module.log(f"Fallo catastrófico durante la inicialización de componentes: {e}", "ERROR")
+            memory_logger_module.log(traceback.format_exc(), "ERROR")
+        else:
+            # Fallback a print si el logger no está disponible
+            traceback.print_exc()
+        return False, f"Fallo catastrófico durante la inicialización de componentes: {e}", None

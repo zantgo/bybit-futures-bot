@@ -59,7 +59,6 @@ def calculate_margin_per_slot(available_margin: float, open_positions_count: int
         
     return _utils.safe_division(available_margin, available_slots, default=0.0)
 
-# <<< CORRECCIÓN: La función ahora acepta sl_pct como argumento >>>
 def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optional[float]:
     """
     Calcula el precio de Stop Loss para una posición individual.

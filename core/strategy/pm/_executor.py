@@ -90,7 +90,7 @@ class PositionExecutor:
         except Exception as e:
             result['message'] = f"Excepción calculando tamaño/margen: {e}"
             memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR")
-            traceback.print_exc()
+            memory_logger.log(traceback.format_exc(), level="ERROR")
             return result
         
         # --- 2. Crear Datos de la Posición Lógica ---

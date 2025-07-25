@@ -90,7 +90,7 @@ def check_conditional_triggers(current_price: float, timestamp: datetime.datetim
 
     except Exception as e_main:
         memory_logger.log(f"ERROR CRÍTICO [Workflow Triggers]: Obteniendo hitos del PM: {e_main}", level="ERROR")
-        traceback.print_exc()
+        memory_logger.log(traceback.format_exc(), level="ERROR")
 
 
 def _execute_milestone_action(action, milestone_id: str):

@@ -9,6 +9,7 @@ v2.0: Refactorizado para ser agnóstico al exchange.
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 import datetime
 import numpy as np
+import traceback # Importamos al inicio del módulo
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 # --- Dependencias del Proyecto ---
@@ -211,7 +212,6 @@ def extract_physical_state_from_standard_positions(
             'timestamp': datetime.datetime.now()
         }
     except Exception as e:
-         memory_logger.log(f"ERROR [Helper Extract Standard]: Excepción calculando agregados: {e}", level="ERROR")
-         import traceback
-         traceback.print_exc()
-         return None
+        memory_logger.log(f"ERROR [Helper Extract Standard]: Excepción calculando agregados: {e}", level="ERROR")
+        memory_logger.log(traceback.format_exc(), level="ERROR")
+        return None
