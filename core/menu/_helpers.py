@@ -7,6 +7,7 @@ y formatear secciones de información.
 
 v3.2: Añadida la clase CancelInput y la lógica de cancelación a la función
 get_input para mejorar la usabilidad de los asistentes de edición.
+v3.3 (REQ-01): Mejorada la UX de get_input para mostrar el valor por defecto de forma explícita.
 """
 import os
 import datetime
@@ -126,26 +127,17 @@ def clear_screen():
     """Limpia la pantalla de la terminal."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
-# Mantenemos la versión robusta de `format_datetime_utc` del v3.1
 def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
     """
     Formatea un objeto datetime a string en formato UTC, manejando None.
     """
-    # Usamos el objeto global _utils si está disponible, si no, lo hacemos manualmente.
-    # Esto es por si esta función se necesita antes de que _utils esté completamente inicializado.
-    
-    # Primero, validamos que el input es un objeto datetime
     if not isinstance(dt_object, datetime.datetime):
         return "N/A"
 
     try:
-        # Convertir a UTC. Si el objeto es "naive" (sin tzinfo), se asume que es
-        # la hora local del sistema y se convierte a UTC.
-        # Si ya tiene zona horaria, se convierte correctamente a UTC.
         dt_utc = dt_object.astimezone(timezone.utc)
         return dt_utc.strftime(fmt)
     except (ValueError, TypeError):
-        # En caso de cualquier error de formateo, devolvemos un mensaje claro.
         return "Invalid DateTime"
 
 def print_tui_header(title: str, width: int = 80):
@@ -164,12 +156,11 @@ def print_tui_header(title: str, width: int = 80):
     print("=" * width)
 
 
-# --- INICIO DEL CÓDIGO AÑADIDO Y MEJORADO DEL v3.2 ---
-
 class CancelInput:
     """Clase marcadora para indicar que el usuario canceló la entrada."""
     pass
 
+# --- INICIO DE LA MODIFICACIÓN ---
 def get_input(
     prompt: str,
     type_func: Callable = str,
@@ -184,9 +175,13 @@ def get_input(
     while True:
         try:
             prompt_full = f"{prompt}"
+            
+            # Se unifica el formato para mostrar el valor por defecto
+            # Esto resuelve el REQ-01 para mejorar la consistencia visual.
             if default is not None:
-                prompt_full += f" (actual: {default})"
-            # Añadimos la opción de cancelar
+                prompt_full += f" [default: {default}]"
+            
+            # Se mantiene la opción de cancelar
             prompt_full += " [o 'c' para cancelar]: "
 
             val_str = input(prompt_full).strip()
@@ -212,8 +207,7 @@ def get_input(
             print(f"Error: Entrada inválida. Por favor, introduce un valor de tipo '{type_func.__name__}'.")
         except Exception as e:
             print(f"Error inesperado: {e}")
-
-# --- FIN DEL CÓDIGO AÑADIDO Y MEJORADO ---
+# --- FIN DE LA MODIFICACIÓN ---
 
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):

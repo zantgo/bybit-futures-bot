@@ -116,6 +116,64 @@ class _ApiActions:
         self.process_triggered_milestone(milestone_id)
         return True, f"Hito ...{milestone_id[-6:]} activado forzosamente."
 
+    def force_trigger_milestone_with_pos_management(
+        self,
+        milestone_id: str,
+        long_pos_action: str = 'keep',
+        short_pos_action: str = 'keep'
+    ) -> Tuple[bool, str]:
+        """
+        Gestiona las posiciones existentes según las acciones especificadas y luego
+        fuerza la activación de un nuevo hito.
+        """
+        milestone = next((m for m in self._milestones if m.id == milestone_id), None)
+        if not milestone:
+            return False, "Hito no encontrado para forzar activación."
+        if milestone.status != 'ACTIVE':
+            return False, f"Solo se pueden forzar hitos con estado 'ACTIVE'. Estado actual: {milestone.status}."
+
+        self._handle_position_management_on_force_trigger(
+            long_pos_action, short_pos_action
+        )
+
+        self._memory_logger.log(f"FORZANDO HITO: ID ...{milestone_id[-6:]} activado manualmente tras gestión de posiciones.", "WARN")
+        self.process_triggered_milestone(milestone_id)
+        
+        return True, f"Hito ...{milestone_id[-6:]} activado forzosamente. Posiciones gestionadas."
+
+    # --- INICIO DE LA MODIFICACIÓN (REQ-10) ---
+    def update_active_trend_parameters(self, params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Actualiza los parámetros de configuración de la tendencia activa en tiempo real.
+        """
+        # 1. Validar que hay una tendencia activa.
+        if not self._active_trend:
+            return False, "No hay ninguna tendencia activa para modificar."
+
+        # 2. Actualizar los parámetros.
+        try:
+            # Iterar sobre los nuevos parámetros y actualizar el objeto TrendConfig
+            trend_config_object = self._active_trend['config']
+            changes_log = []
+            for key, value in params_to_update.items():
+                if hasattr(trend_config_object, key):
+                    old_value = getattr(trend_config_object, key)
+                    setattr(trend_config_object, key, value)
+                    changes_log.append(f"'{key}': {old_value} -> {value}")
+            
+            if not changes_log:
+                return True, "No se realizaron cambios en los parámetros de la tendencia."
+
+            log_message = "Parámetros de la tendencia activa actualizados en tiempo real: " + ", ".join(changes_log)
+            self._memory_logger.log(log_message, "WARN")
+            return True, "Parámetros de la tendencia activa actualizados con éxito."
+
+        except Exception as e:
+            error_msg = f"Error al actualizar los parámetros de la tendencia activa: {e}"
+            self._memory_logger.log(error_msg, "ERROR")
+            return False, error_msg
+    # --- FIN DE LA MODIFICACIÓN ---
+
     def end_current_trend_and_ask(self):
         """Llamado por los limit checkers para finalizar una tendencia."""
         self._end_trend(reason="Límite de tendencia alcanzado")
@@ -171,8 +229,6 @@ class _ApiActions:
         if new_size_usdt <= 0:
             return False, "El tamaño debe ser positivo."
         self._initial_base_position_size_usdt = new_size_usdt
-        # Esta llamada ya no existe en BalanceManager, así que se elimina.
-        # self._balance_manager.recalculate_dynamic_base_sizes() 
         return True, f"Tamaño base actualizado a {new_size_usdt:.2f} USDT."
 
     def set_leverage(self, new_leverage: float) -> Tuple[bool, str]:
@@ -181,9 +237,3 @@ class _ApiActions:
             return False, "Apalancamiento debe estar entre 1.0 y 100.0."
         self._leverage = new_leverage
         return True, f"Apalancamiento actualizado a {new_leverage:.1f}x."
-
-    def set_dynamic_base_size(self, long_size: float, short_size: float):
-        """[OBSOLETO] Mantenido por compatibilidad, pero no tiene efecto."""
-        # self._dynamic_base_size_long = long_size
-        # self._dynamic_base_size_short = short_size
-        pass

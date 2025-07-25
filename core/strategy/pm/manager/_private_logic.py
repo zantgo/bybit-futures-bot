@@ -61,8 +61,6 @@ class _PrivateLogic:
         if open_positions_count >= self._max_logical_positions:
             return False
             
-        # Comprobar si hay margen disponible para al menos el tamaño MÍNIMO de orden.
-        # Esto evita intentar abrir posiciones de 0 USDT cuando el balance es muy bajo.
         if self._balance_manager.get_available_margin(side) < 1.0: # Umbral de ~1 USDT
             return False
             
@@ -72,21 +70,16 @@ class _PrivateLogic:
         """Calcula el margen a usar y delega la apertura al ejecutor."""
         if not self._active_trend: return
 
-        # Calcular el número de slots disponibles
         open_positions_count = len(self._position_state.get_open_logical_positions(side))
         available_slots = self._max_logical_positions - open_positions_count
         if available_slots <= 0: return
 
-        # Calcular margen por slot basado en el capital DISPONIBLE en este momento
         available_margin = self._balance_manager.get_available_margin(side)
         margin_per_slot = self._utils.safe_division(available_margin, available_slots)
         
-        # El margen a usar es el MÍNIMO entre el tamaño base configurado y lo que hay disponible por slot.
-        # Esto asegura que no se arriesgue más de lo configurado y se adapte dinámicamente al capital real.
         margin_to_use = min(self._initial_base_position_size_usdt, margin_per_slot)
 
-        # Doble verificación para evitar montos demasiado pequeños que la API podría rechazar
-        if margin_to_use < 1.0: # Umbral mínimo de 1 USDT para una orden
+        if margin_to_use < 1.0:
             self._memory_logger.log(f"Apertura omitida: Margen a usar ({margin_to_use:.4f} USDT) es menor al umbral mínimo.", level="WARN")
             return
 
@@ -138,7 +131,33 @@ class _PrivateLogic:
                 )
                 if transferred > 0: self._balance_manager.record_real_profit_transfer(transferred)
         return result.get('success', False)
-    
+
+    # --- INICIO DE LA MODIFICACIÓN (REQ-06) ---
+    def _handle_position_management_on_force_trigger(
+        self,
+        long_pos_action: str,
+        short_pos_action: str
+    ):
+        """
+        Ejecuta las acciones de cierre sobre las posiciones existentes antes de
+        forzar una nueva tendencia.
+        """
+        self._memory_logger.log(
+            f"Gestión de posiciones pre-activación: LONGS={long_pos_action}, SHORTS={short_pos_action}",
+            "INFO"
+        )
+        
+        reason = "FORCE_TRIGGER_TRANSITION"
+
+        if long_pos_action == 'close':
+            self.close_all_logical_positions('long', reason=reason)
+        
+        if short_pos_action == 'close':
+            self.close_all_logical_positions('short', reason=reason)
+            
+        # La acción 'keep' no requiere ninguna operación, las posiciones simplemente se mantienen.
+    # --- FIN DE LA MODIFICACIÓN ---
+
     def _cleanup_completed_milestones(self):
         """Limpia el árbol, eliminando hitos obsoletos para evitar acumulación."""
         completed_milestones = sorted(

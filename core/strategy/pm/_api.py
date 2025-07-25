@@ -148,6 +148,32 @@ def force_trigger_milestone(milestone_id: str) -> Tuple[bool, str]:
         return _pm_instance.force_trigger_milestone(milestone_id)
     return False, "Función 'force_trigger_milestone' no implementada en el manager."
 
+def force_trigger_milestone_with_pos_management(
+    milestone_id: str,
+    long_pos_action: str = 'keep',
+    short_pos_action: str = 'keep'
+) -> Tuple[bool, str]:
+    """
+    Gestiona las posiciones existentes y luego fuerza la activación de un hito.
+    """
+    if not _pm_instance: return False, "PM no instanciado"
+    if hasattr(_pm_instance, 'force_trigger_milestone_with_pos_management'):
+        return _pm_instance.force_trigger_milestone_with_pos_management(
+            milestone_id, long_pos_action, short_pos_action
+        )
+    return False, "Función 'force_trigger_milestone_with_pos_management' no implementada en el manager."
+
+# --- INICIO DE LA MODIFICACIÓN (REQ-10) ---
+def update_active_trend_parameters(params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Actualiza los parámetros de la tendencia actualmente activa en tiempo real.
+    """
+    if not _pm_instance: return False, "PM no instanciado"
+    if hasattr(_pm_instance, 'update_active_trend_parameters'):
+        return _pm_instance.update_active_trend_parameters(params_to_update)
+    return False, "Función 'update_active_trend_parameters' no implementada en el manager."
+# --- FIN DE LA MODIFICACIÓN ---
+
 def force_end_trend(close_positions: bool = False) -> Tuple[bool, str]:
     """Fuerza la finalización de la tendencia activa y vuelve a NEUTRAL."""
     if not _pm_instance: return False, "PM no instanciado"
