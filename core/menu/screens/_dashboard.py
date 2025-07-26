@@ -53,7 +53,7 @@ def _handle_ticker_change(config_module: Any):
     default_symbol = "BTCUSDT"
 
     print(f"\nValidando nuevo ticker '{new_symbol}' con el exchange...")
-    time.sleep(1) 
+    time.sleep(1)
 
     validation_ticker = exchange_adapter.get_ticker(new_symbol)
 
@@ -72,7 +72,7 @@ def _handle_ticker_change(config_module: Any):
 def _print_positions_table(title: str, positions: List[Dict[str, Any]], current_price: float, side: str):
     """Imprime una tabla formateada para las posiciones abiertas."""
     print(f"\n--- {title} ({len(positions)}) " + "-" * (76 - len(title) - 4 - len(str(len(positions)))))
-    
+
     if not positions:
         print("  (No hay posiciones abiertas)")
         return
@@ -94,9 +94,9 @@ def _print_positions_table(title: str, positions: List[Dict[str, Any]], current_
         pnl = 0.0
         if current_price > 0 and entry_price > 0 and size_contracts > 0:
             pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
-        
+
         pnl_color = COLOR_GREEN if pnl >= 0 else COLOR_RED
-        
+
         idx_str = f"{i:<4}"
         entry_str = f"{entry_price:10.4f}"
         size_str = f"{size_contracts:12.4f}"
@@ -122,7 +122,7 @@ def show_dashboard_screen():
 
     pm_api = _deps.get("position_manager_api_module")
     config_module = _deps.get("config_module")
-    
+
     if not pm_api or not config_module:
         print("ERROR CRÍTICO: Dependencias (PM API o Config) no inyectadas en el Dashboard.")
         time.sleep(3)
@@ -130,7 +130,7 @@ def show_dashboard_screen():
 
     clear_screen()
     print("Dashboard: Esperando la recepción del primer tick de precio del mercado...")
-    
+
     wait_animation = ['|', '/', '-', '\\']
     i = 0
     while True:
@@ -139,7 +139,7 @@ def show_dashboard_screen():
             print("\n¡Precio recibido! Cargando dashboard...")
             time.sleep(1.5)
             break
-        
+
         print(f"\rEsperando... {wait_animation[i % len(wait_animation)]}", end="")
         i += 1
         time.sleep(0.2)
@@ -149,32 +149,30 @@ def show_dashboard_screen():
 
         try:
             current_price = pm_api.get_current_market_price() or 0.0
-            
+
             summary = pm_api.get_position_summary()
             if not summary or summary.get('error'):
                 print(f"\nError al obtener el estado del bot: {summary.get('error', 'Desconocido')}")
                 press_enter_to_continue()
                 continue
-            
+
             unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
             realized_pnl = summary.get('total_realized_pnl_session', 0.0)
             total_pnl = realized_pnl + unrealized_pnl
             initial_capital = summary.get('initial_total_capital', 0.0)
             current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
-            
+
             session_start_time = pm_api.get_session_start_time()
-            # --- INICIO DE LA MODIFICACIÓN ---
             # Usamos datetime.now(timezone.utc) para que ambos objetos sean "aware" y se puedan restar.
             duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds() if session_start_time else 0
-            # --- FIN DE LA MODIFICACIÓN ---
             duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
-            
+
             ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-            
+
             trend_status = summary.get('trend_status', {})
             trend_mode = trend_status.get('mode', 'NEUTRAL')
             milestone_id = trend_status.get('milestone_id', None)
-            
+
             status_display = f"Tendencia: {trend_mode}"
             if milestone_id:
                 status_display += f" (Hito: ...{milestone_id[-6:]})"
@@ -186,34 +184,34 @@ def show_dashboard_screen():
             print(f"Error al recopilar datos para el dashboard: {e}")
             time.sleep(2)
             continue
-        
+
         clear_screen()
-        
+
         header_title = f"Dashboard: {ticker_symbol} @ {current_price:.4f} USDT | {status_display}"
         print_tui_header(header_title)
-        
+
         print("\n--- Estado General y Configuración de la Sesión " + "-"*31)
-        
+
         col1_data = {
             "Duración Sesión": duration_str, "Capital Inicial": f"{initial_capital:.2f} USDT",
             "PNL Realizado": f"{realized_pnl:+.4f} USDT", "PNL No Realizado": f"{unrealized_pnl:+.4f} USDT",
             "PNL Total": f"{total_pnl:+.4f} USDT", "ROI Sesión": f"{current_roi:+.2f}%",
         }
-        
+
         sl_roi_enabled = getattr(config_module, 'SESSION_ROI_SL_ENABLED', False)
         tp_roi_enabled = getattr(config_module, 'SESSION_ROI_TP_ENABLED', False)
         sl_roi_val = getattr(config_module, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         tp_roi_val = getattr(config_module, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
         sl_roi_str = f"Activo (-{sl_roi_val:.1f}%)" if sl_roi_enabled else "Desactivado"
         tp_roi_str = f"Activo (+{tp_roi_val:.1f}%)" if tp_roi_enabled else "Desactivado"
-        
+
         duration_limit = getattr(config_module, 'SESSION_MAX_DURATION_MINUTES', 0)
         action_on_limit = getattr(config_module, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
         duration_limit_str = f"{duration_limit} min (Acción: {action_on_limit})" if duration_limit > 0 else "Desactivado"
 
         trades_limit = getattr(config_module, 'SESSION_MAX_TRADES', 0)
         trades_limit_str = str(trades_limit) if trades_limit > 0 else "Ilimitados"
-        
+
         col2_data = {
             "Apalancamiento": f"{getattr(config_module, 'POSITION_LEVERAGE', 0.0):.1f}x",
             "Tamaño Base / Max Pos": f"{getattr(config_module, 'POSITION_BASE_SIZE_USDT', 0.0):.2f}$ / {getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 0)}",
@@ -227,7 +225,7 @@ def show_dashboard_screen():
         max_key_len2 = max(len(k) for k in col2_data.keys())
         keys1, keys2 = list(col1_data.keys()), list(col2_data.keys())
         num_rows = max(len(keys1), len(keys2))
-        
+
         for i in range(num_rows):
             line = ""
             if i < len(keys1):
@@ -258,54 +256,44 @@ def show_dashboard_screen():
         _print_positions_table("Posiciones SHORT", summary.get('open_short_positions', []), current_price, 'short')
 
         menu_items = [
-            "[1] Refrescar", 
-            "[2] Gestionar Posiciones", 
+            "[1] Refrescar",
+            "[2] Gestionar Posiciones",
             "[3] Gestionar Hitos (Árbol de Decisiones)",
             None,
-            "[4] Editar Configuración de Sesión", 
             "[5] Ver Logs en Tiempo Real",
             None,
-            "[h] Ayuda", 
+            "[h] Ayuda",
             "[q] Salir del Bot"
         ]
-        
+        # --- FIN DE LA MODIFICACIÓN COMENTADA ---
+
         menu_options = helpers_module.MENU_STYLE.copy()
         menu_options['clear_screen'] = False
         menu_options['menu_cursor_style'] = ("fg_cyan", "bold")
 
         menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
         choice = menu.show()
-        
         action_map = {
             0: 'refresh', 1: 'view_positions', 2: 'milestone_manager',
-            4: 'edit_config', 5: 'view_logs', 7: 'help', 8: 'exit'
+            4: 'view_logs', # El nuevo índice 4 corresponde a 'view_logs'
+            6: 'help',      # El nuevo índice 6 corresponde a 'help'
+            7: 'exit'       # El nuevo índice 7 corresponde a 'exit'
         }
         action = action_map.get(choice)
-        
-        if action == 'refresh': 
+        # --- FIN DE LA MODIFICACIÓN COMENTADA ---
+
+        if action == 'refresh':
             continue
-        elif action == 'view_positions': 
+        elif action == 'view_positions':
             _position_viewer.show_position_viewer_screen(pm_api)
-        elif action == 'milestone_manager': 
+        elif action == 'milestone_manager':
             _milestone_manager.show_milestone_manager_screen()
-        
-        elif action == 'edit_config': 
-            original_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
-            
-            changes_saved = _config_editor.show_config_editor_screen(config_module)
-            
-            if changes_saved:
-                new_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
-                if new_symbol != original_symbol:
-                    _handle_ticker_change(config_module)
-            
-            continue
-            
-        elif action == 'view_logs': 
+
+        elif action == 'view_logs':
             _log_viewer.show_log_viewer()
-        elif action == 'help': 
+        elif action == 'help':
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="¿Confirmas apagar el bot?", **helpers_module.MENU_STYLE)
-            if confirm_menu.show() == 0: 
+            if confirm_menu.show() == 0:
                 break
