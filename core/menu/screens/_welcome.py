@@ -1,9 +1,9 @@
 """
 Módulo para la Pantalla de Bienvenida y Configuración Inicial.
 
-v2.6: Eliminada la comprobación de balances en el menú principal para agilizar la carga.
-v2.5: Añadida la opción para ver los logs directamente desde el menú de bienvenida.
-v2.4: Añadida la funcionalidad de prueba de apertura/cierre de posiciones.
+v3.0 (Refactor de Contexto):
+- Se separa la configuración en "General" (pre-sesión) y "Sesión" (en-vivo).
+- Este menú ahora llama al editor en modo 'general'.
 """
 from typing import Dict, Any, Tuple
 import time
@@ -31,7 +31,7 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- Funciones de Ayuda para la Pantalla ---
+# --- Funciones de Ayuda para la Pantalla (sin cambios) ---
 
 def _display_balances(config_module: Any):
     """Obtiene y muestra los balances de todas las cuentas configuradas."""
@@ -153,18 +153,17 @@ def show_welcome_screen() -> bool:
         else:
             print("  (Error: No se pudo cargar la función de impresión de config)")
 
-        # --- CAMBIO: Llamada a la comprobación de balances eliminada de aquí ---
-        # _display_balances(config_module)
-
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Iniciar Bot con esta configuración",
-            "[2] Modificar configuración para esta sesión",
+            "[2] Modificar configuración general del bot",
             "[3] Probar Transferencias entre Subcuentas",
             "[4] Probar Apertura/Cierre de Posiciones",
             "[5] Ver Logs de la Sesión",
             None,
             "[6] Salir"
         ]
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -176,7 +175,10 @@ def show_welcome_screen() -> bool:
             return True
         
         elif choice_index == 1:
-            show_config_editor_screen(config_module)
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Llamamos al editor en modo 'general'
+            show_config_editor_screen(config_module, context='general')
+            # --- FIN DE LA MODIFICACIÓN ---
             continue
             
         elif choice_index == 2:
@@ -187,7 +189,6 @@ def show_welcome_screen() -> bool:
             print(f"Resultado: {message}")
             if success: print("\n-> Los UIDs y permisos de transferencia son CORRECTOS.")
             else: print("\n-> ¡ERROR! Revisa los UIDs, permisos y logs.")
-            # --- CAMBIO: Llamada a la comprobación de balances eliminada de aquí ---
             press_enter_to_continue()
             continue
 
@@ -198,7 +199,6 @@ def show_welcome_screen() -> bool:
             print(f"Estado: {'ÉXITO' if success else 'FALLO'}")
             print(f"Mensaje: {message}")
             print("="*50)
-            # --- CAMBIO: Llamada a la comprobación de balances eliminada de aquí ---
             press_enter_to_continue()
             continue
             

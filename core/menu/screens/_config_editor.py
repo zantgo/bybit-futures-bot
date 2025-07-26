@@ -1,9 +1,10 @@
 """
 Módulo para la Pantalla de Edición de Configuración.
 
-v3.4: Refactorizado para no llamar a la API del PM en vivo y para loguear
-los cambios solo al guardar, mejorando la UX y la consistencia. Implementado
-un sistema de estado temporal.
+v3.5 (Refactor de Contexto):
+- La función principal ahora acepta un 'context' ('general' o 'session').
+- Muestra dinámicamente solo las opciones de configuración relevantes
+  para el contexto proporcionado.
 """
 from typing import Any, Dict
 import time
@@ -30,9 +31,10 @@ def init(dependencies: Dict[str, Any]):
 
 # --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
-def show_config_editor_screen(config_module: Any) -> bool:
+def show_config_editor_screen(config_module: Any, context: str = 'session') -> bool:
     """
-    Muestra la pantalla de edición y devuelve True si se guardaron cambios, False si no.
+    Muestra la pantalla de edición y devuelve True si se guardaron cambios.
+    Acepta un 'context' para mostrar diferentes menús.
     """
     logger = _deps.get("memory_logger_module")
     if not TerminalMenu:
@@ -40,46 +42,60 @@ def show_config_editor_screen(config_module: Any) -> bool:
             logger.log("Error: 'simple-term-menu' no está instalado. No se puede mostrar el editor.", level="ERROR")
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return False
 
-    # 1. Crear un objeto temporal que es una copia PROFUNDA de la configuración actual.
+    # Crear una copia temporal de la configuración para editarla de forma segura.
     class TempConfig:
         pass
     
     temp_config = TempConfig()
-
-    # Iteramos sobre los atributos del módulo config, pero aplicamos un filtro estricto.
     for attr in dir(config_module):
-        # La condición clave: solo nos interesan los atributos en mayúsculas,
-        # que no sean "privados" (no empiecen con '_'), y que no sean funciones.
         if attr.isupper() and not attr.startswith('_'):
             value = getattr(config_module, attr)
-            # Una capa extra de seguridad: no intentar copiar funciones o métodos.
             if not callable(value):
-                # Usamos deepcopy para asegurar que listas o diccionarios se copien por valor.
                 setattr(temp_config, attr, copy.deepcopy(value))
 
     while True:
-        menu_items = [
-            "[1] Configuración del Ticker",
-            "[2] Parámetros de la Estrategia (TA y Señal)",
-            "[3] Gestión de Posiciones (Capital)",
-            "[4] Límites de la Sesión (Disyuntores)",
-            None,
-            "[h] Ayuda sobre el Editor de Configuración",
-            None,
-            "[b] Guardar y Volver",
-            "[c] Cancelar (Descartar Cambios)"
-        ]
-        
-        main_menu = TerminalMenu(menu_items, title="Editor de Configuración de la Sesión", **MENU_STYLE)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Construir dinámicamente el menú y las acciones según el contexto
+        if context == 'general':
+            title = "Editor de Configuración General del Bot"
+            menu_items = [
+                "[1] Configuración del Ticker",
+                "[2] Parámetros de la Estrategia (TA y Señal)",
+                None,
+                "[h] Ayuda sobre el Editor de Configuración",
+                None,
+                "[b] Guardar y Volver",
+                "[c] Cancelar (Descartar Cambios)"
+            ]
+            action_map = {
+                0: 'ticker', 1: 'strategy',
+                3: 'help', 5: 'save_back', 6: 'cancel_back'
+            }
+        elif context == 'session':
+            title = "Editor de Configuración de la Sesión"
+            menu_items = [
+                "[1] Gestión de Posiciones (Capital)",
+                "[2] Límites de la Sesión (Disyuntores)",
+                None,
+                "[h] Ayuda sobre el Editor de Configuración",
+                None,
+                "[b] Guardar y Volver",
+                "[c] Cancelar (Descartar Cambios)"
+            ]
+            action_map = {
+                0: 'capital', 1: 'limits',
+                3: 'help', 5: 'save_back', 6: 'cancel_back'
+            }
+        else:
+            # Fallback por si se pasa un contexto inválido
+            print(f"Error: Contexto de editor de configuración desconocido: '{context}'"); time.sleep(2); return False
+
+        main_menu = TerminalMenu(menu_items, title=title, **MENU_STYLE)
         choice_index = main_menu.show()
         
-        action_map = {
-            0: 'ticker', 1: 'strategy', 2: 'capital', 3: 'limits',
-            5: 'help', 7: 'save_back', 8: 'cancel_back'
-        }
         action = action_map.get(choice_index)
+        # --- FIN DE LA MODIFICACIÓN ---
 
-        # Todos los submenús ahora modificarán `temp_config`
         if action == 'ticker':
             _show_ticker_config_menu(temp_config)
         elif action == 'strategy':
@@ -92,25 +108,22 @@ def show_config_editor_screen(config_module: Any) -> bool:
             show_help_popup("config_editor")
         
         elif action == 'save_back':
-            # 2. Si el usuario guarda, aplicamos los cambios al módulo original y al PM.
             pm_api = _deps.get("position_manager_api_module")
-            # logger ya fue obtenido al inicio de la función
             _apply_and_log_changes(temp_config, config_module, pm_api, logger)
             if logger:
                 logger.log("Cambios guardados y aplicados en la sesión.", level="INFO")
             print("\nCambios guardados y aplicados en la sesión.")
             time.sleep(1.5)
-            return True # Señaliza que se guardaron cambios
+            return True
             
         elif action == 'cancel_back' or choice_index is None:
-            # 3. Si cancela, simplemente salimos. La copia se descarta.
             if logger:
                 logger.log("Cambios en la configuración descartados.", level="INFO")
             print("\nCambios descartados.")
             time.sleep(1.5)
-            return False # Señaliza que no se guardaron cambios
+            return False
 
-# --- Lógica de Aplicación de Cambios (del v3.4) ---
+# --- Lógica de Aplicación de Cambios (sin cambios) ---
 
 def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: Any):
     """Compara la config temporal con la real, aplica los cambios y los loguea."""
@@ -124,13 +137,11 @@ def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: An
             new_value = getattr(temp_cfg, attr)
             old_value = getattr(real_cfg, attr, None)
             
-            # Comparamos para ver si hubo un cambio real
             if new_value != old_value:
                 changes_found = True
                 logger.log(f"  -> {attr}: '{old_value}' -> '{new_value}'", "WARN")
                 setattr(real_cfg, attr, new_value)
                 
-                # Lógica para aplicar cambios en vivo en el PM
                 if pm_api:
                     if attr == 'SESSION_STOP_LOSS_ROI_PCT':
                         if getattr(real_cfg, 'SESSION_ROI_SL_ENABLED', False):
@@ -147,7 +158,7 @@ def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: An
     if not changes_found:
         logger.log("No se detectaron cambios en la configuración.", "INFO")
 
-# --- SUBMENÚS DE CONFIGURACIÓN ---
+# --- SUBMENÚS DE CONFIGURACIÓN (sin cambios) ---
 def _show_ticker_config_menu(cfg: Any):
     while True:
         menu_items = [
@@ -279,10 +290,9 @@ def _show_session_limits_menu(cfg: Any):
             new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, sl_roi_val, min_val=0.1)
             if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
         
-        # Se ajustan los índices para que coincidan con la posición en la lista menu_items
-        elif choice == 6:  # El botón [5] está en el índice 6 de la lista
+        elif choice == 6:
             setattr(cfg, 'SESSION_ROI_TP_ENABLED', not getattr(cfg, 'SESSION_ROI_TP_ENABLED', False))
-        elif choice == 7:  # El botón [6] está en el índice 7 de la lista
+        elif choice == 7:
             new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, tp_roi_val, min_val=0.1)
             if not isinstance(new_val, CancelInput): setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
             
