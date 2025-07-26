@@ -9,7 +9,7 @@ from core import api as bybit_api, utils
 from core.logging import memory_logger
 from connection import manager as connection_manager
 import config
-
+import uuid
 from ._interface import AbstractExchange
 from ._models import StandardOrder, StandardPosition, StandardBalance, StandardInstrumentInfo, StandardTicker
 
@@ -183,28 +183,50 @@ class BybitAdapter(AbstractExchange):
     def transfer_funds(self, amount: float, from_purpose: str, to_purpose: str, coin: str = "USDT") -> bool:
         from_acc_name = self._purpose_to_account_name_map.get(from_purpose)
         to_acc_name = self._purpose_to_account_name_map.get(to_purpose)
-        if not from_acc_name or not to_acc_name: return False
+        if not from_acc_name or not to_acc_name: 
+            memory_logger.log(f"Error de transferencia: propósito desconocido '{from_purpose}' o '{to_purpose}'", "ERROR")
+            return False
 
         loaded_uids = getattr(config, 'LOADED_UIDS', {})
         from_uid = loaded_uids.get(from_acc_name)
         to_uid = loaded_uids.get(to_acc_name)
-        if not from_uid or not to_uid: return False
+        if not from_uid or not to_uid: 
+            memory_logger.log(f"Error de transferencia: UID no encontrado para '{from_acc_name}' o '{to_acc_name}'", "ERROR")
+            return False
 
+        # Se usa la cuenta MAIN siempre para autorizar transferencias
         session, _ = connection_manager.get_session_for_operation('general', specific_account=config.ACCOUNT_MAIN)
-        if not session: return False
+        if not session: 
+            memory_logger.log("Error de transferencia: No se pudo obtener sesión para la cuenta principal.", "ERROR")
+            return False
         
-        amount_str = f"{amount:.{4}f}" # Precisión de transferencia
+        # Formatear el monto a un string con precisión fija
+        amount_str = f"{amount:.4f}"
+        
         try:
+            # <<< INICIO DE LA CORRECCIÓN >>>
+            transfer_id = str(uuid.uuid4())
+            # <<< FIN DE LA CORRECCIÓN >>>
+
             response = session.create_universal_transfer(
-                transferId=f"bot_{int(time.time()*1000)}", coin=coin.upper(), amount=amount_str,
+                transferId=transfer_id, coin=coin.upper(), amount=amount_str,
                 fromMemberId=int(from_uid), toMemberId=int(to_uid),
                 fromAccountType=getattr(config, 'UNIVERSAL_TRANSFER_FROM_TYPE', 'UNIFIED'),
                 toAccountType=getattr(config, 'UNIVERSAL_TRANSFER_TO_TYPE', 'UNIFIED')
             )
-            return response and response.get('retCode') == 0
+            
+            # <<< INICIO DE MEJORA DE LOGGING >>>
+            if response and response.get('retCode') == 0:
+                return True
+            else:
+                error_msg = response.get('retMsg', 'Error desconocido') if response else "Sin respuesta de la API"
+                memory_logger.log(f"[BybitAdapter] Fallo en la transferencia: {error_msg}", "ERROR")
+                return False
+            # <<< FIN DE MEJORA DE LOGGING >>>
+
         except Exception as e:
-            memory_logger.log(f"[BybitAdapter] Fallo en la transferencia: {e}", "ERROR")
+            memory_logger.log(f"[BybitAdapter] Excepción en la transferencia: {e}", "ERROR")
             return False
-        
+
     def get_latest_price(self) -> Optional[float]:
         return self._latest_price

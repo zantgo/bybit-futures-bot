@@ -128,39 +128,58 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # --- UID Management ---
 LOADED_UIDS = {}
 
+# EN: ./config.py
+
 def _load_and_validate_uids():
+    """
+    Carga y valida los UIDs desde el .env.
+    --- VERSIÓN MODIFICADA: Detiene el programa si el .env o los UIDs faltan. ---
+    """
     global LOADED_UIDS
     all_uids_valid = True
     required_uids_map = ACCOUNT_UID_ENV_VAR_MAP
+    
     try:
-        env_path = find_dotenv(filename='.env', raise_error_if_not_found=False, usecwd=True)
-        if env_path:
-            load_dotenv(dotenv_path=env_path, override=True)
-        else:
-            print("ADVERTENCIA [config]: .env no encontrado (necesario para UIDs de transferencia).")
+        # <-- CAMBIO CLAVE: raise_error_if_not_found ahora es True
+        env_path = find_dotenv(filename='.env', raise_error_if_not_found=True, usecwd=True)
+        load_dotenv(dotenv_path=env_path, override=True)
+    except IOError:
+        # <-- CAMBIO CLAVE: Manejo explícito del error si el .env no se encuentra
+        print("="*80)
+        print("!!! ERROR FATAL: No se encontró el archivo de configuración de entorno '.env' !!!")
+        print("Este archivo es OBLIGATORIO para las claves API y los UIDs.")
+        print("Por favor, crea un archivo .env en la raíz del proyecto y reinicia el bot.")
+        print("="*80)
+        sys.exit(1) # Detiene el programa inmediatamente
     except Exception as e:
-        print(f"ERROR [config]: Excepción cargando .env para UIDs: {e}"); return False
+        print(f"ERROR [config]: Excepción inesperada cargando .env: {e}")
+        sys.exit(1)
 
-    if not required_uids_map: return True
+    if not required_uids_map: 
+        return True
     
     loaded_temp = {}
     print("Validando UIDs desde .env...")
     for account_name, env_var_name in required_uids_map.items():
         uid_value = os.getenv(env_var_name)
         if uid_value is None or not uid_value.strip().isdigit():
-             print(f"ERROR [config]: UID inválido/faltante para '{account_name}' (Variable de entorno: {env_var_name}).")
+             print(f"  -> ERROR: UID inválido/faltante para '{account_name}' (Variable de entorno: {env_var_name})")
              all_uids_valid = False
         else:
              loaded_temp[account_name] = uid_value.strip()
 
     if all_uids_valid:
         LOADED_UIDS = loaded_temp
-        print(f"  [config] Validación de UIDs OK. Cargados para: {list(LOADED_UIDS.keys())}")
+        print(f"  -> Validación de UIDs OK. Cargados para: {list(LOADED_UIDS.keys())}")
+        return True
     else:
-        print("ERROR Crítico [config]: Faltan o son inválidos UIDs para transferencias API.")
-        LOADED_UIDS = {}
-    return all_uids_valid
-
+        # <-- CAMBIO CLAVE: Detiene el programa si los UIDs son inválidos
+        print("="*80)
+        print("!!! ERROR FATAL: Faltan o son inválidos UIDs para transferencias API en el archivo .env !!!")
+        print("El bot no puede continuar de forma segura sin esta configuración.")
+        print("="*80)
+        sys.exit(1)
+        
 # --- Función de Impresión de Configuración ---
 def print_initial_config(operation_mode="unknown"):
     """Imprime un resumen de la configuración cargada."""

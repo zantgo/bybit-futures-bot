@@ -11,7 +11,7 @@ de bajo nivel.
 import sys
 from typing import Optional, Dict, Tuple
 from pybit.unified_trading import HTTP
-
+import time
 # --- Dependencias del Proyecto ---
 import config
 from core.logging import memory_logger
@@ -23,43 +23,167 @@ _clients: Dict[str, HTTP] = {}
 _initialized = False
 
 # --- Funciones Públicas ---
-
 def initialize_all_clients():
     """
-    Orquesta la inicialización de todos los clientes API configurados.
+    Orquesta la inicialización y VALIDACIÓN ESTRICTA de todos los clientes API configurados.
+    El bot se detendrá si alguna de las cuentas requeridas falla al conectar o al obtener su balance.
     """
     global _clients, _initialized
     if _initialized:
         memory_logger.log("Advertencia: Clientes API ya inicializados.", level="WARN")
         return
 
-    memory_logger.log("Iniciando Gestor de Conexiones...", level="INFO")
+    print("\n" + "="*80)
+    print("INICIANDO GESTOR DE CONEXIONES Y VALIDANDO CUENTAS API...")
+    print("="*80)
     
-    # 1. Cargar credenciales
+    # --- PASO 1: Cargar credenciales y UIDs (detendrá el bot si el .env o los UIDs faltan) ---
     _credentials.load_and_validate_uids()
     api_credentials = _credentials.load_api_credentials()
     
-    if not api_credentials:
-        memory_logger.log("Advertencia: No se encontraron credenciales API válidas. No se inicializarán clientes.", level="WARN")
-        _initialized = True
-        return
+    required_accounts = set(config.ACCOUNTS_TO_INITIALIZE)
+    
+    # Verificación de que existen credenciales para todas las cuentas requeridas en el .env
+    if not required_accounts.issubset(set(api_credentials.keys())):
+        missing_creds = required_accounts - set(api_credentials.keys())
+        print("!!! ERROR FATAL: Faltan credenciales API en el archivo .env para las siguientes cuentas:")
+        for acc in missing_creds:
+            print(f"  - {acc}")
+        print("El bot no puede continuar. Por favor, completa tu archivo .env.")
+        print("="*80)
+        sys.exit(1)
 
-    # 2. Crear clientes usando la fábrica
-    for account_name, creds in api_credentials.items():
+    # --- PASO 2: Crear clientes y validar conexión obteniendo el balance ---
+    print("\nIntentando conectar y validar cada cuenta...")
+    failed_accounts = {}
+    
+    for account_name in required_accounts:
+        creds = api_credentials.get(account_name)
+        if not creds:
+            # Esta comprobación es redundante por la anterior, pero es una buena práctica de seguridad.
+            failed_accounts[account_name] = "Credenciales no encontradas."
+            continue
+
+        # Crear cliente
         session = _client_factory.create_client(account_name, creds)
-        if session:
-            _clients[account_name] = session
+        if not session:
+            failed_accounts[account_name] = "Fallo al crear el cliente o al conectar (get_server_time)."
+            continue
+            
+        # Prueba definitiva: Obtener balance
+        try:
+            # Usamos la llamada directa de pybit, ya que el adaptador aún no está listo.
+            balance_response = session.get_wallet_balance(accountType="UNIFIED")
+            if balance_response and balance_response.get('retCode') == 0:
+                result_list = balance_response.get('result', {}).get('list', [])
+                if result_list:
+                    equity = result_list[0].get('totalEquity', 'N/A')
+                    print(f"  -> ÉXITO: Conexión con '{account_name}' validada. Equity: {equity} USD")
+                    _clients[account_name] = session
+                else:
+                    # Respuesta exitosa pero sin datos de balance, podría ser una cuenta nueva. Aceptable.
+                    print(f"  -> ÉXITO: Conexión con '{account_name}' validada. (Sin datos de balance, puede ser una cuenta nueva)")
+                    _clients[account_name] = session
+            else:
+                error_msg = balance_response.get('retMsg', 'Error desconocido de la API')
+                failed_accounts[account_name] = f"Fallo al obtener balance: {error_msg}"
+        except Exception as e:
+            failed_accounts[account_name] = f"Excepción al obtener balance: {str(e)}"
 
-    if not _clients:
-        memory_logger.log("Error Fatal: No se pudo inicializar NINGÚN cliente API con éxito.", level="ERROR")
-        _initialized = False
-        return
+    # --- PASO 3: Verificación final y parada si hay fallos ---
+    if failed_accounts:
+        print("\n" + "="*80)
+        print("!!! ERROR FATAL: No se pudieron validar todas las cuentas API requeridas !!!")
+        for acc, reason in failed_accounts.items():
+            print(f"  - Cuenta '{acc}': {reason}")
+        print("\nEl bot no puede continuar de forma segura. Revisa tus claves API, permisos y conexión.")
+        print("="*80)
+        sys.exit(1)
         
-    # 3. Configurar modos de cuenta para los clientes creados
+    # --- PASO 4: Configurar modos de cuenta para los clientes validados ---
+    print("\nConfigurando modos de cuenta (Hedge Mode)...")
     _configure_active_clients()
 
     _initialized = True
-    memory_logger.log(f"Gestor de Conexiones inicializado. Cuentas activas: {list(_clients.keys())}", level="INFO")
+    print("\n" + "="*80)
+    print("GESTOR DE CONEXIONES INICIALIZADO. TODAS LAS CUENTAS ESTÁN ACTIVAS Y VALIDADAS.")
+    print("="*80)
+    #memory_logger.log(f"Gestor de Conexiones inicializado. Cuentas activas: {list(_clients.keys())}", level="INFO")
+
+
+def test_subaccount_transfers() -> Tuple[bool, str]:
+    """
+    Realiza una secuencia de micro-transferencias para validar la funcionalidad.
+    Transfiere 0.001 USDT de longs->profit->longs y de shorts->profit->shorts.
+    Devuelve un booleano de éxito y un mensaje con el resultado.
+    """
+    main_session = get_client(config.ACCOUNT_MAIN)
+    if not main_session:
+        return False, "Fallo crítico: La cuenta principal no está disponible para iniciar la prueba."
+
+    test_amount = "0.001"
+    coin = "USDT"
+    
+    # Lista de cuentas a probar
+    accounts_to_test = [config.ACCOUNT_LONGS, config.ACCOUNT_SHORTS]
+    profit_account = config.ACCOUNT_PROFIT
+    
+    # Verificar que todos los UIDs necesarios están cargados
+    required_uids = accounts_to_test + [profit_account]
+    for acc in required_uids:
+        if acc not in config.LOADED_UIDS:
+            return False, f"Fallo: El UID para la cuenta '{acc}' no se encontró en la configuración."
+
+    profit_uid = config.LOADED_UIDS[profit_account]
+
+    for source_account in accounts_to_test:
+        source_uid = config.LOADED_UIDS[source_account]
+        
+        # --- Transferencia de Ida (Fuente -> Profit) ---
+        try:
+            transfer_id_forward = f"bot_test_{source_account}_{int(time.time() * 1000)}"
+            print(f"  -> Probando: {source_account} -> {profit_account} ({test_amount} {coin})... ", end="")
+            
+            response_fwd = main_session.create_universal_transfer(
+                transferId=transfer_id_forward, coin=coin, amount=test_amount,
+                fromMemberId=int(source_uid), toMemberId=int(profit_uid),
+                fromAccountType="UNIFIED", toAccountType="UNIFIED"
+            )
+            if not (response_fwd and response_fwd.get('retCode') == 0):
+                msg = response_fwd.get('retMsg', 'Error desconocido')
+                print("FALLO.")
+                return False, f"Fallo en la transferencia de '{source_account}' a 'profit'. Razón: {msg}"
+            
+            print("ÉXITO.")
+            time.sleep(1) # Pausa para asegurar que la API procese
+
+        except Exception as e:
+            print("FALLO.")
+            return False, f"Excepción durante la transferencia de '{source_account}' a 'profit': {e}"
+
+        # --- Transferencia de Vuelta (Profit -> Fuente) ---
+        try:
+            transfer_id_backward = f"bot_test_return_{source_account}_{int(time.time() * 1000)}"
+            print(f"  -> Devolviendo: {profit_account} -> {source_account} ({test_amount} {coin})... ", end="")
+
+            response_bwd = main_session.create_universal_transfer(
+                transferId=transfer_id_backward, coin=coin, amount=test_amount,
+                fromMemberId=int(profit_uid), toMemberId=int(source_uid),
+                fromAccountType="UNIFIED", toAccountType="UNIFIED"
+            )
+            if not (response_bwd and response_bwd.get('retCode') == 0):
+                msg = response_bwd.get('retMsg', 'Error desconocido')
+                print("FALLO.")
+                return False, f"¡CRÍTICO! Fallo en la transferencia de retorno a '{source_account}'. Mueve {test_amount} {coin} manualmente. Razón: {msg}"
+            
+            print("ÉXITO.")
+            time.sleep(1)
+
+        except Exception as e:
+            print("FALLO.")
+            return False, f"¡CRÍTICO! Excepción en la transferencia de retorno a '{source_account}'. Mueve {test_amount} {coin} manualmente: {e}"
+
+    return True, "Prueba de transferencias completada con éxito para todas las cuentas."
 
 def get_client(account_name: str) -> Optional[HTTP]:
     """Obtiene una sesión de cliente inicializada por su nombre de cuenta."""
@@ -72,6 +196,8 @@ def get_initialized_accounts() -> list[str]:
     """Devuelve una lista con los nombres de las cuentas inicializadas con éxito."""
     return list(_clients.keys())
 
+# ARCHIVO: ./connection/_manager.py
+
 def get_session_for_operation(
     purpose: str,
     side: Optional[str] = None,
@@ -79,6 +205,7 @@ def get_session_for_operation(
 ) -> Tuple[Optional[HTTP], Optional[str]]:
     """
     Centraliza la lógica para obtener la sesión API y el nombre de la cuenta correctos.
+    --- VERSIÓN MODIFICADA: Lógica de fallback eliminada para un comportamiento estricto. ---
     """
     if not _initialized:
         return None, None
@@ -89,13 +216,15 @@ def get_session_for_operation(
         if session:
             return session, specific_account
         else:
-            memory_logger.log(f"WARN [Session Selector]: Cuenta específica '{specific_account}' solicitada pero no está inicializada.", level="WARN")
+            # Si se pide una cuenta específica y no existe, la operación debe fallar.
+            memory_logger.log(f"ERROR [Session Selector]: La cuenta específica requerida '{specific_account}' no está inicializada.", level="ERROR")
+            return None, None
 
     # Prioridad 2: Lógica basada en el propósito
     target_map = {
         'ticker': getattr(config, 'TICKER_SOURCE_ACCOUNT', config.ACCOUNT_PROFIT),
-        'trading_long': getattr(config, 'ACCOUNT_LONGS', config.ACCOUNT_MAIN),
-        'trading_short': getattr(config, 'ACCOUNT_SHORTS', config.ACCOUNT_MAIN),
+        'trading_long': getattr(config, 'ACCOUNT_LONGS', None), # Importante: default a None
+        'trading_short': getattr(config, 'ACCOUNT_SHORTS', None), # Importante: default a None
         'general': getattr(config, 'ACCOUNT_MAIN', None),
         'market_data': getattr(config, 'ACCOUNT_MAIN', None)
     }
@@ -107,20 +236,10 @@ def get_session_for_operation(
         if session:
             return session, target_account_name
 
-    # Prioridad 3: Fallback a la cuenta principal
-    main_account_name = getattr(config, 'ACCOUNT_MAIN', None)
-    if main_account_name and main_account_name in _clients:
-        memory_logger.log(f"WARN [Session Selector]: Cuenta objetivo para '{purpose}' ('{target_account_name}') no disponible. Usando fallback a cuenta principal '{main_account_name}'.", level="WARN")
-        return _clients[main_account_name], main_account_name
-        
-    # Prioridad 4: Fallback a CUALQUIER cuenta disponible
-    if _clients:
-        fallback_account_name = next(iter(_clients))
-        memory_logger.log(f"WARN [Session Selector]: Ni la cuenta objetivo ni la principal están disponibles. Usando primera cuenta disponible: '{fallback_account_name}'.", level="WARN")
-        return _clients[fallback_account_name], fallback_account_name
-
+    # Si no se encontró una sesión para el propósito específico, la operación falla.
+    memory_logger.log(f"ERROR [Session Selector]: No se pudo encontrar una sesión API válida para el propósito '{purpose_key}' (Cuenta objetivo: '{target_account_name}').", level="ERROR")
     return None, None
-        
+  
 # --- Funciones Internas (Privadas) ---
 
 def _configure_active_clients():
