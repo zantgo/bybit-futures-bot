@@ -1,3 +1,5 @@
+# core/strategy/pm/__init__.py
+
 """
 Paquete del Position Manager (PM).
 

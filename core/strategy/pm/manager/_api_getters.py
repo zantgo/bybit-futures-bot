@@ -1,3 +1,5 @@
+# core/strategy/pm/manager/_api_getters.py
+
 """
 Módulo del Position Manager: API de Getters.
 
@@ -10,9 +12,16 @@ from typing import Optional, Dict, Any, List
 
 # --- Dependencias de Tipado ---
 try:
-    from .._entities import Milestone
+    # --- INICIO DE LA MODIFICACIÓN: Importar nuevas entidades ---
+    from .._entities import Hito, Operacion
+    # from .._entities import Milestone # Comentada la antigua entidad
+    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError:
-    class Milestone: pass
+    # --- INICIO DE LA MODIFICACIÓN: Añadir fallbacks para nuevas entidades ---
+    class Hito: pass
+    class Operacion: pass
+    # class Milestone: pass
+    # --- FIN DE LA MODIFICACIÓN ---
 
 class _ApiGetters:
     """Clase base que contiene los getters públicos de la API del PositionManager."""
@@ -31,24 +40,52 @@ class _ApiGetters:
         ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
 
-        open_longs = self._position_state.get_open_logical_positions('long')
-        open_shorts = self._position_state.get_open_logical_positions('short')
+        # --- INICIO DE LA MODIFICACIÓN: Leer posiciones desde la Operación Activa ---
+        open_longs = self.operacion_activa.posiciones_activas['long'] if self.operacion_activa else []
+        open_shorts = self.operacion_activa.posiciones_activas['short'] if self.operacion_activa else []
+        # --- FIN DE LA MODIFICACIÓN ---
         
         from dataclasses import asdict
         milestones_as_dicts = [asdict(m) for m in self._milestones]
 
+        # --- INICIO DE LA MODIFICACIÓN: Calcular PNL y ROI de la Operación actual ---
+        operation_unrealized_pnl = 0.0
+        if self.operacion_activa:
+            for side in ['long', 'short']:
+                for pos in self.operacion_activa.posiciones_activas[side]:
+                    entry = pos.entry_price
+                    size = pos.size_contracts
+                    if side == 'long': operation_unrealized_pnl += (current_market_price - entry) * size
+                    else: operation_unrealized_pnl += (entry - current_market_price) * size
+            
+            operation_total_pnl = self.operacion_activa.pnl_realizado_usdt + operation_unrealized_pnl
+            initial_capital_op = self.operacion_activa.capital_inicial_usdt
+            operation_roi = self._utils.safe_division(operation_total_pnl, initial_capital_op) * 100 if initial_capital_op > 0 else 0.0
+        else:
+            operation_total_pnl = 0.0
+            operation_roi = 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
+
+
         summary_data = {
             "initialized": True,
             "operation_mode": self._operation_mode,
-            "trend_status": self.get_trend_state(),
-            "leverage": self._leverage,
-            "max_logical_positions": self._max_logical_positions,
-            "initial_base_position_size_usdt": self._initial_base_position_size_usdt,
+            # --- INICIO DE LA MODIFICACIÓN: Adaptar al nuevo modelo de Operación ---
+            "operation_status": self.get_operation_state(),
+            # "trend_status": self.get_trend_state(), # Comentada la antigua clave
+            # "leverage": self._leverage, # Comentado, ahora dentro de la operación
+            # "max_logical_positions": self._max_logical_positions, # Comentado, ahora dentro de la operación
+            # "initial_base_position_size_usdt": self._initial_base_position_size_usdt, # Comentado, ahora dentro de la operación
+            "operation_pnl": operation_total_pnl,
+            "operation_roi": operation_roi,
+            # --- FIN DE LA MODIFICACIÓN ---
             "bm_balances": self._balance_manager.get_balances_summary(),
             "open_long_positions_count": len(open_longs),
             "open_short_positions_count": len(open_shorts),
-            "open_long_positions": [self._helpers.format_pos_for_summary(p) for p in open_longs],
-            "open_short_positions": [self._helpers.format_pos_for_summary(p) for p in open_shorts],
+            # --- INICIO DE LA MODIFICACIÓN: Usar asdict para las posiciones lógicas ---
+            "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs],
+            "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts],
+            # --- FIN DE LA MODIFICACIÓN ---
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": self._balance_manager.get_initial_total_capital(),
             "real_account_balances": self._balance_manager.get_real_balances_cache(),
@@ -59,44 +96,87 @@ class _ApiGetters:
         return summary_data
 
     def get_unrealized_pnl(self, current_price: float) -> float:
-        """Calcula el PNL no realizado total de todas las posiciones abiertas."""
+        """Calcula el PNL no realizado total de todas las posiciones abiertas en la sesión."""
+        # Esta función ahora calcula el PNL total de la SESIÓN, no de la operación
+        # Se mantiene para los límites globales de sesión
         total_pnl = 0.0
+        if not self.operacion_activa:
+            return 0.0
+            
         for side in ['long', 'short']:
-            for pos in self._position_state.get_open_logical_positions(side):
-                entry = pos.get('entry_price', 0.0)
-                size = pos.get('size_contracts', 0.0)
+            for pos in self.operacion_activa.posiciones_activas[side]:
+                entry = pos.entry_price
+                size = pos.size_contracts
                 if side == 'long': total_pnl += (current_price - entry) * size
                 else: total_pnl += (entry - current_price) * size
         return total_pnl
 
-    def get_trend_state(self) -> Dict[str, Any]:
-        """Devuelve el estado de la tendencia activa."""
-        if not self._active_trend:
-            return {'mode': 'NEUTRAL'}
+    # --- (COMENTADO) get_trend_state ---
+    # def get_trend_state(self) -> Dict[str, Any]:
+    #     """Devuelve el estado de la tendencia activa."""
+    #     if not self._active_trend:
+    #         return {'mode': 'NEUTRAL'}
+        
+    #     from dataclasses import asdict
+    #     return {
+    #         'mode': self._active_trend['config'].mode,
+    #         'milestone_id': self._active_trend['milestone_id'],
+    #         'start_time': self._active_trend['start_time'],
+    #         'trades_executed': self._active_trend['trades_executed'],
+    #         'initial_pnl': self._active_trend['initial_pnl'],
+    #         'config': asdict(self._active_trend['config'])
+    #     }
+
+    # --- INICIO DE LA MODIFICACIÓN: Nuevos getters para la Operación ---
+    def get_operation_state(self) -> Dict[str, Any]:
+        """Devuelve un diccionario con el estado completo de la operación activa."""
+        if not self.operacion_activa:
+            return {'error': 'Operacion no inicializada'}
         
         from dataclasses import asdict
+        
+        # Calcular capital actual y tiempo de ejecución para el estado
+        current_capital = self.operacion_activa.capital_inicial_usdt + self.operacion_activa.pnl_realizado_usdt
+        execution_time_str = "N/A"
+        if self.operacion_activa.tiempo_inicio_ejecucion:
+            duration = datetime.datetime.now(timezone.utc) - self.operacion_activa.tiempo_inicio_ejecucion
+            execution_time_str = str(duration).split('.')[0]
+
         return {
-            'mode': self._active_trend['config'].mode,
-            'milestone_id': self._active_trend['milestone_id'],
-            'start_time': self._active_trend['start_time'],
-            'trades_executed': self._active_trend['trades_executed'],
-            'initial_pnl': self._active_trend['initial_pnl'],
-            'config': asdict(self._active_trend['config'])
+            "id": self.operacion_activa.id,
+            "configuracion": asdict(self.operacion_activa.configuracion),
+            "capital_inicial_usdt": self.operacion_activa.capital_inicial_usdt,
+            "capital_actual_usdt": current_capital, # Nota: No incluye PNL no realizado aquí
+            "pnl_realizado_usdt": self.operacion_activa.pnl_realizado_usdt,
+            "comercios_cerrados_contador": self.operacion_activa.comercios_cerrados_contador,
+            "tiempo_inicio_ejecucion": self.operacion_activa.tiempo_inicio_ejecucion,
+            "tiempo_ejecucion_str": execution_time_str,
+            "posiciones_long_count": len(self.operacion_activa.posiciones_activas['long']),
+            "posiciones_short_count": len(self.operacion_activa.posiciones_activas['short']),
         }
 
-    def get_trend_limits(self) -> Dict[str, Any]:
-        """Devuelve los límites de la tendencia activa."""
-        if not self._active_trend:
-            return {}
+    # --- (COMENTADO) get_trend_limits ---
+    # def get_trend_limits(self) -> Dict[str, Any]:
+    #     """Devuelve los límites de la tendencia activa."""
+    #     if not self._active_trend:
+    #         return {}
         
-        config = self._active_trend['config']
-        return {
-            "start_time": self._active_trend['start_time'],
-            "duration_minutes": config.limit_duration_minutes,
-            "tp_roi_pct": config.limit_tp_roi_pct,
-            "sl_roi_pct": config.limit_sl_roi_pct,
-            "trade_limit": config.limit_trade_count
-        }
+    #     config = self._active_trend['config']
+    #     return {
+    #         "start_time": self._active_trend['start_time'],
+    #         "duration_minutes": config.limit_duration_minutes,
+    #         "tp_roi_pct": config.limit_tp_roi_pct,
+    #         "sl_roi_pct": config.limit_sl_roi_pct,
+    #         "trade_limit": config.limit_trade_count
+    #     }
+
+    def get_operation_parameters(self) -> Dict[str, Any]:
+        """Devuelve solo los parámetros de configuración de la operación activa."""
+        if not self.operacion_activa:
+            return {}
+        from dataclasses import asdict
+        return asdict(self.operacion_activa.configuracion)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_session_start_time(self) -> Optional[datetime.datetime]: 
         """Obtiene la hora de inicio de la sesión."""
@@ -114,8 +194,8 @@ class _ApiGetters:
         """Obtiene el umbral de Stop Loss Global por ROI de la sesión."""
         return self._global_stop_loss_roi_pct
         
-    def get_all_milestones(self) -> List[Milestone]: 
-        """Obtiene todos los hitos (triggers) como objetos Milestone."""
+    def get_all_milestones(self) -> List[Hito]: 
+        """Obtiene todos los hitos (triggers) como objetos Hito."""
         return copy.deepcopy(self._milestones)
         
     def get_session_time_limit(self) -> Dict[str, Any]:
@@ -134,14 +214,15 @@ class _ApiGetters:
         except (AttributeError, TypeError):
             return None
 
-    def get_max_logical_positions(self) -> int: 
-        """Obtiene el número máximo de posiciones lógicas permitidas por lado."""
-        return self._max_logical_positions
+    # --- (COMENTADO) Getters de atributos que ahora son parte de la operación ---
+    # def get_max_logical_positions(self) -> int: 
+    #     """Obtiene el número máximo de posiciones lógicas permitidas por lado."""
+    #     return self._max_logical_positions
         
-    def get_initial_base_position_size(self) -> float: 
-        """Obtiene el tamaño base inicial de las posiciones configurado para la sesión."""
-        return self._initial_base_position_size_usdt
+    # def get_initial_base_position_size(self) -> float: 
+    #     """Obtiene el tamaño base inicial de las posiciones configurado para la sesión."""
+    #     return self._initial_base_position_size_usdt
         
-    def get_leverage(self) -> float: 
-        """Obtiene el apalancamiento actual de la sesión."""
-        return self._leverage
+    # def get_leverage(self) -> float: 
+    #     """Obtiene el apalancamiento actual de la sesión."""
+    #     return self._leverage

@@ -1,3 +1,5 @@
+# core/strategy/pm/manager/__init__.py
+
 """
 Módulo Ensamblador del Position Manager.
 
@@ -17,6 +19,11 @@ from ._api_getters import _ApiGetters
 from ._api_actions import _ApiActions
 from ._workflow import _Workflow
 from ._private_logic import _PrivateLogic
+
+# --- INICIO DE LA CORRECCIÓN ---
+# Se elimina la importación incorrecta del módulo _triggers
+# from ._triggers import check_conditional_triggers 
+# --- FIN DE LA CORRECCIÓN ---
 
 # 2. Definir la clase final `PositionManager` que hereda de todas las clases base.
 # El orden de la herencia es importante para la Resolución de Métodos (MRO).

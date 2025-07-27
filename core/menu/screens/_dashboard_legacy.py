@@ -1,5 +1,3 @@
-# core/menu/screens/_dashboard.py
-
 """
 Módulo para la Pantalla del Dashboard Principal.
 
@@ -166,20 +164,10 @@ def show_dashboard_screen():
             
             ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
             
-            # --- Lógica de visualización original ---
-            # En lugar de leer `operation_status`, leemos `trend_status` como antes.
-            # pm.api.get_trend_state() está comentado, así que esto usará la lógica que aún exista
-            # o fallará si ya no existe, lo cual nos indicará el siguiente paso.
-            trend_status = summary.get('trend_status', {}) 
-            if not trend_status:
-                 # Fallback si `trend_status` no existe, usamos `operation_status`
-                 op_status = summary.get('operation_status', {})
-                 trend_mode = op_status.get('configuracion', {}).get('tendencia', 'NEUTRAL')
-                 milestone_id = None # No tenemos un análogo directo
-            else:
-                 trend_mode = trend_status.get('mode', 'NEUTRAL')
-                 milestone_id = trend_status.get('milestone_id', None)
-
+            trend_status = summary.get('trend_status', {})
+            trend_mode = trend_status.get('mode', 'NEUTRAL')
+            milestone_id = trend_status.get('milestone_id', None)
+            
             status_display = f"Tendencia: {trend_mode}"
             if milestone_id:
                 status_display += f" (Hito: ...{milestone_id[-6:]})"
@@ -219,15 +207,9 @@ def show_dashboard_screen():
         trades_limit = getattr(config_module, 'SESSION_MAX_TRADES', 0)
         trades_limit_str = str(trades_limit) if trades_limit > 0 else "Ilimitados"
         
-        # --- Lógica de visualización original ---
-        # Leemos los parámetros desde `config_module` como antes
-        leverage_val = getattr(config_module, 'POSITION_LEVERAGE', 0.0)
-        base_size_val = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 0.0)
-        max_pos_val = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 0)
-
         col2_data = {
-            "Apalancamiento": f"{leverage_val:.1f}x",
-            "Tamaño Base / Max Pos": f"{base_size_val:.2f}$ / {max_pos_val}",
+            "Apalancamiento": f"{getattr(config_module, 'POSITION_LEVERAGE', 0.0):.1f}x",
+            "Tamaño Base / Max Pos": f"{getattr(config_module, 'POSITION_BASE_SIZE_USDT', 0.0):.2f}$ / {getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 0)}",
             "Límite de Duración": duration_limit_str,
             "Límite de Trades": trades_limit_str,
             "SL Sesión (ROI)": sl_roi_str,
@@ -268,11 +250,10 @@ def show_dashboard_screen():
         _print_positions_table("Posiciones LONG", summary.get('open_long_positions', []), current_price, 'long')
         _print_positions_table("Posiciones SHORT", summary.get('open_short_positions', []), current_price, 'short')
 
-        # --- INICIO DE LA CORRECCIÓN ---
         menu_items = [
             "[1] Refrescar", 
             "[2] Gestionar Posiciones", 
-            "[3] Gestionar Operaciones y Hitos", # Texto actualizado
+            "[3] Gestionar Hitos (Árbol de Decisiones)",
             None,
             "[4] Editar Configuración de Sesión", 
             "[5] Ver Logs en Tiempo Real",
@@ -280,7 +261,6 @@ def show_dashboard_screen():
             "[h] Ayuda", 
             "[q] Salir del Bot"
         ]
-        # --- FIN DE LA CORRECCIÓN ---
         
         menu_options = helpers_module.MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -303,12 +283,20 @@ def show_dashboard_screen():
             _milestone_manager.show_milestone_manager_screen()
         
         elif action == 'edit_config':
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Guardamos el símbolo original para detectar si cambia.
             original_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
+            
+            # Llamamos al editor en modo 'session'
             changes_saved = _config_editor.show_config_editor_screen(config_module, context='session')
+            
+            # La lógica para manejar el cambio de ticker se mantiene, ya que sigue siendo
+            # posible (aunque no recomendable) cambiarlo desde el editor de config. general.
             if changes_saved:
                 new_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
                 if new_symbol != original_symbol:
                     _handle_ticker_change(config_module)
+            # --- FIN DE LA MODIFICACIÓN ---
             continue
             
         elif action == 'view_logs': 

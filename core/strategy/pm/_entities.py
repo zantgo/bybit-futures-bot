@@ -1,3 +1,5 @@
+# core/strategy/pm/_entities.py
+
 """
 Módulo de Entidades de Dominio para el Position Manager.
 
@@ -8,10 +10,16 @@ y una mayor claridad.
 v2.1 (Refactor de Hitos):
 - Corregido el orden de los atributos en `MilestoneAction` para cumplir con
   las reglas de Python sobre argumentos por defecto.
+
+v3.0 (Modelo de Operaciones):
+- Introducida la clase `Operacion` como entidad central del estado.
+- Refactorizados los Hitos para dividirse conceptualmente en tipos de
+  'Inicialización' y 'Finalización' con estructuras de condición y acción
+  especializadas.
 """
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
 
 # --- Entidades de Posiciones ---
 
@@ -68,56 +76,156 @@ class Balances:
         return max(0.0, self.operational_short - self.used_short)
 
 
-# --- Entidades para el Árbol de Decisiones (Hitos y Tendencias) ---
+# --- (COMENTADO) Entidades Antiguas para el Árbol de Decisiones (Hitos y Tendencias) ---
+# Se conservan comentadas como referencia durante la transición.
+
+# @dataclass
+# class TrendConfig:
+#     """
+#     Encapsula todos los parámetros que definen una Tendencia operativa.
+#     """
+#     mode: str
+#     individual_sl_pct: float = 0.0
+#     trailing_stop_activation_pct: float = 0.0
+#     trailing_stop_distance_pct: float = 0.0
+#     limit_trade_count: Optional[int] = None
+#     limit_duration_minutes: Optional[int] = None
+#     limit_tp_roi_pct: Optional[float] = None
+#     limit_sl_roi_pct: Optional[float] = None
+
+
+# @dataclass
+# class MilestoneCondition:
+#     """Define la condición de precio que activa un Hito."""
+#     type: str
+#     value: float
+
+
+# @dataclass
+# class MilestoneAction:
+#     """
+#     Define la acción que se ejecuta cuando un Hito se activa.
+#     """
+#     params: TrendConfig
+#     type: str = "START_TREND"
+
+
+# @dataclass
+# class Milestone:
+#     """
+#     Representa un Hito (Trigger) en el árbol de decisiones.
+#     """
+#     id: str
+#     condition: MilestoneCondition
+#     action: MilestoneAction
+    
+#     parent_id: Optional[str] = None
+#     level: int = 1
+    
+#     status: str = 'PENDING'
+    
+#     one_shot: bool = True
+#     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
+
+
+# --- INICIO: NUEVAS ENTIDADES PARA EL MODELO DE OPERACIONES SECUENCIALES ---
+
+# --- 1. La Entidad Central: Operacion ---
 
 @dataclass
-class TrendConfig:
+class ConfiguracionOperacion:
     """
-    Encapsula todos los parámetros que definen una Tendencia operativa.
+    Define los parámetros de configuración inmutables para una Operacion de trading.
+    Esta configuración es establecida por un Hito de Inicialización.
     """
-    mode: str
-    individual_sl_pct: float = 0.0
-    trailing_stop_activation_pct: float = 0.0
-    trailing_stop_distance_pct: float = 0.0
-    limit_trade_count: Optional[int] = None
-    limit_duration_minutes: Optional[int] = None
-    limit_tp_roi_pct: Optional[float] = None
-    limit_sl_roi_pct: Optional[float] = None
+    tendencia: str  # 'LONG_ONLY', 'SHORT_ONLY', 'LONG_SHORT', o 'NEUTRAL'
+    tamaño_posicion_base_usdt: float
+    max_posiciones_logicas: int
+    apalancamiento: float
+    sl_posicion_individual_pct: float
+    tsl_activacion_pct: float
+    tsl_distancia_pct: float
 
 
 @dataclass
-class MilestoneCondition:
-    """Define la condición de precio que activa un Hito."""
-    type: str
-    value: float
+class Operacion:
+    """
+    Representa un ciclo de vida completo de trading. Contiene tanto la
+    configuración de la operación como su estado dinámico en tiempo real.
+    """
+    id: str
+    configuracion: ConfiguracionOperacion
+    
+    # --- Estado dinámico de la operación ---
+    capital_inicial_usdt: float
+    pnl_realizado_usdt: float = 0.0
+    comercios_cerrados_contador: int = 0
+    tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
+    posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})
 
 
-# --- INICIO DE LA CORRECCIÓN ---
+# --- 2. Entidades para los Nuevos Hitos Especializados ---
+
 @dataclass
-class MilestoneAction:
+class CondicionPrecioDosPasos:
+    """
+    Define la condición de activación de precio de dos pasos. El hito se "arma"
+    cuando se cumple la primera condición y se "dispara" cuando se cumple la segunda.
+    """
+    # El valor puede ser un float o el string 'market_price'
+    activacion_mayor_a: Union[float, str]
+    activacion_menor_a: Union[float, str]
+    
+    # Estado interno de la condición
+    estado_mayor_a_cumplido: bool = False
+    estado_menor_a_cumplido: bool = False
+
+
+@dataclass
+class CondicionHito:
+    """
+    Contenedor para todas las posibles condiciones que pueden activar un hito.
+    El tipo de hito ('INICIALIZACION' o 'FINALIZACION') determinará qué
+    atributos son relevantes.
+    """
+    # Para Hitos de Inicialización
+    condicion_precio: Optional[CondicionPrecioDosPasos] = None
+    
+    # Para Hitos de Finalización
+    tp_roi_pct: Optional[float] = None
+    sl_roi_pct: Optional[float] = None
+    tiempo_maximo_min: Optional[int] = None
+    max_comercios: Optional[int] = None
+
+
+@dataclass
+class AccionHito:
     """
     Define la acción que se ejecuta cuando un Hito se activa.
     """
-    # El atributo sin valor por defecto (`params`) debe ir PRIMERO.
-    params: TrendConfig
-    # El atributo con valor por defecto (`type`) debe ir DESPUÉS.
-    type: str = "START_TREND"
-# --- FIN DE LA CORRECCIÓN ---
+    # Para Hitos de Inicialización
+    configuracion_nueva_operacion: Optional[ConfiguracionOperacion] = None
+    
+    # Para Hitos de Finalización
+    cerrar_posiciones_al_finalizar: bool = False
 
 
 @dataclass
-class Milestone:
+class Hito:
     """
-    Representa un Hito (Trigger) en el árbol de decisiones.
+    La nueva entidad Hito, que representa un nodo en el árbol de decisiones.
+    Es agnóstica a su contenido, que está definido en CondicionHito y AccionHito.
     """
     id: str
-    condition: MilestoneCondition
-    action: MilestoneAction
+    tipo_hito: str  # 'INICIALIZACION' o 'FINALIZACION'
+    condicion: CondicionHito
+    accion: AccionHito
     
+    # --- Atributos de gestión del árbol (igual que antes) ---
     parent_id: Optional[str] = None
     level: int = 1
-    
-    status: str = 'PENDING'
-    
+    status: str = 'PENDING'  # PENDING, ACTIVE, COMPLETED, CANCELLED
     one_shot: bool = True
     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
+
+# --- FIN: NUEVAS ENTIDADES ---

@@ -1,3 +1,5 @@
+# core/strategy/workflow/__init__.py
+
 """
 Paquete del Flujo de Trabajo del Event Processor.
 
@@ -19,7 +21,10 @@ from ._data_processing import process_tick_and_generate_signal, initialize_data_
 
 # Desde el módulo de comprobación de límites y disyuntores
 from ._limit_checks import (
-    check_trend_limits,
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se elimina la importación de 'check_trend_limits' ya que fue comentada.
+    # check_trend_limits, 
+    # --- FIN DE LA CORRECCIÓN ---
     check_session_limits,
     GlobalStopLossException,
     initialize_limit_checks,
@@ -34,7 +39,10 @@ __all__ = [
     'check_conditional_triggers',
     'process_tick_and_generate_signal',
     'initialize_data_processing',
-    'check_trend_limits',
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se elimina la exportación de 'check_trend_limits'.
+    # 'check_trend_limits',
+    # --- FIN DE LA CORRECCIÓN ---
     'check_session_limits',
     'GlobalStopLossException',
     'initialize_limit_checks',

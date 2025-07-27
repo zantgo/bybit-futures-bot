@@ -1,3 +1,5 @@
+# core/strategy/pm/_api.py
+
 """
 Interfaz Pública del Position Manager (PM API).
 
@@ -9,7 +11,10 @@ from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import PositionManager
-    from ._entities import Milestone
+    # --- INICIO DE LA MODIFICACIÓN: Importar nuevas entidades ---
+    from ._entities import Hito
+    # from ._entities import Milestone # Comentado
+    # --- FIN DE LA MODIFICACIÓN ---
 
 _pm_instance: Optional['PositionManager'] = None
 
@@ -40,15 +45,28 @@ def get_unrealized_pnl(current_price: float) -> float:
     if not _pm_instance: return 0.0
     return _pm_instance.get_unrealized_pnl(current_price)
 
-def get_trend_state() -> Dict[str, Any]:
-    """Obtiene el estado de la tendencia activa (NEUTRAL si no hay ninguna)."""
-    if not _pm_instance: return {'mode': 'UNKNOWN'}
-    return _pm_instance.get_trend_state()
+# --- (COMENTADO) get_trend_state y get_trend_limits ---
+# def get_trend_state() -> Dict[str, Any]:
+#     """Obtiene el estado de la tendencia activa (NEUTRAL si no hay ninguna)."""
+#     if not _pm_instance: return {'mode': 'UNKNOWN'}
+#     return _pm_instance.get_trend_state()
     
-def get_trend_limits() -> Dict[str, Any]:
-    """Obtiene los límites de la tendencia activa."""
+# def get_trend_limits() -> Dict[str, Any]:
+#     """Obtiene los límites de la tendencia activa."""
+#     if not _pm_instance: return {}
+#     return _pm_instance.get_trend_limits()
+
+# --- INICIO DE LA MODIFICACIÓN: Nuevas funciones proxy para la Operación ---
+def get_operation_state() -> Dict[str, Any]:
+    """Obtiene el estado completo de la Operación activa."""
+    if not _pm_instance: return {'error': 'PM no instanciado'}
+    return _pm_instance.get_operation_state()
+
+def get_operation_parameters() -> Dict[str, Any]:
+    """Obtiene los parámetros de configuración de la Operación activa."""
     if not _pm_instance: return {}
-    return _pm_instance.get_trend_limits()
+    return _pm_instance.get_operation_parameters()
+# --- FIN DE LA MODIFICACIÓN ---
 
 def get_session_start_time() -> Optional[datetime.datetime]:
     """Obtiene la hora de inicio de la sesión."""
@@ -66,8 +84,8 @@ def get_global_sl_pct() -> Optional[float]:
     """Obtiene el umbral de Stop Loss Global por ROI de la sesión."""
     return _pm_instance.get_global_sl_pct() if _pm_instance else None
 
-def get_all_milestones() -> List['Milestone']:
-    """Obtiene todos los hitos (triggers) como objetos Milestone."""
+def get_all_milestones() -> List['Hito']:
+    """Obtiene todos los hitos (triggers) como objetos Hito."""
     return _pm_instance.get_all_milestones() if _pm_instance else []
 
 def get_session_time_limit() -> Dict[str, Any]:
@@ -87,27 +105,28 @@ def close_all_logical_positions(side: str, reason: str = "MANUAL_ALL") -> bool:
     if not _pm_instance: return False
     return _pm_instance.close_all_logical_positions(side, reason)
 
-# --- Funciones de Ajuste de Parámetros de Sesión (TUI) ---
+# --- (COMENTADO) Funciones de Ajuste de Parámetros de Sesión (TUI) ---
+# Estas funciones ahora se gestionan a través de la modificación de la operación activa
+# o la creación de un nuevo hito.
+# def add_max_logical_position_slot() -> Tuple[bool, str]:
+#     """Incrementa el número máximo de posiciones simultáneas."""
+#     if not _pm_instance: return False, "PM no instanciado"
+#     return _pm_instance.add_max_logical_position_slot()
 
-def add_max_logical_position_slot() -> Tuple[bool, str]:
-    """Incrementa el número máximo de posiciones simultáneas."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.add_max_logical_position_slot()
+# def remove_max_logical_position_slot() -> Tuple[bool, str]:
+#     """Decrementa el número máximo de posiciones, si es seguro hacerlo."""
+#     if not _pm_instance: return False, "PM no instanciado"
+#     return _pm_instance.remove_max_logical_position_slot()
 
-def remove_max_logical_position_slot() -> Tuple[bool, str]:
-    """Decrementa el número máximo de posiciones, si es seguro hacerlo."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.remove_max_logical_position_slot()
+# def set_base_position_size(new_size_usdt: float) -> Tuple[bool, str]:
+#     """Establece el tamaño base de las nuevas posiciones."""
+#     if not _pm_instance: return False, "PM no instanciado"
+#     return _pm_instance.set_base_position_size(new_size_usdt)
 
-def set_base_position_size(new_size_usdt: float) -> Tuple[bool, str]:
-    """Establece el tamaño base de las nuevas posiciones."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.set_base_position_size(new_size_usdt)
-
-def set_leverage(new_leverage: float) -> Tuple[bool, str]:
-    """Establece el apalancamiento para futuras operaciones."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.set_leverage(new_leverage)
+# def set_leverage(new_leverage: float) -> Tuple[bool, str]:
+#     """Establece el apalancamiento para futuras operaciones."""
+#     if not _pm_instance: return False, "PM no instanciado"
+#     return _pm_instance.set_leverage(new_leverage)
 
 # --- Funciones de Gestión de Límites de Sesión (TUI) ---
 
@@ -123,22 +142,21 @@ def set_global_take_profit_pct(value: float) -> Tuple[bool, str]:
     
 # --- Funciones de Gestión de Hitos (TUI) ---
 
-def add_milestone(condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
+def add_milestone(tipo_hito: str, condicion: Any, accion: Any, parent_id: Optional[str] = None) -> Tuple[bool, str]:
     """Añade un nuevo hito al árbol de decisiones."""
     if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.add_milestone(condition_data, action_data, parent_id)
+    return _pm_instance.add_milestone(tipo_hito, condicion, accion, parent_id)
 
 def remove_milestone(milestone_id: str) -> Tuple[bool, str]:
     """Elimina un hito del árbol de decisiones."""
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.remove_milestone(milestone_id)
 
-
-def update_milestone(milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
+def update_milestone(milestone_id: str, nueva_condicion: Any, nueva_accion: Any) -> Tuple[bool, str]:
     """Actualiza los datos de un hito existente."""
     if not _pm_instance: return False, "PM no instanciado"
     if hasattr(_pm_instance, 'update_milestone'):
-        return _pm_instance.update_milestone(milestone_id, condition_data, action_data)
+        return _pm_instance.update_milestone(milestone_id, nueva_condicion, nueva_accion)
     return False, "Función 'update_milestone' no implementada en el manager."
 
 def force_trigger_milestone(milestone_id: str) -> Tuple[bool, str]:
@@ -163,21 +181,21 @@ def force_trigger_milestone_with_pos_management(
         )
     return False, "Función 'force_trigger_milestone_with_pos_management' no implementada en el manager."
 
-# --- INICIO DE LA MODIFICACIÓN (REQ-10) ---
-def update_active_trend_parameters(params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
+# --- INICIO DE LA MODIFICACIÓN (REQ-10) -> Adaptada a Operación ---
+def update_active_operation_parameters(params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
     """
-    Actualiza los parámetros de la tendencia actualmente activa en tiempo real.
+    Actualiza los parámetros de la operación actualmente activa en tiempo real.
     """
     if not _pm_instance: return False, "PM no instanciado"
-    if hasattr(_pm_instance, 'update_active_trend_parameters'):
-        return _pm_instance.update_active_trend_parameters(params_to_update)
-    return False, "Función 'update_active_trend_parameters' no implementada en el manager."
+    if hasattr(_pm_instance, 'update_active_operation_parameters'):
+        return _pm_instance.update_active_operation_parameters(params_to_update)
+    return False, "Función 'update_active_operation_parameters' no implementada en el manager."
 # --- FIN DE LA MODIFICACIÓN ---
 
-def force_end_trend(close_positions: bool = False) -> Tuple[bool, str]:
-    """Fuerza la finalización de la tendencia activa y vuelve a NEUTRAL."""
+def force_end_operation(close_positions: bool = False) -> Tuple[bool, str]:
+    """Fuerza la finalización de la operación activa y vuelve a NEUTRAL."""
     if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.force_end_trend(close_positions=close_positions)
+    return _pm_instance.force_end_operation(close_positions=close_positions)
 
 def force_balance_update():
     """Delega la llamada para forzar una actualización de la caché de balances reales."""
@@ -194,12 +212,12 @@ def process_triggered_milestone(milestone_id: str):
 def set_session_tp_hit(value: bool):
     """Establece el estado de 'TP de sesión alcanzado' finalizando la tendencia activa."""
     if _pm_instance and value:
-        _pm_instance.end_current_trend_and_ask()
+        _pm_instance.end_current_operation_and_neutralize("TP de Sesión Global Alcanzado")
 
-def end_current_trend_and_ask():
-    """Finaliza la tendencia actual y revierte a modo NEUTRAL."""
+def end_current_operation_and_neutralize(reason: str):
+    """Finaliza la operación actual y revierte a modo NEUTRAL."""
     if _pm_instance:
-        _pm_instance.end_current_trend_and_ask()
+        _pm_instance.end_current_operation_and_neutralize(reason)
 
 # --- Funciones de Ayuda y Visualización ---
 
