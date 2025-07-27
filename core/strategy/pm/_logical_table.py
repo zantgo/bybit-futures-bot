@@ -2,6 +2,11 @@
 Módulo que define la clase LogicalPositionTable para gestionar una lista de
 posiciones lógicas abiertas para un lado específico (long/short).
 
+v2.1 (Thread-Safety Refactor):
+- Se ha añadido un threading.Lock para proteger el acceso a la lista de posiciones
+  desde múltiples hilos (TUI y Ticker), evitando race conditions.
+- Todos los métodos que leen o escriben en self._positions están ahora bloqueados.
+
 v2.0 (Exchange Agnostic Refactor):
 - Se reemplaza la dependencia de `live_operations` por `exchange_adapter`.
 """
@@ -9,6 +14,9 @@ import datetime
 import traceback
 import copy
 import time
+# --- INICIO DE LA MODIFICACIÓN ---
+import threading
+# --- FIN DE LA MODIFICACIÓN ---
 from typing import Optional, Dict, Any, List, Tuple, Union, TYPE_CHECKING
 import pandas as pd
 
@@ -36,13 +44,14 @@ if TYPE_CHECKING:
 class LogicalPositionTable:
     """
     Gestiona una tabla (lista) de posiciones lógicas para un lado (long/short).
+    Esta clase es thread-safe.
     """
     def __init__(self,
                  side: str,
                  is_live_mode: bool,
                  config_param: Optional[Any] = None,
                  utils: Optional[Any] = None,
-                 exchange_adapter: Optional[AbstractExchange] = None # <-- CAMBIO CLAVE
+                 exchange_adapter: Optional[AbstractExchange] = None
                  ):
         """
         Inicializa la tabla de posiciones lógicas.
@@ -55,8 +64,11 @@ class LogicalPositionTable:
         self.is_live_mode = is_live_mode
         self._config_param = config_param
         self._utils = utils
-        self._exchange = exchange_adapter # <-- CAMBIO CLAVE
+        self._exchange = exchange_adapter
         self._positions: List[Dict[str, Any]] = []
+        # --- INICIO DE LA MODIFICACIÓN ---
+        self._lock = threading.Lock()
+        # --- FIN DE LA MODIFICACIÓN ---
 
         memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
 
@@ -67,9 +79,10 @@ class LogicalPositionTable:
         if 'id' not in position_data: 
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'.", level="ERROR"); return False
         
-        self._positions.append(copy.deepcopy(position_data))
+        with self._lock:
+            self._positions.append(copy.deepcopy(position_data))
         
-        # Usar config_param inyectado para el control de logs
+        # Logging fuera del lock
         log_level = "INFO"
         if self._config_param:
             log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
@@ -78,95 +91,115 @@ class LogicalPositionTable:
 
     def remove_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
         try:
-            if 0 <= index < len(self._positions):
-                removed_position = self._positions.pop(index)
-                
-                log_level = "INFO"
-                if self._config_param:
-                    log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
-                
-                return copy.deepcopy(removed_position)
-            else: 
-                memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango.", level="ERROR"); return None
+            with self._lock:
+                if 0 <= index < len(self._positions):
+                    removed_position = self._positions.pop(index)
+                    return copy.deepcopy(removed_position)
+                else: 
+                    # Loguear el error fuera del lock si es posible
+                    pass
+            
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango.", level="ERROR")
+            return None
+            
         except Exception as e:
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Excepción {index}: {e}", level="ERROR")
             memory_logger.log(traceback.format_exc(), level="ERROR")
             return None
 
     def remove_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
-        index_to_remove = -1
-        for i, pos in enumerate(self._positions):
-            if pos.get('id') == position_id: 
-                index_to_remove = i
-                break
+        with self._lock:
+            index_to_remove = -1
+            for i, pos in enumerate(self._positions):
+                if pos.get('id') == position_id: 
+                    index_to_remove = i
+                    break
+        # Llamar a remove_position_by_index fuera del lock para no anidarlos
         if index_to_remove != -1: 
             return self.remove_position_by_index(index_to_remove)
         else: 
-            memory_logger.log(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado.", level="WARN"); return None
+            memory_logger.log(f"WARN [LPT {self.side.upper()} Remove ID]: ID {position_id} no encontrado.", level="WARN")
+            return None
 
     def update_position_details(self, position_id: str, details_to_update: Dict[str, Any]) -> bool:
         if not isinstance(details_to_update, dict): 
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: details no es dict.", level="ERROR"); return False
+        
         found = False
-        for i, pos in enumerate(self._positions):
-            if pos.get('id') == position_id:
-                try:
-                    self._positions[i].update(details_to_update)
-                    
-                    log_level = "INFO"
-                    if self._config_param:
-                        log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
+        with self._lock:
+            for i, pos in enumerate(self._positions):
+                if pos.get('id') == position_id:
+                    try:
+                        self._positions[i].update(details_to_update)
+                        found = True
+                        break
+                    except Exception as e:
+                        # Loguear dentro del lock solo si es crítico para el estado
+                        memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR")
+                        memory_logger.log(traceback.format_exc(), level="ERROR")
+                        return False
 
-                    found = True
-                    break
-                except Exception as e:
-                    memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR")
-                    memory_logger.log(traceback.format_exc(), level="ERROR")
-                    return False
         if not found: 
             memory_logger.log(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.", level="WARN")
         return found
 
     # --- Métodos de Acceso y Cálculo ---
     def get_positions(self) -> List[Dict[str, Any]]:
-        return copy.deepcopy(self._positions)
+        with self._lock:
+            return copy.deepcopy(self._positions)
 
     def get_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
-        for pos in self._positions:
-            if pos.get('id') == position_id: 
-                return copy.deepcopy(pos)
+        with self._lock:
+            for pos in self._positions:
+                if pos.get('id') == position_id: 
+                    return copy.deepcopy(pos)
         return None
 
     def get_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
         try:
-            if 0 <= index < len(self._positions): 
-                return copy.deepcopy(self._positions[index])
-            else: 
-                memory_logger.log(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango.", level="WARN"); return None
+            with self._lock:
+                if 0 <= index < len(self._positions): 
+                    return copy.deepcopy(self._positions[index])
+            
+            memory_logger.log(f"WARN [LPT {self.side.upper()} Get Idx]: Índice {index} fuera de rango.", level="WARN")
+            return None
         except Exception as e: 
-            memory_logger.log(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}", level="ERROR"); return None
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Get Idx]: Excepción {index}: {e}", level="ERROR")
+            return None
 
     def get_count(self) -> int:
-        return len(self._positions)
+        with self._lock:
+            return len(self._positions)
 
     def get_total_size(self) -> float:
         if not self._utils: return 0.0
+        with self._lock:
+            positions_copy = copy.deepcopy(self._positions)
+        
         total_size = 0.0
-        for pos in self._positions: 
+        for pos in positions_copy: 
             total_size += self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
         return total_size
 
     def get_total_used_margin(self) -> float:
-         if not self._utils: return 0.0
-         total_margin = 0.0
-         for pos in self._positions: 
-             total_margin += self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0)
-         return total_margin
+        if not self._utils: return 0.0
+        with self._lock:
+            positions_copy = copy.deepcopy(self._positions)
+            
+        total_margin = 0.0
+        for pos in positions_copy: 
+            total_margin += self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0)
+        return total_margin
 
     def get_average_entry_price(self) -> float:
         if not self._utils: return 0.0
+        with self._lock:
+            positions_copy = copy.deepcopy(self._positions)
+            
+        if not positions_copy: return 0.0
+        
         total_value = 0.0; total_size = 0.0
-        for pos in self._positions:
+        for pos in positions_copy:
             size = self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
             price = self._utils.safe_float_convert(pos.get('entry_price'), 0.0)
             if size > 0 and price > 0: 
@@ -176,16 +209,14 @@ class LogicalPositionTable:
 
     # --- Visualización ---
     def display_table(self):
-        config_to_use = self._config_param
-        log_level = "INFO"
-        if config_to_use:
-            log_level = getattr(config_to_use, 'LOG_LEVEL', 'INFO').upper()
+        with self._lock:
+            positions_copy = copy.deepcopy(self._positions)
+            positions_count = len(positions_copy)
 
-        if not self._positions:
+        if positions_count == 0:
             return
         
-        data_for_df = []
-        columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'Stop Loss', 'API Order ID']
+        config_to_use = self._config_param
         price_prec = 4; qty_prec = 3
         
         if config_to_use:
@@ -193,9 +224,12 @@ class LogicalPositionTable:
                  price_prec = int(getattr(config_to_use, 'PRICE_PRECISION', 4))
                  qty_prec = int(getattr(config_to_use, 'DEFAULT_QTY_PRECISION', 3))
              except Exception: 
-                 memory_logger.log("WARN [LPT Display]: Error obteniendo precisiones config.", level="WARN"); price_prec = 4; qty_prec = 3
+                 memory_logger.log("WARN [LPT Display]: Error obteniendo precisiones config.", level="WARN")
+
+        data_for_df = []
+        columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'Stop Loss', 'API Order ID']
         
-        for pos in self._positions:
+        for pos in positions_copy:
             entry_ts = pos.get('entry_timestamp')
             entry_ts_str = self._utils.format_datetime(entry_ts, '%Y-%m-%d %H:%M:%S') if self._utils and entry_ts else "N/A"
             sl_price = pos.get('stop_loss_price')
@@ -212,7 +246,7 @@ class LogicalPositionTable:
             })
         try:
              df = pd.DataFrame(data_for_df, columns=columns)
-             print(f"\n--- Tabla Posiciones Lógicas {self.side.upper()} (Total: {len(self._positions)}) ---")
+             print(f"\n--- Tabla Posiciones Lógicas {self.side.upper()} (Total: {positions_count}) ---")
              if not df.empty:
                  table_string = df.to_string(index=False, justify='right')
                  print(table_string)
