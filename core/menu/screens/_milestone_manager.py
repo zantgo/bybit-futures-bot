@@ -1,19 +1,13 @@
 """
-Módulo para la Pantalla de Gestión de Operaciones y Hitos (Centro de Control Estratégico).
+Módulo para la Pantalla de Gestión de la Operación Estratégica.
 
-v5.5 (Corrección de TypeError en TUI):
-- Se ha corregido un error `TypeError` que ocurría al crear instancias de
-  `TerminalMenu` al pasar el argumento `clear_screen` dos veces. La lógica
-  ha sido ajustada para modificar una copia del diccionario de estilo antes
-  de pasarlo.
-
-v5.4 (Claridad de Estados):
-- Se ha cambiado la terminología de los estados de los hitos en la TUI para
-  ser más intuitiva: ACTIVE -> ARMADO, PENDING -> EN ESPERA, COMPLETED -> EJECUTADO.
-- Se añade un indicador visual para señalar qué hito EJECUTADO inició la
-  operación actualmente activa.
-- Se elimina la llamada a la función de saneamiento para permitir múltiples
-  hitos 'ARMADOS' compitiendo en el mismo nivel.
+v6.0 (Modelo de Operación Única):
+- Completamente refactorizado para eliminar el concepto de Hitos.
+- La pantalla ahora es un "Panel de Control de Operación" que permite
+  configurar, modificar y controlar una única operación estratégica.
+- Se eliminan todas las funciones relacionadas con la gestión de un
+  árbol de decisiones.
+- Se introduce un nuevo "Asistente de Configuración de Operación".
 """
 import time
 from typing import Any, Dict, Optional, List
@@ -34,14 +28,17 @@ from .._helpers import (
 )
 
 try:
-    from core.strategy.pm._entities import (
-        Hito, CondicionHito, AccionHito, ConfiguracionOperacion
-    )
+    # (COMENTADO) Ya no se usan las entidades de Hitos.
+    # from core.strategy.pm._entities import (
+    #     Hito, CondicionHito, AccionHito, ConfiguracionOperacion
+    # )
+    from core.strategy.pm._entities import Operacion
 except ImportError:
-    class Hito: pass
-    class CondicionHito: pass
-    class AccionHito: pass
-    class ConfiguracionOperacion: pass
+    # class Hito: pass
+    # class CondicionHito: pass
+    # class AccionHito: pass
+    # class ConfiguracionOperacion: pass
+    class Operacion: pass
 
 
 _deps: Dict[str, Any] = {}
@@ -50,7 +47,7 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- LÓGICA DE LA PANTALLA PRINCIPAL ---
+# --- LÓGICA DE LA PANTALLA PRINCIPAL (NUEVA VERSIÓN v6.0) ---
 def show_milestone_manager_screen():
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
@@ -61,18 +58,16 @@ def show_milestone_manager_screen():
 
     while True:
         clear_screen()
-        print_tui_header("Gestión de Operación")
+        print_tui_header("Panel de Control de Operación")
         
-        # (COMENTADO) Se elimina la llamada a la función de saneamiento para permitir
-        # que múltiples condiciones compitan entre sí en el mismo nivel.
-        # if hasattr(pm_api, 'validate_milestone_tree_state'):
-        #     pm_api.validate_milestone_tree_state()
-
         summary = pm_api.get_position_summary()
-        all_milestones = pm_api.get_all_milestones()
+        # (NUEVO) Se obtiene el objeto de operación única en lugar de una lista de hitos.
+        operacion = pm_api.get_operation()
+        # (COMENTADO) La llamada a get_all_milestones() se elimina.
+        # all_milestones = pm_api.get_all_milestones()
         current_price = pm_api.get_current_market_price() or 0.0
 
-        if not summary or 'error' in summary:
+        if not summary or 'error' in summary or not operacion:
             print(f"Error obteniendo datos del PM: {summary.get('error', 'Desconocido')}")
             time.sleep(2)
             continue
@@ -80,38 +75,161 @@ def show_milestone_manager_screen():
         _display_operation_details(summary)
         _display_capital_stats(summary)
         _display_positions_tables(summary, current_price)
-        _display_decision_tree(all_milestones, summary.get('operation_status', {}))
+        # (MODIFICADO) Se llama a la nueva función que muestra las condiciones de la operación.
+        _display_operation_conditions(operacion, current_price)
+        # (COMENTADO) La llamada a _display_decision_tree() se elimina.
+        # _display_decision_tree(all_milestones, summary.get('operation_status', {}))
 
+        # (NUEVO) El menú ahora es dinámico y se adapta al estado de la operación.
         menu_items = [
-            "[1] Refrescar Pantalla",
-            "[2] Ver/Gestionar Hitos",
-            "[3] Finalizar Operación Actual",
+            "[1] Configurar/Modificar Operación",
+        ]
+        if operacion.estado == 'EN_ESPERA':
+            menu_items.append("[2] Forzar Inicio de Operación")
+        elif operacion.estado == 'ACTIVA':
+            menu_items.append("[2] Forzar Fin de Operación")
+        
+        menu_items.extend([
             None,
+            "[r] Refrescar",
             "[h] Ayuda",
             "[b] Volver al Dashboard"
-        ]
+        ])
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
         main_menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
         choice = main_menu.show()
-
+        
+        # (NUEVO) Lógica de menú refactorizada para la operación única.
         if choice == 0:
-            continue
+            _operation_setup_wizard(pm_api, operacion)
         elif choice == 1:
-            _show_manage_milestones_list_screen(pm_api)
-        elif choice == 2:
-            _end_operation_wizard(pm_api)
-        elif choice == 4:
+            if operacion.estado == 'EN_ESPERA':
+                # (NUEVO) Se llama a la nueva función de la API.
+                success, msg = pm_api.force_start_operation()
+                print(f"\n{msg}"); time.sleep(2)
+            elif operacion.estado == 'ACTIVA':
+                _end_operation_wizard(pm_api)
+        elif choice == 3: # Corresponde a 'Refrescar'
+            continue
+        elif choice == 4: # Corresponde a 'Ayuda'
             show_help_popup("auto_mode")
         else:
             break
 
-# --- FUNCIONES DE VISUALIZACIÓN Y ASISTENTES ---
+# --- FUNCIONES DE VISUALIZACIÓN Y ASISTENTES (REFACTORIZADAS) ---
+
+# (NUEVO) Función para mostrar las condiciones de la operación única. Reemplaza a _display_decision_tree.
+def _display_operation_conditions(operacion: Operacion, current_price: float):
+    print("\n--- Estrategia de la Operación " + "-"*53)
+    
+    # Condición de Entrada
+    cond_in_str = "N/A"
+    if operacion.tipo_cond_entrada == 'MARKET':
+        cond_in_str = "Inmediata (Precio de Mercado)"
+    elif operacion.tipo_cond_entrada and operacion.valor_cond_entrada is not None:
+        op = ">" if operacion.tipo_cond_entrada == 'PRICE_ABOVE' else "<"
+        cond_in_str = f"Precio {op} {operacion.valor_cond_entrada:.4f}"
+    
+    status_color_map = {'EN_ESPERA': "\033[93m", 'ACTIVA': "\033[92m", 'FINALIZADA': "\033[90m"}
+    color = status_color_map.get(operacion.estado, "")
+    reset = "\033[0m"
+    
+    print(f"  Estado: {color}{operacion.estado}{reset}")
+    print(f"  Condición de Entrada: {cond_in_str}")
+    
+    # Condiciones de Salida
+    print(f"  Condiciones de Salida:")
+    exit_conditions = []
+    if operacion.tp_roi_pct is not None:
+        exit_conditions.append(f"TP si ROI >= {operacion.tp_roi_pct}%")
+    if operacion.sl_roi_pct is not None:
+        exit_conditions.append(f"SL si ROI <= {operacion.sl_roi_pct}%")
+    if operacion.tiempo_maximo_min is not None:
+        exit_conditions.append(f"Tiempo >= {operacion.tiempo_maximo_min} min")
+    if operacion.max_comercios is not None:
+        exit_conditions.append(f"Trades >= {operacion.max_comercios}")
+    
+    if not exit_conditions:
+        print("    - Ninguna (finalización manual)")
+    else:
+        print(f"    - {', '.join(exit_conditions)}")
+
+
+# (NUEVO) Asistente único para configurar la operación. Reemplaza a _create_milestone_wizard.
+def _operation_setup_wizard(pm_api: Any, current_op: Operacion):
+    """Asistente único para crear o modificar la operación estratégica."""
+    title = "Asistente de Configuración de Operación"
+    clear_screen(); print_tui_header(title)
+    
+    print("\nDefine los parámetros para la próxima operación o modifica la actual.")
+    print("(Deja un campo en blanco para mantener su valor actual)")
+    
+    # --- Paso 1: Condición de Entrada ---
+    print("\n--- 1. Condición de Entrada ---")
+    cond_choice = TerminalMenu(["Precio SUPERIOR a", "Precio INFERIOR a", "Activación Inmediata (Mercado)"]).show()
+    
+    new_cond_type, new_cond_value = current_op.tipo_cond_entrada, current_op.valor_cond_entrada
+    if cond_choice == 0:
+        new_cond_type = 'PRICE_ABOVE'
+        val = get_input(f"Activar si precio SUPERA", float, default=current_op.valor_cond_entrada)
+        if not isinstance(val, CancelInput): new_cond_value = val
+    elif cond_choice == 1:
+        new_cond_type = 'PRICE_BELOW'
+        val = get_input(f"Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada)
+        if not isinstance(val, CancelInput): new_cond_value = val
+    elif cond_choice == 2:
+        new_cond_type, new_cond_value = 'MARKET', 0.0
+    
+    # --- Paso 2: Parámetros de Trading ---
+    print("\n--- 2. Parámetros de Trading ---")
+    tendencia_idx = TerminalMenu(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT", "NEUTRAL"], title=f"Tendencia [Actual: {current_op.tendencia}]").show()
+    new_tendencia = ["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT", "NEUTRAL"][tendencia_idx] if tendencia_idx is not None else current_op.tendencia
+
+    new_base_size = get_input("Tamaño base (USDT)", float, default=current_op.tamaño_posicion_base_usdt)
+    new_max_pos = get_input("Máx. posiciones", int, default=current_op.max_posiciones_logicas)
+    new_leverage = get_input("Apalancamiento", float, default=current_op.apalancamiento)
+    new_sl_ind = get_input("SL individual (%)", float, default=current_op.sl_posicion_individual_pct)
+    new_tsl_act = get_input("Activación TSL (%)", float, default=current_op.tsl_activacion_pct)
+    new_tsl_dist = get_input("Distancia TSL (%)", float, default=current_op.tsl_distancia_pct)
+
+    # --- Paso 3: Condiciones de Salida ---
+    print("\n--- 3. Condiciones de Salida (0 o vacío para desactivar) ---")
+    new_tp_roi = get_input("TP por ROI (%)", float, default=current_op.tp_roi_pct or 0)
+    new_sl_roi = get_input("SL por ROI (%)", float, default=current_op.sl_roi_pct or 0)
+    new_max_trades = get_input("Máx. trades", int, default=current_op.max_comercios or 0)
+    new_max_duracion = get_input("Duración máx. (min)", int, default=current_op.tiempo_maximo_min or 0)
+
+    # Recopilar todos los parámetros en un diccionario
+    params_to_update = {
+        'tipo_cond_entrada': new_cond_type,
+        'valor_cond_entrada': new_cond_value,
+        'tendencia': new_tendencia,
+        'tamaño_posicion_base_usdt': new_base_size if not isinstance(new_base_size, CancelInput) else current_op.tamaño_posicion_base_usdt,
+        'max_posiciones_logicas': new_max_pos if not isinstance(new_max_pos, CancelInput) else current_op.max_posiciones_logicas,
+        'apalancamiento': new_leverage if not isinstance(new_leverage, CancelInput) else current_op.apalancamiento,
+        'sl_posicion_individual_pct': new_sl_ind if not isinstance(new_sl_ind, CancelInput) else current_op.sl_posicion_individual_pct,
+        'tsl_activacion_pct': new_tsl_act if not isinstance(new_tsl_act, CancelInput) else current_op.tsl_activacion_pct,
+        'tsl_distancia_pct': new_tsl_dist if not isinstance(new_tsl_dist, CancelInput) else current_op.tsl_distancia_pct,
+        'tp_roi_pct': new_tp_roi if not isinstance(new_tp_roi, CancelInput) and new_tp_roi > 0 else None,
+        'sl_roi_pct': new_sl_roi if not isinstance(new_sl_roi, CancelInput) and new_sl_roi != 0 else None,
+        'max_comercios': new_max_trades if not isinstance(new_max_trades, CancelInput) and new_max_trades > 0 else None,
+        'tiempo_maximo_min': new_max_duracion if not isinstance(new_max_duracion, CancelInput) and new_max_duracion > 0 else None,
+    }
+
+    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"]).show() == 0:
+        # (NUEVO) Se llama a la nueva función de la API para actualizar la operación.
+        success, msg = pm_api.create_or_update_operation(params_to_update)
+        print(f"\n{msg}"); time.sleep(2)
+
+
+# (MODIFICADO) Ligeramente adaptada para el nuevo modelo de datos del summary.
 def _display_operation_details(summary: Dict[str, Any]):
     print("\n--- Detalles de la Operación " + "-"*55)
     op_state = summary.get('operation_status', {})
-    config_op = op_state.get('configuracion', {})
+    # En el nuevo modelo, operation_status es el dict de la operación, no un sub-diccionario.
+    config_op = op_state 
     tendencia = config_op.get('tendencia', 'NEUTRAL')
     
     color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m", 'LONG_SHORT': "\033[96m", 'NEUTRAL': "\033[90m"}
@@ -120,14 +238,11 @@ def _display_operation_details(summary: Dict[str, Any]):
 
     price_at_start = "N/A"
     
-    pos_abiertas = op_state.get('posiciones_long_count', 0) + op_state.get('posiciones_short_count', 0)
+    pos_abiertas = len(summary.get('open_long_positions', [])) + len(summary.get('open_short_positions', []))
     pos_total = config_op.get('max_posiciones_logicas', 0)
 
-    capital_en_uso = 0.0
-    if summary.get('open_long_positions'):
-        capital_en_uso += sum(p.get('margin_usdt', 0) for p in summary['open_long_positions'])
-    if summary.get('open_short_positions'):
-        capital_en_uso += sum(p.get('margin_usdt', 0) for p in summary['open_short_positions'])
+    capital_en_uso = sum(p.get('margin_usdt', 0) for p in summary.get('open_long_positions', [])) + \
+                     sum(p.get('margin_usdt', 0) for p in summary.get('open_short_positions', []))
     
     capital_total_op = config_op.get('tamaño_posicion_base_usdt', 0) * pos_total
 
@@ -136,6 +251,7 @@ def _display_operation_details(summary: Dict[str, Any]):
     print(f"  Posiciones Abiertas / Total: {pos_abiertas} / {pos_total}")
     print(f"  Capital en Uso / Total Op:   {capital_en_uso:.2f}$ / {capital_total_op:.2f}$")
 
+# (MODIFICADO) Ligeramente adaptada para el nuevo modelo de datos del summary.
 def _display_capital_stats(summary: Dict[str, Any]):
     print("\n--- Capital y Rendimiento " + "-"*58)
     op_state = summary.get('operation_status', {})
@@ -144,9 +260,14 @@ def _display_capital_stats(summary: Dict[str, Any]):
     pnl_color = "\033[92m" if op_pnl >= 0 else "\033[91m"
     reset = "\033[0m"
 
+    # Lógica actualizada para capital actual
+    capital_inicial = op_state.get('capital_inicial_usdt', 0.0)
+    pnl_realizado = op_state.get('pnl_realizado_usdt', 0.0)
+    capital_actual = capital_inicial + pnl_realizado
+
     col1 = {
-        "Capital Inicial": f"{op_state.get('capital_inicial_usdt', 0.0):.2f}$",
-        "Capital Actual": f"{op_state.get('capital_actual_usdt', 0.0):.2f}$",
+        "Capital Inicial": f"{capital_inicial:.2f}$",
+        "Capital Actual": f"{capital_actual:.2f}$",
         "Tiempo Ejecución": op_state.get('tiempo_ejecucion_str', 'N/A')
     }
     col2 = {
@@ -159,6 +280,7 @@ def _display_capital_stats(summary: Dict[str, Any]):
     for (k1, v1), (k2, v2) in zip(col1.items(), col2.items()):
         print(f"  {k1:<{max_key_len}}: {v1:<20} |  {k2:<18}: {v2}")
 
+# (MODIFICADO) Ligeramente adaptada para ser más robusta.
 def _display_positions_tables(summary: Dict[str, Any], current_price: float):
     print("\n--- Posiciones " + "-"*69)
     
@@ -202,210 +324,12 @@ def _display_positions_tables(summary: Dict[str, Any], current_price: float):
     print_table('long')
     print_table('short')
 
-def _display_decision_tree(milestones: List[Any], operation_state: Dict[str, Any]):
-    print("\n--- Árbol de Decisiones Secuenciales " + "-"*45)
-    if not milestones:
-        print("  (No hay hitos definidos)"); return
-        
-    tree = {None: []}
-    for m in milestones:
-        pid = m.parent_id
-        if pid not in tree: tree[pid] = []
-        tree[pid].append(m)
-
-    STATUS_MAP = {
-        "ACTIVE":    ("ARMADO",    "\x1b[92m"),
-        "PENDING":   ("EN ESPERA", "\x1b[93m"),
-        "COMPLETED": ("EJECUTADO", "\x1b[90m"),
-        "CANCELLED": ("CANCELADO", "\x1b[91m"),
-    }
-    
-    op_initiator_id = None
-    if operation_state and operation_state.get('configuracion', {}).get('tendencia') != 'NEUTRAL':
-        completed_initiators = sorted(
-            [m for m in milestones if m.status == 'COMPLETED' and m.tipo_hito == 'INICIALIZACION'],
-            key=lambda m: m.created_at,
-            reverse=True
-        )
-        if completed_initiators:
-            op_initiator_id = completed_initiators[0].id
-
-    def print_branch(parent_id, prefix=""):
-        if parent_id not in tree: return
-        children = sorted(tree[parent_id], key=lambda m: m.created_at)
-        for i, hito in enumerate(children):
-            is_last = (i == len(children) - 1)
-            connector = "└─" if is_last else "├─"
-            
-            status_text, color = STATUS_MAP.get(hito.status, (hito.status, ""))
-            reset = "\x1b[0m"
-            status_str = f"[{color}{status_text:<9}{reset}]"
-            
-            tipo_str = f"({hito.tipo_hito[:4]})"
-            cond_str = "Finaliza por límites"
-            if hito.condicion.tipo_condicion_precio:
-                if hito.condicion.tipo_condicion_precio == 'MARKET':
-                    cond_str = "SI Precio = MERCADO"
-                else:
-                    op = ">" if hito.condicion.tipo_condicion_precio == 'PRICE_ABOVE' else "<"
-                    cond_str = f"SI Precio {op} {hito.condicion.valor_condicion_precio}"
-            
-            op_indicator = ""
-            if hito.id == op_initiator_id:
-                op_indicator = f"  <- [OP. ACTIVA]"
-            
-            print(f"{prefix}{connector} {tipo_str} {status_str} {cond_str} (ID: ...{hito.id[-6:]}){op_indicator}")
-
-            child_prefix = prefix + ("    " if is_last else "│   ")
-            print_branch(hito.id, child_prefix)
-            
-    print_branch(None)
-
+# (MODIFICADO) Adaptado a la nueva lógica y nombres de funciones de la API.
 def _end_operation_wizard(pm_api: Any):
     title = "¿Cómo deseas finalizar la operación actual?"
-    end_menu_items = ["[1] Volver a NEUTRAL (mantener posiciones)", "[2] Cierre forzoso y volver a NEUTRAL", None, "[c] Cancelar"]
+    end_menu_items = ["[1] Mantener posiciones y finalizar", "[2] Cerrar todas las posiciones y finalizar", None, "[c] Cancelar"]
     choice = TerminalMenu(end_menu_items, title=title).show()
     if choice in [0, 1]:
-        success, msg = pm_api.force_end_operation(close_positions=(choice == 1))
+        # (NUEVO) Se llama a la función `force_stop_operation`
+        success, msg = pm_api.force_stop_operation(close_positions=(choice == 1))
         print(f"\n{msg}"); time.sleep(2)
-
-def _show_manage_milestones_list_screen(pm_api: Any):
-    while True:
-        clear_screen(); print_tui_header("Gestión del Árbol de Hitos")
-        
-        if hasattr(pm_api, 'validate_milestone_tree_state'): pm_api.validate_milestone_tree_state()
-        all_milestones = pm_api.get_all_milestones()
-        _display_decision_tree(all_milestones, pm_api.get_operation_state())
-        
-        future_milestones = [m for m in all_milestones if m.status in ['PENDING', 'ACTIVE']]
-        
-        menu_items = ["[1] Crear Nuevo Hito"]
-        if future_milestones:
-            menu_items.extend(["[2] Seleccionar un Hito para Gestionar", "[3] Eliminar TODOS los Hitos Futuros"])
-        menu_items.extend([None, "[b] Volver al Panel Principal"])
-        
-        menu_options = MENU_STYLE.copy()
-        menu_options['clear_screen'] = False
-        choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
-        
-        if choice == 0: _create_milestone_wizard(pm_api, all_milestones)
-        elif choice == 1 and future_milestones:
-            STATUS_MAP_SELECT = {"ACTIVE": "ARMADO", "PENDING": "EN ESPERA"}
-            select_items = [f"Lvl {m.level} - {STATUS_MAP_SELECT.get(m.status, m.status)} - ...{m.id[-6:]}" for m in future_milestones] + ["[c] Cancelar"]
-            select_choice = TerminalMenu(select_items, title="Selecciona un hito:").show()
-            if select_choice is not None and select_choice < len(future_milestones):
-                _show_milestone_detail_screen(pm_api, future_milestones[select_choice])
-        elif choice == 2 and future_milestones:
-            if TerminalMenu(["[1] Sí, eliminar todos", "[2] No, cancelar"], title="¿Estás seguro?").show() == 0:
-                for m in reversed(future_milestones): pm_api.remove_milestone(m.id)
-                print("\nTodos los hitos futuros eliminados."); time.sleep(2)
-        else: break
-
-def _show_milestone_detail_screen(pm_api: Any, hito: Any):
-    clear_screen(); print_tui_header(f"Detalle del Hito (...{hito.id[-6:]})")
-    print(f"\n--- Detalles del Hito Seleccionado ---\n  ID Completo: {hito.id}\n  Tipo: {hito.tipo_hito}\n  Estado: {hito.status}\n  Nivel en el Árbol: {hito.level}\n  ID Padre: {hito.parent_id or 'N/A (Nivel 1)'}")
-    print(f"\n  CONDICIÓN DE ACTIVACIÓN:")
-    if hito.condicion.tipo_condicion_precio:
-        if hito.condicion.tipo_condicion_precio == 'MARKET': print("    - Activación Inmediata (Precio de Mercado)")
-        else: print(f"    - Precio {'SUPERIOR a' if hito.condicion.tipo_condicion_precio == 'PRICE_ABOVE' else 'INFERIOR a'} {hito.condicion.valor_condicion_precio}")
-    if hito.tipo_hito == 'FINALIZACION':
-        if hito.condicion.tp_roi_pct: print(f"    - TP de Operación por ROI >= {hito.condicion.tp_roi_pct}%")
-        if hito.condicion.sl_roi_pct: print(f"    - SL de Operación por ROI <= {hito.condicion.sl_roi_pct}%")
-        if hito.condicion.tiempo_maximo_min: print(f"    - Duración de Operación >= {hito.condicion.tiempo_maximo_min} min")
-        if hito.condicion.max_comercios: print(f"    - Trades en Operación >= {hito.condicion.max_comercios}")
-    print(f"\n  ACCIÓN A EJECUTAR:")
-    if hito.tipo_hito == 'INICIALIZACION' and hito.accion.configuracion_nueva_operacion:
-        print("    - Iniciar nueva Operación con la siguiente configuración:")
-        for key, value in asdict(hito.accion.configuracion_nueva_operacion).items(): print(f"      - {key.replace('_', ' ').title()}: {value}")
-    elif hito.tipo_hito == 'FINALIZACION':
-        print(f"    - Finalizar operación actual y transicionar a modo NEUTRAL.\n    - ¿Cerrar posiciones abiertas al finalizar?: {'Sí' if hito.accion.cerrar_posiciones_al_finalizar else 'No'}")
-    menu_items = ["[1] Modificar Hito", "[2] Eliminar Hito", "[3] Forzar Activación", None, "[b] Volver"]
-    menu_options = MENU_STYLE.copy()
-    menu_options['clear_screen'] = False
-    choice = TerminalMenu(menu_items, title="\nAcciones para este hito:", **menu_options).show()
-    if choice == 0: _create_milestone_wizard(pm_api, pm_api.get_all_milestones(), update_mode=True, milestone_to_update=hito)
-    elif choice == 1: _delete_milestone_wizard(pm_api, hito)
-    elif choice == 2: _force_trigger_wizard(pm_api, hito)
-
-def _create_milestone_wizard(pm_api: Any, all_milestones: List[Any], update_mode: bool = False, milestone_to_update: Any = None):
-    title = "Asistente de Modificación de Hitos" if update_mode else "Asistente de Creación de Hitos"
-    clear_screen(); print_tui_header(title)
-    current_price = pm_api.get_current_market_price() or 0.0
-    print(f"\nPrecio de Mercado Actual: {current_price:.4f} USDT\n")
-    parent_id = None
-    if update_mode: tipo_hito, parent_id = milestone_to_update.tipo_hito, milestone_to_update.parent_id
-    else:
-        selectable_parents = [m for m in all_milestones if m.status in ['PENDING', 'ACTIVE']]
-        if selectable_parents:
-            parent_menu_items = ["[1] Hito de Nivel 1 (Sin padre)"] + [f"[{i+2}] Anidar bajo Hito ...{m.id[-6:]}" for i, m in enumerate(selectable_parents)] + [None, "[c] Cancelar"]
-            parent_choice = TerminalMenu(parent_menu_items, title="Paso 1: ¿Dónde crear el hito?").show()
-            if parent_choice is None or parent_choice >= len(parent_menu_items) - 2: return
-            if parent_choice > 0:
-                parent_id = selectable_parents[parent_choice - 1].id
-                tipo_hito = 'FINALIZACION' if selectable_parents[parent_choice - 1].tipo_hito == 'INICIALIZACION' else 'INICIALIZACION'
-                print(f"\n-> Se creará un hito de '{tipo_hito}' como hijo."); time.sleep(1.5)
-            else: tipo_hito = 'INICIALIZACION'
-        else: tipo_hito = 'INICIALIZACION'
-    if tipo_hito == 'INICIALIZACION':
-        clear_screen(); print_tui_header(f"Crear Hito de Inicialización")
-        print(f"\nPrecio Actual: {current_price:.4f} USDT\n")
-        cond_choice = TerminalMenu(["[1] Precio SUPERIOR a", "[2] Precio INFERIOR a", "[3] Activación Inmediata"], title="Paso 2: Define la condición:").show()
-        cond_type, cond_value = None, None
-        if cond_choice in [0, 1]:
-            cond_type = 'PRICE_ABOVE' if cond_choice == 0 else 'PRICE_BELOW'
-            val = get_input(f"Activar si precio {'SUPERIOR a' if cond_choice == 0 else 'INFERIOR a'}", float, default=current_price)
-            if isinstance(val, CancelInput): return
-            cond_value = val
-        elif cond_choice == 2: cond_type, cond_value = 'MARKET', 0.0
-        else: return
-        condicion = CondicionHito(tipo_condicion_precio=cond_type, valor_condicion_precio=cond_value)
-        print("\n--- Paso 3: Configura la Operación que se iniciará ---")
-        tendencia_idx = TerminalMenu(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]).show()
-        if tendencia_idx is None: return
-        tendencia = ["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"][tendencia_idx]
-        base_size = get_input("Tamaño base (USDT)", float, default=1.0);_ = isinstance(base_size, CancelInput) and (lambda: exec("return"))()
-        max_pos = get_input("Máx. posiciones", int, default=5);_ = isinstance(max_pos, CancelInput) and (lambda: exec("return"))()
-        leverage = get_input("Apalancamiento", float, default=10.0);_ = isinstance(leverage, CancelInput) and (lambda: exec("return"))()
-        sl_ind = get_input("SL individual (%)", float, default=10.0);_ = isinstance(sl_ind, CancelInput) and (lambda: exec("return"))()
-        tsl_act = get_input("Activación TSL (%)", float, default=0.4);_ = isinstance(tsl_act, CancelInput) and (lambda: exec("return"))()
-        tsl_dist = get_input("Distancia TSL (%)", float, default=0.1);_ = isinstance(tsl_dist, CancelInput) and (lambda: exec("return"))()
-        config_op = ConfiguracionOperacion(tendencia, base_size, max_pos, leverage, sl_ind, tsl_act, tsl_dist)
-        accion = AccionHito(configuracion_nueva_operacion=config_op)
-    else:
-        clear_screen(); print_tui_header(f"Crear Hito de Finalización")
-        print("\nDefine las condiciones que finalizarán la operación (0 para desactivar).")
-        tp_roi = get_input("TP por ROI (%)", float, default=2.5);_ = isinstance(tp_roi, CancelInput) and (lambda: exec("return"))()
-        sl_roi = get_input("SL por ROI (%)", float, default=-1.5);_ = isinstance(sl_roi, CancelInput) and (lambda: exec("return"))()
-        max_trades = get_input("Máx. trades", int, default=0);_ = isinstance(max_trades, CancelInput) and (lambda: exec("return"))()
-        max_duracion = get_input("Duración máx. (min)", int, default=0);_ = isinstance(max_duracion, CancelInput) and (lambda: exec("return"))()
-        condicion = CondicionHito(tp_roi_pct=tp_roi or None, sl_roi_pct=sl_roi or None, max_comercios=max_trades or None, tiempo_maximo_min=max_duracion or None)
-        cerrar_pos = TerminalMenu(["No (Recomendado)", "Sí"]).show() == 1
-        accion = AccionHito(cerrar_posiciones_al_finalizar=cerrar_pos)
-    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"]).show() == 0:
-        if update_mode: success, msg = pm_api.update_milestone(milestone_to_update.id, condicion, accion)
-        else: success, msg = pm_api.add_milestone(tipo_hito, condicion, accion, parent_id)
-        print(f"\n{msg}"); time.sleep(2)
-
-def _delete_milestone_wizard(pm_api: Any, hito_to_delete: Optional[Any] = None):
-    if not hito_to_delete: print("\nError: No se ha especificado un hito para eliminar."); time.sleep(2); return
-    title = f"¿Eliminar hito ...{hito_to_delete.id[-6:]}?\n(ADVERTENCIA: Sus descendientes también serán eliminados)"
-    if TerminalMenu(["[1] Sí, eliminar", "[2] No, cancelar"], title=title).show() == 0:
-        success, msg = pm_api.remove_milestone(hito_to_delete.id)
-        print(f"\n{msg}"); time.sleep(2)
-
-def _force_trigger_wizard(pm_api: Any, hito_to_trigger: Optional[Any] = None):
-    if not hito_to_trigger: print("\nError: No se ha especificado un hito para activar."); time.sleep(2); return
-    hito_id = hito_to_trigger.id
-    new_tendencia = 'NEUTRAL' if hito_to_trigger.tipo_hito == 'FINALIZACION' else hito_to_trigger.accion.configuracion_nueva_operacion.tendencia
-    summary = pm_api.get_position_summary()
-    has_longs, has_shorts = summary.get('open_long_positions_count', 0) > 0, summary.get('open_short_positions_count', 0) > 0
-    long_pos_action, short_pos_action = 'keep', 'keep'
-    if has_longs or has_shorts:
-        clear_screen(); print_tui_header("Gestión de Posiciones Existentes")
-        print(f"\nSe activará una nueva operación en modo '{new_tendencia}'.\n¿Qué hacer con las posiciones abiertas?")
-        if has_longs:
-            if TerminalMenu(["[1] Mantener LONGs", "[2] Cerrar LONGs"], title="Acción para posiciones LONG:").show() == 1: long_pos_action = 'close'
-        if has_shorts:
-            if TerminalMenu(["[1] Mantener SHORTs", "[2] Cerrar SHORTs"], title="Acción para posiciones SHORT:").show() == 1: short_pos_action = 'close'
-    success, msg = pm_api.force_trigger_milestone_with_pos_management(hito_id, long_pos_action, short_pos_action)
-    print(f"\n{msg}"); time.sleep(2.5)

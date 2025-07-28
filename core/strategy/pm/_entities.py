@@ -1,16 +1,19 @@
 """
 Módulo de Entidades de Dominio para el Position Manager.
 
-v5.2 (Sincronización de Entidades):
-- Asegura que la definición de `CondicionHito` coincida con su uso en la TUI,
-  utilizando `tipo_condicion_precio` y `valor_condicion_precio` para una
-  lógica de activación de un solo paso.
+v6.0 (Modelo de Operación Estratégica Única):
+- Se elimina por completo el concepto de Hitos. Las clases `Hito`,
+  `CondicionHito` y `AccionHito` han sido comentadas y serán eliminadas.
+- La clase `Operacion` se convierte en la única entidad estratégica,
+  conteniendo ahora su propio estado, condiciones de entrada y
+  condiciones de salida.
+- `ConfiguracionOperacion` se fusiona dentro de `Operacion` para simplificar.
 """
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List
 
-# --- Entidades de Posiciones ---
+# --- Entidades de Posiciones (Sin cambios) ---
 
 @dataclass
 class LogicalPosition:
@@ -43,7 +46,7 @@ class PhysicalPosition:
     last_update_ts: Optional[datetime.datetime] = None
 
 
-# --- Entidades de Balance y Capital ---
+# --- Entidades de Balance y Capital (Sin cambios) ---
 
 @dataclass
 class Balances:
@@ -65,78 +68,38 @@ class Balances:
         return max(0.0, self.operational_short - self.used_short)
 
 
-# --- ENTIDADES PARA EL MODELO DE OPERACIONES SECUENCIALES ---
-
-# --- 1. La Entidad Central: Operacion ---
-
-@dataclass
-class ConfiguracionOperacion:
-    """
-    Define los parámetros de configuración inmutables para una Operacion de trading.
-    """
-    tendencia: str
-    tamaño_posicion_base_usdt: float
-    max_posiciones_logicas: int
-    apalancamiento: float
-    sl_posicion_individual_pct: float
-    tsl_activacion_pct: float
-    tsl_distancia_pct: float
-
-
 @dataclass
 class Operacion:
     """
-    Representa un ciclo de vida completo de trading.
+    Representa una única Operación Estratégica configurable. Contiene toda la
+    lógica de estado, condiciones y parámetros de trading.
     """
+    # --- Identificación y Estado ---
     id: str
-    configuracion: ConfiguracionOperacion
-    capital_inicial_usdt: float
-    pnl_realizado_usdt: float = 0.0
-    comercios_cerrados_contador: int = 0
-    tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
-    posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})
+    estado: str = 'EN_ESPERA'  # 'EN_ESPERA', 'ACTIVA', 'FINALIZADA'
 
+    # --- Condición de Entrada ---
+    tipo_cond_entrada: Optional[str] = 'MARKET' # 'PRICE_ABOVE', 'PRICE_BELOW', 'MARKET'
+    valor_cond_entrada: Optional[float] = 0.0
 
-# --- 2. Entidades para los Nuevos Hitos Especializados ---
+    # --- Parámetros de Trading (antes en ConfiguracionOperacion) ---
+    tendencia: str = 'NEUTRAL'
+    tamaño_posicion_base_usdt: float = 1.0
+    max_posiciones_logicas: int = 5
+    apalancamiento: float = 10.0
+    sl_posicion_individual_pct: float = 10.0
+    tsl_activacion_pct: float = 0.4
+    tsl_distancia_pct: float = 0.1
 
-# --- INICIO DE LA CORRECCIÓN: Definición correcta de CondicionHito ---
-@dataclass
-class CondicionHito:
-    """
-    Contenedor para todas las posibles condiciones que pueden activar un hito.
-    """
-    # Para Hitos de Inicialización (y opcionalmente de Finalización)
-    # tipo_condicion_precio puede ser: 'PRICE_ABOVE', 'PRICE_BELOW', 'MARKET'
-    tipo_condicion_precio: Optional[str] = None 
-    valor_condicion_precio: Optional[float] = None
-    
-    # Para Hitos de Finalización
+    # --- Condiciones de Salida (Límites de la Operación) ---
     tp_roi_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
-# --- FIN DE LA CORRECCIÓN ---
-
-@dataclass
-class AccionHito:
-    """
-    Define la acción que se ejecuta cuando un Hito se activa.
-    """
-    configuracion_nueva_operacion: Optional[ConfiguracionOperacion] = None
-    cerrar_posiciones_al_finalizar: bool = False
-
-
-@dataclass
-class Hito:
-    """
-    La entidad Hito, que representa un nodo en el árbol de decisiones.
-    """
-    id: str
-    tipo_hito: str
-    condicion: CondicionHito
-    accion: AccionHito
-    parent_id: Optional[str] = None
-    level: int = 1
-    status: str = 'PENDING'
-    one_shot: bool = True
-    created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
+    
+    # --- Estado Dinámico (se actualiza durante la ejecución) ---
+    capital_inicial_usdt: float = 0.0
+    pnl_realizado_usdt: float = 0.0
+    comercios_cerrados_contador: int = 0
+    tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
+    posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})

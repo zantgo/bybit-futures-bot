@@ -1,18 +1,17 @@
 """
-Módulo para la gestión de Hitos Condicionales (Triggers).
+Módulo para la gestión de Triggers de la Operación Estratégica.
 
-v5.4 (Restauración de Lógica "Primero Gana"):
-- Se restaura la lógica de evaluación para que se detenga en el primer hito
-  que cumple su condición en un tick.
-- Los hitos se evalúan en orden de creación para asegurar predictibilidad.
-- La responsabilidad de cancelar a los "hermanos" recae enteramente en la
-  función de cascada `process_triggered_milestone`, que ahora es más robusta.
+v6.0 (Modelo de Operación Estratégica Única):
+- Se elimina por completo la lógica de evaluación de Hitos.
+- La función `check_conditional_triggers` ha sido reescrita para una única
+  responsabilidad: comprobar las condiciones de entrada y salida de la
+  operación estratégica única gestionada por el Position Manager.
 """
 import sys
 import os
 import datetime
 import traceback
-from typing import Any, Dict, Tuple, Optional, List
+from typing import Any, Dict, Tuple, Optional
 
 # --- Importaciones Adaptadas ---
 if __name__ != "__main__":
@@ -24,104 +23,95 @@ if __name__ != "__main__":
 try:
     from core.strategy.pm import api as position_manager
     from core.logging import memory_logger
-    from core.strategy.pm._entities import Hito
+    # (COMENTADO) La entidad Hito ya no es necesaria.
+    # from core.strategy.pm._entities import Hito 
+    from core.strategy.pm._entities import Operacion # Importamos la nueva entidad
     from core import utils
 except ImportError as e:
     print(f"ERROR [Workflow Triggers Import]: Falló importación de dependencias: {e}")
     position_manager = None
     utils = None
-    class Hito: pass
+    class Operacion: pass
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
 
-# --- Lógica de Hitos ---
+# --- INICIO DE LA MODIFICACIÓN: Nueva Lógica de Triggers para Operación Única ---
 
 def check_conditional_triggers(current_price: float, timestamp: datetime.datetime):
     """
-    Comprueba y ejecuta el primer hito 'ARMADO' cuya condición se cumpla.
+    Comprueba las condiciones de entrada y salida de la operación estratégica actual.
     """
     if not position_manager or not position_manager.is_initialized():
         return
 
     try:
-        operation_state = position_manager.get_operation_state()
-        if not operation_state or 'error' in operation_state:
+        operacion = position_manager.get_operation()
+        if not operacion:
             return
 
-        all_milestones = position_manager.get_all_milestones()
-        if not all_milestones:
-            return
+        # Escenario 1: La operación está EN_ESPERA, comprobamos su condición de entrada.
+        if operacion.estado == 'EN_ESPERA':
+            condition_met, reason = _evaluate_entry_condition(operacion, current_price)
+            if condition_met:
+                memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA: {reason}", "INFO")
+                # El PM se encargará de cambiar el estado a 'ACTIVA'.
+                position_manager.force_start_operation()
 
-        current_tendencia = operation_state.get('configuracion', {}).get('tendencia', 'NEUTRAL')
-        tipo_hito_a_evaluar = 'INICIALIZACION' if current_tendencia == 'NEUTRAL' else 'FINALIZACION'
-        
-        # --- INICIO DE LA CORRECCIÓN: Volver a la lógica de "el primero gana" ---
-        # 1. Filtrar los hitos relevantes y ordenarlos por fecha de creación.
-        #    Esto asegura que siempre se evalúe primero el que se creó antes.
-        active_milestones_to_check = sorted(
-            [m for m in all_milestones if m.status == 'ACTIVE' and m.tipo_hito == tipo_hito_a_evaluar],
-            key=lambda m: m.created_at
-        )
-
-        # 2. Iterar y detenerse en el primer hito que se cumpla.
-        for hito in active_milestones_to_check:
-            try:
-                condition_met, reason = _evaluate_milestone_conditions(hito, current_price, timestamp, operation_state)
-                
-                if condition_met:
-                    trigger_msg = f"HITO ALCANZADO: ID ...{hito.id[-6:]}. Razón: {reason}"
-                    memory_logger.log(trigger_msg, level="INFO")
-
-                    if hito.one_shot:
-                        position_manager.process_triggered_milestone(hito.id)
-                    
-                    # 3. Romper el bucle. Esto es crucial. Solo se procesa UN hito por tick.
-                    #    La lógica de cascada en el PM se encargará del resto.
-                    break
-
-            except Exception as e_single:
-                milestone_id_err = getattr(hito, 'id', 'desconocido')
-                memory_logger.log(f"ERROR [Workflow Triggers]: Procesando hito ID '{milestone_id_err}': {e_single}", level="ERROR")
-                memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-        # --- FIN DE LA CORRECCIÓN ---
+        # Escenario 2: La operación está ACTIVA, comprobamos sus condiciones de salida.
+        elif operacion.estado == 'ACTIVA':
+            condition_met, reason = _evaluate_exit_conditions(operacion, current_price)
+            if condition_met:
+                memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA: {reason}", "INFO")
+                # El PM se encargará de finalizar la operación.
+                position_manager.force_stop_operation(close_positions=False) # Por defecto, no se cierran posiciones
 
     except Exception as e_main:
-        memory_logger.log(f"ERROR CRÍTICO [Workflow Triggers]: Obteniendo estado del PM: {e_main}", level="ERROR")
+        memory_logger.log(f"ERROR CRÍTICO [Workflow Triggers]: {e_main}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
 
 
-def _evaluate_milestone_conditions(hito: Hito, current_price: float, timestamp: datetime.datetime, operation_state: Dict[str, Any]) -> Tuple[bool, str]:
-    # (Esta función se mantiene sin cambios, es correcta)
-    cond = hito.condicion
-    if cond.tipo_condicion_precio:
-        price_met, price_reason = _evaluate_price_condition(cond.tipo_condicion_precio, cond.valor_condicion_precio, current_price)
-        if price_met: return True, price_reason
-    if hito.tipo_hito == 'FINALIZACION':
-        op_summary = position_manager.get_position_summary()
-        if op_summary:
-            current_op_roi = op_summary.get('operation_roi', 0.0)
-            if cond.tp_roi_pct is not None and current_op_roi >= cond.tp_roi_pct:
-                return True, f"TP por ROI de Operación alcanzado ({current_op_roi:.2f}% >= {cond.tp_roi_pct}%)"
-            if cond.sl_roi_pct is not None and current_op_roi <= cond.sl_roi_pct:
-                return True, f"SL por ROI de Operación alcanzado ({current_op_roi:.2f}% <= {cond.sl_roi_pct}%)"
-        if cond.max_comercios is not None and operation_state.get('comercios_cerrados_contador', 0) >= cond.max_comercios:
-            return True, f"Límite de {cond.max_comercios} trades alcanzado"
-        start_time = operation_state.get('tiempo_inicio_ejecucion')
-        if cond.tiempo_maximo_min is not None and start_time:
-            if timestamp.tzinfo is None and start_time.tzinfo is not None:
-                 timestamp = timestamp.replace(tzinfo=start_time.tzinfo)
-            elapsed_minutes = (timestamp - start_time).total_seconds() / 60.0
-            if elapsed_minutes >= cond.tiempo_maximo_min:
-                return True, f"Límite de duración de {cond.tiempo_maximo_min} min alcanzado"
+def _evaluate_entry_condition(operacion: Operacion, current_price: float) -> Tuple[bool, str]:
+    """Evalúa la condición de entrada de la operación."""
+    cond_type = operacion.tipo_cond_entrada
+    cond_value = operacion.valor_cond_entrada
+
+    if cond_type == 'MARKET':
+        return True, "Activación inmediata por precio de mercado"
+    
+    if cond_value is None:
+        return False, ""
+
+    if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
+        return True, f"Precio ({current_price:.4f}) superó umbral de entrada ({cond_value:.4f})"
+        
+    if cond_type == 'PRICE_BELOW' and current_price < cond_value:
+        return True, f"Precio ({current_price:.4f}) cayó por debajo de umbral de entrada ({cond_value:.4f})"
+        
     return False, ""
 
-def _evaluate_price_condition(cond_type: Optional[str], cond_value: Optional[float], current_price: float) -> Tuple[bool, str]:
-    # (Esta función se mantiene sin cambios, es correcta)
-    if cond_type == 'MARKET': return True, "Activación inmediata por precio de mercado"
-    if cond_value is None: return False, ""
-    if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
-        return True, f"Precio ({current_price:.4f}) superó el umbral ({cond_value:.4f})"
-    if cond_type == 'PRICE_BELOW' and current_price < cond_value:
-        return True, f"Precio ({current_price:.4f}) cayó por debajo del umbral ({cond_value:.4f})"
+def _evaluate_exit_conditions(operacion: Operacion, current_price: float) -> Tuple[bool, str]:
+    """Evalúa todas las condiciones de salida de la operación."""
+    
+    # Comprobar límites de ROI
+    summary = position_manager.get_position_summary()
+    if summary and 'error' not in summary:
+        current_op_roi = summary.get('operation_roi', 0.0)
+        if operacion.tp_roi_pct is not None and current_op_roi >= operacion.tp_roi_pct:
+            return True, f"TP por ROI alcanzado ({current_op_roi:.2f}% >= {operacion.tp_roi_pct}%)"
+        if operacion.sl_roi_pct is not None and current_op_roi <= operacion.sl_roi_pct:
+            return True, f"SL por ROI alcanzado ({current_op_roi:.2f}% <= {operacion.sl_roi_pct}%)"
+
+    # Comprobar límite de trades
+    if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
+        return True, f"Límite de {operacion.max_comercios} trades alcanzado"
+    
+    # Comprobar límite de tiempo
+    start_time = operacion.tiempo_inicio_ejecucion
+    if operacion.tiempo_maximo_min is not None and start_time:
+        current_ts_utc = datetime.datetime.now(datetime.timezone.utc)
+        elapsed_minutes = (current_ts_utc - start_time).total_seconds() / 60.0
+        if elapsed_minutes >= operacion.tiempo_maximo_min:
+            return True, f"Límite de duración de {operacion.tiempo_maximo_min} min alcanzado"
+            
     return False, ""
