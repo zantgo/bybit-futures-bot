@@ -225,3 +225,5 @@ def get_current_market_price() -> Optional[float]:
     """Obtiene el precio de mercado más reciente conocido por el ticker."""
     if not _pm_instance: return None
     return _pm_instance.get_current_market_price()
+
+    

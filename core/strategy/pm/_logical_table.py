@@ -2,34 +2,30 @@
 Módulo que define la clase LogicalPositionTable para gestionar una lista de
 posiciones lógicas abiertas para un lado específico (long/short).
 
-v2.1 (Thread-Safety Refactor):
-- Se ha añadido un threading.Lock para proteger el acceso a la lista de posiciones
-  desde múltiples hilos (TUI y Ticker), evitando race conditions.
-- Todos los métodos que leen o escriben en self._positions están ahora bloqueados.
-
-v2.0 (Exchange Agnostic Refactor):
-- Se reemplaza la dependencia de `live_operations` por `exchange_adapter`.
+v2.2 (Sincronización):
+- Añadido el método `sync_positions` para permitir la sobrescritura completa
+  del estado de la tabla, necesario para la transición entre Operaciones.
+- Mejorado el tipado interno para usar la entidad `LogicalPosition`.
 """
 import datetime
 import traceback
 import copy
-import time
-# --- INICIO DE LA MODIFICACIÓN ---
 import threading
-# --- FIN DE LA MODIFICACIÓN ---
-from typing import Optional, Dict, Any, List, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
 import pandas as pd
 
 # --- Dependencias (se inyectan en __init__) ---
 try:
     from core.exchange import AbstractExchange
     from core.logging import memory_logger
+    # Importar la entidad específica para un tipado más fuerte
+    from ._entities import LogicalPosition
 except ImportError:
     class AbstractExchange: pass
+    class LogicalPosition: pass # Fallback
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
-
 
 if TYPE_CHECKING:
     import config as cfg_mod
@@ -65,39 +61,48 @@ class LogicalPositionTable:
         self._config_param = config_param
         self._utils = utils
         self._exchange = exchange_adapter
-        self._positions: List[Dict[str, Any]] = []
-        # --- INICIO DE LA MODIFICACIÓN ---
+        # --- INICIO DE LA CORRECCIÓN: El tipado de la lista es ahora explícito ---
+        self._positions: List[LogicalPosition] = []
+        # --- FIN DE LA CORRECCIÓN ---
         self._lock = threading.Lock()
-        # --- FIN DE LA MODIFICACIÓN ---
 
         memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
 
-    # --- Métodos de Gestión Básica ---
-    def add_position(self, position_data: Dict[str, Any]) -> bool:
-        if not isinstance(position_data, dict): 
-            memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: Dato no es dict.", level="ERROR"); return False
-        if 'id' not in position_data: 
-            memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: Falta 'id'.", level="ERROR"); return False
+    # --- INICIO DE LA MODIFICACIÓN: Nuevo método de sincronización ---
+    def sync_positions(self, new_positions: List[LogicalPosition]):
+        """
+        Sobrescribe completamente la lista interna de posiciones con una nueva lista.
+        Este método es crucial para sincronizar el estado después de una transición de Operación.
+        """
+        if not isinstance(new_positions, list):
+            memory_logger.log(f"ERROR [LPT Sync {self.side.upper()}]: El dato proporcionado no es una lista.", level="ERROR")
+            return
+        
+        with self._lock:
+            # Se usa deepcopy para asegurar que la tabla tenga su propia copia de los objetos
+            self._positions = copy.deepcopy(new_positions)
+        
+        memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    # --- Métodos de Gestión Básica (con tipado mejorado) ---
+    def add_position(self, position_data: LogicalPosition) -> bool:
+        """Añade un objeto LogicalPosition a la tabla."""
+        if not isinstance(position_data, LogicalPosition): 
+            memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: El dato no es un objeto LogicalPosition válido.", level="ERROR"); return False
         
         with self._lock:
             self._positions.append(copy.deepcopy(position_data))
         
-        # Logging fuera del lock
-        log_level = "INFO"
-        if self._config_param:
-            log_level = getattr(self._config_param, 'LOG_LEVEL', 'INFO').upper()
-
         return True
 
-    def remove_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
+    def remove_position_by_index(self, index: int) -> Optional[LogicalPosition]:
+        """Elimina una posición por su índice y la devuelve."""
         try:
             with self._lock:
                 if 0 <= index < len(self._positions):
                     removed_position = self._positions.pop(index)
                     return copy.deepcopy(removed_position)
-                else: 
-                    # Loguear el error fuera del lock si es posible
-                    pass
             
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Remove Idx]: Índice {index} fuera de rango.", level="ERROR")
             return None
@@ -107,14 +112,15 @@ class LogicalPositionTable:
             memory_logger.log(traceback.format_exc(), level="ERROR")
             return None
 
-    def remove_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
+    def remove_position_by_id(self, position_id: str) -> Optional[LogicalPosition]:
+        """Elimina una posición por su ID y la devuelve."""
         with self._lock:
             index_to_remove = -1
             for i, pos in enumerate(self._positions):
-                if pos.get('id') == position_id: 
+                if pos.id == position_id: 
                     index_to_remove = i
                     break
-        # Llamar a remove_position_by_index fuera del lock para no anidarlos
+        
         if index_to_remove != -1: 
             return self.remove_position_by_index(index_to_remove)
         else: 
@@ -122,40 +128,45 @@ class LogicalPositionTable:
             return None
 
     def update_position_details(self, position_id: str, details_to_update: Dict[str, Any]) -> bool:
+        """Actualiza atributos de una posición existente por su ID."""
         if not isinstance(details_to_update, dict): 
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: details no es dict.", level="ERROR"); return False
         
         found = False
         with self._lock:
-            for i, pos in enumerate(self._positions):
-                if pos.get('id') == position_id:
+            for pos in self._positions:
+                if pos.id == position_id:
                     try:
-                        self._positions[i].update(details_to_update)
+                        for key, value in details_to_update.items():
+                            if hasattr(pos, key):
+                                setattr(pos, key, value)
                         found = True
                         break
                     except Exception as e:
-                        # Loguear dentro del lock solo si es crítico para el estado
                         memory_logger.log(f"ERROR [LPT {self.side.upper()} Update]: Excepción ID {position_id}: {e}", level="ERROR")
                         memory_logger.log(traceback.format_exc(), level="ERROR")
                         return False
 
         if not found: 
-            memory_logger.log(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado.", level="WARN")
+            memory_logger.log(f"WARN [LPT {self.side.upper()} Update]: ID {position_id} no encontrado para actualizar.", level="WARN")
         return found
 
     # --- Métodos de Acceso y Cálculo ---
-    def get_positions(self) -> List[Dict[str, Any]]:
+    def get_positions(self) -> List[LogicalPosition]:
+        """Devuelve una copia de la lista de objetos LogicalPosition."""
         with self._lock:
             return copy.deepcopy(self._positions)
 
-    def get_position_by_id(self, position_id: str) -> Optional[Dict[str, Any]]:
+    def get_position_by_id(self, position_id: str) -> Optional[LogicalPosition]:
+        """Busca y devuelve una copia de una posición por su ID."""
         with self._lock:
             for pos in self._positions:
-                if pos.get('id') == position_id: 
+                if pos.id == position_id: 
                     return copy.deepcopy(pos)
         return None
 
-    def get_position_by_index(self, index: int) -> Optional[Dict[str, Any]]:
+    def get_position_by_index(self, index: int) -> Optional[LogicalPosition]:
+        """Obtiene una copia de una posición por su índice."""
         try:
             with self._lock:
                 if 0 <= index < len(self._positions): 
@@ -176,9 +187,7 @@ class LogicalPositionTable:
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
         
-        total_size = 0.0
-        for pos in positions_copy: 
-            total_size += self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
+        total_size = sum(pos.size_contracts for pos in positions_copy)
         return total_size
 
     def get_total_used_margin(self) -> float:
@@ -186,9 +195,7 @@ class LogicalPositionTable:
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
             
-        total_margin = 0.0
-        for pos in positions_copy: 
-            total_margin += self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0)
+        total_margin = sum(pos.margin_usdt for pos in positions_copy)
         return total_margin
 
     def get_average_entry_price(self) -> float:
@@ -198,33 +205,24 @@ class LogicalPositionTable:
             
         if not positions_copy: return 0.0
         
-        total_value = 0.0; total_size = 0.0
-        for pos in positions_copy:
-            size = self._utils.safe_float_convert(pos.get('size_contracts'), 0.0)
-            price = self._utils.safe_float_convert(pos.get('entry_price'), 0.0)
-            if size > 0 and price > 0: 
-                total_value += size * price
-                total_size += size
+        total_value = sum(pos.size_contracts * pos.entry_price for pos in positions_copy)
+        total_size = sum(pos.size_contracts for pos in positions_copy)
+        
         return self._utils.safe_division(total_value, total_size, default=0.0)
 
     # --- Visualización ---
     def display_table(self):
+        """Muestra una representación en tabla de las posiciones."""
+        from dataclasses import asdict
         with self._lock:
-            positions_copy = copy.deepcopy(self._positions)
+            positions_copy = [asdict(p) for p in self._positions]
             positions_count = len(positions_copy)
 
         if positions_count == 0:
             return
         
-        config_to_use = self._config_param
-        price_prec = 4; qty_prec = 3
-        
-        if config_to_use:
-             try: 
-                 price_prec = int(getattr(config_to_use, 'PRICE_PRECISION', 4))
-                 qty_prec = int(getattr(config_to_use, 'DEFAULT_QTY_PRECISION', 3))
-             except Exception: 
-                 memory_logger.log("WARN [LPT Display]: Error obteniendo precisiones config.", level="WARN")
+        price_prec = getattr(self._config_param, 'PRICE_PRECISION', 4)
+        qty_prec = getattr(self._config_param, 'DEFAULT_QTY_PRECISION', 3)
 
         data_for_df = []
         columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'Stop Loss', 'API Order ID']
@@ -237,11 +235,11 @@ class LogicalPositionTable:
             data_for_df.append({
                 'ID': str(pos.get('id', 'N/A'))[-6:], 
                 'Entry Time': entry_ts_str,
-                'Entry Price': f"{self._utils.safe_float_convert(pos.get('entry_price'), 0.0):.{price_prec}f}" if self._utils else pos.get('entry_price'),
-                'Size': f"{self._utils.safe_float_convert(pos.get('size_contracts'), 0.0):.{qty_prec}f}" if self._utils else pos.get('size_contracts'),
-                'Margin': f"{self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0):.2f}" if self._utils else pos.get('margin_usdt'),
-                'Leverage': f"{float(pos.get('leverage', 1.0)):.1f}x" if pos.get('leverage') else 'N/A',
-                'Stop Loss': f"{self._utils.safe_float_convert(sl_price, 0.0):.{price_prec}f}" if self._utils and sl_price else 'N/A',
+                'Entry Price': f"{self._utils.safe_float_convert(pos.get('entry_price'), 0.0):.{price_prec}f}",
+                'Size': f"{self._utils.safe_float_convert(pos.get('size_contracts'), 0.0):.{qty_prec}f}",
+                'Margin': f"{self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0):.2f}",
+                'Leverage': f"{float(pos.get('leverage', 1.0)):.1f}x",
+                'Stop Loss': f"{self._utils.safe_float_convert(sl_price, 0.0):.{price_prec}f}" if sl_price else 'N/A',
                 'API Order ID': str(pos.get('api_order_id', 'N/A'))[-8:]
             })
         try:

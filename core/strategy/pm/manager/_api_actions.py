@@ -1,10 +1,14 @@
-# core/strategy/pm/manager/_api_actions.py
-
 """
 Módulo del Position Manager: API de Acciones.
 
 Agrupa todos los métodos públicos que la TUI y otros módulos utilizan
 para modificar el estado o ejecutar acciones en el PositionManager.
+
+v4.4 (Lógica de Reemplazo de Hitos):
+- La función `add_milestone` ahora implementa una lógica de reemplazo.
+  Al crear un nuevo hito de INICIALIZACION de Nivel 1, todos los
+  otros hitos de INICIALIZACION de Nivel 1 existentes son cancelados,
+  asegurando que solo la estrategia de entrada más reciente esté activa.
 """
 import datetime
 import time
@@ -16,23 +20,14 @@ from datetime import timezone
 
 # --- Dependencias de Tipado ---
 try:
-    # --- INICIO DE LA MODIFICACIÓN: Importar nuevas entidades ---
     from .._entities import (
         Hito, CondicionHito, AccionHito, ConfiguracionOperacion
     )
-    # from .._entities import Milestone, MilestoneCondition, MilestoneAction, TrendConfig # Comentadas las antiguas
-    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError:
-    # --- INICIO DE LA MODIFICACIÓN: Añadir fallbacks para nuevas entidades ---
     class Hito: pass
     class CondicionHito: pass
     class AccionHito: pass
     class ConfiguracionOperacion: pass
-    # class Milestone: pass
-    # class MilestoneCondition: pass
-    # class MilestoneAction: pass
-    # class TrendConfig: pass
-    # --- FIN DE LA MODIFICACIÓN ---
 
 class _ApiActions:
     """Clase base que contiene las acciones públicas de la API del PositionManager."""
@@ -57,33 +52,22 @@ class _ApiActions:
         self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
         return True, msg
 
-    # --- (COMENTADO) add_milestone ---
-    # def add_milestone(self, condition_data: Dict, action_data: Dict, parent_id: Optional[str] = None) -> Tuple[bool, str]:
-    #     """Añade un nuevo hito al árbol de decisiones."""
-    #     try:
-    #         condition = MilestoneCondition(**condition_data)
-    #         trend_config = TrendConfig(**action_data['params'])
-    #         action = MilestoneAction(type=action_data['type'], params=trend_config)
-            
-    #         level, status = 1, 'ACTIVE'
-    #         if parent_id:
-    #             parent = next((m for m in self._milestones if m.id == parent_id), None)
-    #             if not parent: return False, f"Hito padre con ID '{parent_id}' no encontrado."
-    #             level = parent.level + 1
-    #             status = 'PENDING'
-            
-    #         milestone_id = f"mstone_{int(time.time() * 1000)}"
-    #         new_milestone = Milestone(id=milestone_id, condition=condition, action=action, parent_id=parent_id, level=level, status=status)
-    #         self._milestones.append(new_milestone)
-    #         self._memory_logger.log(f"HITO CREADO: ID ...{milestone_id[-6:]}, Nivel {level}, Estado {status}", "INFO")
-    #         return True, f"Hito '{milestone_id[-6:]}' añadido en Nivel {level}."
-    #     except Exception as e:
-    #         return False, f"Error creando hito: {e}"
-
-    # --- INICIO DE LA MODIFICACIÓN: Nuevo add_milestone para el modelo de Operaciones ---
     def add_milestone(self, tipo_hito: str, condicion: CondicionHito, accion: AccionHito, parent_id: Optional[str] = None) -> Tuple[bool, str]:
-        """Añade un nuevo hito al árbol de decisiones bajo el nuevo modelo."""
+        """Añade un nuevo hito al árbol de decisiones, cancelando los anteriores si es necesario."""
         try:
+            # --- INICIO DE LA MODIFICACIÓN: Lógica de reemplazo ---
+            # Si se está creando un hito de INICIALIZACION de Nivel 1 (sin padre),
+            # se cancelan todos los otros hitos de INICIALIZACION de Nivel 1 existentes.
+            if tipo_hito == 'INICIALIZACION' and parent_id is None:
+                cancelled_count = 0
+                for hito in self._milestones:
+                    if hito.parent_id is None and hito.tipo_hito == 'INICIALIZACION' and hito.status in ['ACTIVE', 'PENDING']:
+                        hito.status = 'CANCELLED'
+                        cancelled_count += 1
+                if cancelled_count > 0:
+                    self._memory_logger.log(f"HITO REEMPLAZADO: {cancelled_count} hito(s) de entrada anteriores fueron cancelados.", "INFO")
+            # --- FIN DE LA MODIFICACIÓN ---
+
             level, status = 1, 'ACTIVE'
             if parent_id:
                 parent = next((m for m in self._milestones if m.id == parent_id), None)
@@ -108,43 +92,19 @@ class _ApiActions:
             return True, f"Hito '{milestone_id[-6:]}' añadido con éxito."
         except Exception as e:
             return False, f"Error creando hito: {e}"
-    # --- FIN DE LA MODIFICACIÓN ---
 
-    # --- (COMENTADO) update_milestone ---
-    # def update_milestone(self, milestone_id: str, condition_data: Dict, action_data: Dict) -> Tuple[bool, str]:
-    #     """Busca un hito por su ID y actualiza sus datos."""
-    #     for i, m in enumerate(self._milestones):
-    #         if m.id == milestone_id:
-    #             if m.status not in ['PENDING', 'ACTIVE']:
-    #                 return False, "No se puede modificar un hito completado o cancelado."
-    #             try:
-    #                 new_condition = MilestoneCondition(**condition_data)
-    #                 new_trend_config = TrendConfig(**action_data['params'])
-    #                 new_action = MilestoneAction(params=new_trend_config, type=action_data['type'])
-                    
-    #                 self._milestones[i].condition = new_condition
-    #                 self._milestones[i].action = new_action
-                    
-    #                 self._memory_logger.log(f"HITO ACTUALIZADO: ID ...{milestone_id[-6:]}", "INFO")
-    #                 return True, f"Hito ...{milestone_id[-6:]} actualizado."
-    #             except Exception as e:
-    #                 return False, f"Error actualizando hito: {e}"
-    #     return False, "Hito no encontrado para actualizar."
-
-    # --- INICIO DE LA MODIFICACIÓN: Nuevo update_milestone ---
     def update_milestone(self, milestone_id: str, nueva_condicion: CondicionHito, nueva_accion: AccionHito) -> Tuple[bool, str]:
         """Busca un hito por su ID y actualiza sus objetos de condición y acción."""
         for i, hito in enumerate(self._milestones):
             if hito.id == milestone_id:
                 if hito.status not in ['PENDING', 'ACTIVE']:
-                    return False, "No se puede modificar un hito completado o cancelado."
+                    return False, "No se puede modificar un hito ejecutado o cancelado."
                 
                 self._milestones[i].condicion = nueva_condicion
                 self._milestones[i].accion = nueva_accion
                 self._memory_logger.log(f"HITO ACTUALIZADO: ID ...{milestone_id[-6:]}", "INFO")
                 return True, f"Hito ...{milestone_id[-6:]} actualizado."
         return False, "Hito no encontrado para actualizar."
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def remove_milestone(self, milestone_id: str) -> Tuple[bool, str]:
         """Implementa borrado en cascada."""
@@ -202,35 +162,6 @@ class _ApiActions:
         
         return True, f"Hito ...{hito.id[-6:]} activado forzosamente. Posiciones gestionadas."
 
-    # --- (COMENTADO) update_active_trend_parameters ---
-    # def update_active_trend_parameters(self, params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
-    #     """
-    #     Actualiza los parámetros de configuración de la tendencia activa en tiempo real.
-    #     """
-    #     if not self._active_trend:
-    #         return False, "No hay ninguna tendencia activa para modificar."
-    #     try:
-    #         trend_config_object = self._active_trend['config']
-    #         changes_log = []
-    #         for key, value in params_to_update.items():
-    #             if hasattr(trend_config_object, key):
-    #                 old_value = getattr(trend_config_object, key)
-    #                 setattr(trend_config_object, key, value)
-    #                 changes_log.append(f"'{key}': {old_value} -> {value}")
-            
-    #         if not changes_log:
-    #             return True, "No se realizaron cambios en los parámetros de la tendencia."
-
-    #         log_message = "Parámetros de la tendencia activa actualizados en tiempo real: " + ", ".join(changes_log)
-    #         self._memory_logger.log(log_message, "WARN")
-    #         return True, "Parámetros de la tendencia activa actualizados con éxito."
-
-    #     except Exception as e:
-    #         error_msg = f"Error al actualizar los parámetros de la tendencia activa: {e}"
-    #         self._memory_logger.log(error_msg, "ERROR")
-    #         return False, error_msg
-
-    # --- INICIO DE LA MODIFICACIÓN: Nueva función para actualizar la Operación Activa ---
     def update_active_operation_parameters(self, params_to_update: Dict[str, Any]) -> Tuple[bool, str]:
         """
         Actualiza los parámetros de configuración de la operación activa en tiempo real.
@@ -257,28 +188,7 @@ class _ApiActions:
             error_msg = f"Error al actualizar parámetros de la operación: {e}"
             self._memory_logger.log(error_msg, "ERROR")
             return False, error_msg
-    # --- FIN DE LA MODIFICACIÓN ---
 
-    # --- (COMENTADO) end_current_trend_and_ask ---
-    # def end_current_trend_and_ask(self):
-    #     """Llamado por los limit checkers para finalizar una tendencia."""
-    #     self._end_trend(reason="Límite de tendencia alcanzado")
-
-    # --- (COMENTADO) force_end_trend ---
-    # def force_end_trend(self, close_positions: bool = False) -> Tuple[bool, str]:
-    #     """Fuerza la finalización de la tendencia activa actual."""
-    #     if not self._active_trend:
-    #         return False, "No hay ninguna tendencia activa para finalizar."
-        
-    #     if close_positions:
-    #         self._memory_logger.log("Cierre forzoso de todas las posiciones por finalización de tendencia.", "WARN")
-    #         self.close_all_logical_positions('long', reason="TREND_FORCE_CLOSED")
-    #         self.close_all_logical_positions('short', reason="TREND_FORCE_CLOSED")
-
-    #     self._end_trend(reason="Finalización forzada por el usuario")
-    #     return True, "Tendencia activa finalizada."
-        
-    # --- INICIO DE LA MODIFICACIÓN: Nuevas funciones para finalizar la Operación ---
     def end_current_operation_and_neutralize(self, reason: str):
         """Finaliza la operación actual y transiciona a una operación NEUTRAL."""
         self._end_operation(reason=reason)
@@ -295,7 +205,6 @@ class _ApiActions:
 
         self._end_operation(reason="Finalización forzada por el usuario")
         return True, "Operación activa finalizada. Transicionando a NEUTRAL."
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         """Cierra una posición lógica específica por su índice."""
@@ -316,34 +225,15 @@ class _ApiActions:
         count = len(self.operacion_activa.posiciones_activas[side])
         if count == 0: return True
         
-        # Iterar en reversa para evitar problemas con los índices al eliminar
         for i in range(count - 1, -1, -1):
             self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
         return True
-    
-    # --- (COMENTADO) Funciones de TUI que ahora son parte de la Configuración de Operación ---
-    # def add_max_logical_position_slot(self) -> Tuple[bool, str]:
-    #     """Incrementa el número máximo de posiciones simultáneas."""
-    #     self._max_logical_positions += 1
-    #     return True, f"Slot añadido. Máximo ahora: {self._max_logical_positions}"
 
-    # def remove_max_logical_position_slot(self) -> Tuple[bool, str]:
-    #     """Decrementa el número máximo de posiciones, si es seguro hacerlo."""
-    #     if self._max_logical_positions <= 1:
-    #         return False, "No se puede reducir más (mínimo 1)."
-    #     self._max_logical_positions -= 1
-    #     return True, f"Slot eliminado. Máximo ahora: {self._max_logical_positions}"
-
-    # def set_base_position_size(self, new_size_usdt: float) -> Tuple[bool, str]:
-    #     """Establece el tamaño base de las nuevas posiciones."""
-    #     if new_size_usdt <= 0:
-    #         return False, "El tamaño debe ser positivo."
-    #     self._initial_base_position_size_usdt = new_size_usdt
-    #     return True, f"Tamaño base actualizado a {new_size_usdt:.2f} USDT."
-
-    # def set_leverage(self, new_leverage: float) -> Tuple[bool, str]:
-    #     """Establece el apalancamiento para futuras operaciones."""
-    #     if not (1.0 <= new_leverage <= 100.0):
-    #         return False, "Apalancamiento debe estar entre 1.0 y 100.0."
-    #     self._leverage = new_leverage
-    #     return True, f"Apalancamiento actualizado a {new_leverage:.1f}x."
+    # --- INICIO DE LA NUEVA FUNCIÓN ---
+    def validate_milestone_tree_state(self):
+        """
+        Llama a la lógica interna para sanear el estado del árbol de hitos.
+        """
+        if self._initialized and hasattr(self, '_cleanup_and_validate_milestone_tree'):
+            self._cleanup_and_validate_milestone_tree()
+    # --- FIN DE LA NUEVA FUNCIÓN ---

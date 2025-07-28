@@ -139,7 +139,7 @@ class _ApiGetters:
         current_capital = self.operacion_activa.capital_inicial_usdt + self.operacion_activa.pnl_realizado_usdt
         execution_time_str = "N/A"
         if self.operacion_activa.tiempo_inicio_ejecucion:
-            duration = datetime.datetime.now(timezone.utc) - self.operacion_activa.tiempo_inicio_ejecucion
+            duration = datetime.datetime.now(datetime.timezone.utc) - self.operacion_activa.tiempo_inicio_ejecucion
             execution_time_str = str(duration).split('.')[0]
 
         return {

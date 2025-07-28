@@ -1,8 +1,10 @@
 """
 Gestiona el hilo que obtiene los precios del mercado en tiempo real.
 
-v2.0: Modificado para leer el TICKER_SYMBOL dinámicamente desde el módulo
-config en cada iteración, permitiendo cambios en tiempo real desde la TUI.
+v2.1 (Error Handling):
+- Añadido un bloque try-except robusto en el bucle de obtención de precios
+  para manejar errores de red (Timeouts, ConnectionErrors) sin detener el hilo,
+  haciendo al Ticker resiliente a fallos de conexión temporales.
 """
 import threading
 import time
@@ -11,6 +13,14 @@ import traceback
 import sys
 import os
 from typing import Optional, Dict, Any, Callable
+
+# --- INICIO DE LA MODIFICACIÓN ---
+# Importación segura para manejar excepciones de red
+try:
+    import requests
+except ImportError:
+    requests = None
+# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Importaciones Adaptadas ---
 try:
@@ -41,7 +51,7 @@ _raw_event_callback: Optional[Callable] = None
 _intermediate_ticks_buffer: list = []
 _exchange_adapter: Optional[AbstractExchange] = None
 
-# --- Interfaz Pública ---
+# --- Interfaz Pública (Sin cambios) ---
 
 def get_latest_price() -> dict:
     """Devuelve una copia de la información del último precio almacenado en caché."""
@@ -114,28 +124,51 @@ def _fetch_price_loop():
     while not _ticker_stop_event.is_set():
         start_time = time.monotonic()
         
-        # 1. Leer el símbolo desde config DENTRO del bucle.
-        #    Esto asegura que siempre usemos el valor más reciente.
-        symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
+        try:
+            # 1. Leer el símbolo desde config DENTRO del bucle.
+            symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
 
-        if symbol == 'N/A':
-            # Si el símbolo no es válido, esperamos y continuamos el bucle.
-            time.sleep(fetch_interval)
-            continue
+            if symbol == 'N/A':
+                time.sleep(fetch_interval)
+                continue
+                
+            if symbol != last_symbol_used:
+                memory_logger.log(f"Ticker: Símbolo actualizado a '{symbol}'.", level="INFO")
+                last_symbol_used = symbol
+                with threading.Lock():
+                    _latest_price_info = {"price": None, "timestamp": None, "symbol": symbol}
+
+            # --- INICIO DE LA MODIFICACIÓN: Bloque try-except para la llamada de red ---
             
-        # Opcional: Loguear solo si el símbolo ha cambiado
-        if symbol != last_symbol_used:
-            memory_logger.log(f"Ticker: Símbolo actualizado a '{symbol}'.", level="INFO")
-            last_symbol_used = symbol
-            with threading.Lock():
-                # Reseteamos la info de precio al cambiar de símbolo
-                _latest_price_info = {"price": None, "timestamp": None, "symbol": symbol}
+            standard_ticker = None # Reiniciar en cada iteración
+            try:
+                # 2. Obtener el ticker estandarizado desde el adaptador
+                standard_ticker = _exchange_adapter.get_ticker(symbol)
+            
+            # Capturar errores específicos de red si `requests` está disponible
+            except requests.exceptions.RequestException as e:
+                memory_logger.log(f"Ticker WARN: Error de red al obtener el precio: {type(e).__name__}. Reintentando...", level="WARN")
+                # Esperar un poco antes de reintentar para no sobrecargar la API
+                time.sleep(2) 
+            
+            # Capturar cualquier otra excepción para evitar que el hilo muera
+            except Exception as e:
+                memory_logger.log(f"Ticker ERROR: Excepción inesperada en get_ticker: {e}", level="ERROR")
+                memory_logger.log(traceback.format_exc(), level="ERROR")
+                time.sleep(5) # Esperar más tiempo en caso de un error desconocido
 
-        # 2. Obtener el ticker estandarizado desde el adaptador con el símbolo actual
-        standard_ticker = _exchange_adapter.get_ticker(symbol)
-        
-        if standard_ticker and isinstance(standard_ticker, StandardTicker):
-            _handle_new_price(standard_ticker)
+            # 3. Procesar el precio solo si la llamada fue exitosa
+            if standard_ticker and isinstance(standard_ticker, StandardTicker):
+                _handle_new_price(standard_ticker)
+            
+            # --- FIN DE LA MODIFICACIÓN ---
+
+        except Exception as e_outer:
+            # Captura de seguridad para cualquier error imprevisto en la lógica del bucle
+            memory_logger.log(f"Ticker FATAL: Error crítico en el bucle principal del Ticker: {e_outer}", level="ERROR")
+            memory_logger.log(traceback.format_exc(), level="ERROR")
+            # Esperar antes de continuar para evitar un bucle de error rápido
+            time.sleep(10)
 
         elapsed = time.monotonic() - start_time
         wait_time = max(0, fetch_interval - elapsed)
@@ -143,6 +176,7 @@ def _fetch_price_loop():
 
     memory_logger.log("Ticker: Bucle de obtención de precios detenido.", level="INFO")
 
+# --- Función _handle_new_price (sin cambios) ---
 def _handle_new_price(ticker_data: StandardTicker):
     """Actualiza el estado interno con el nuevo precio y dispara el callback si corresponde."""
     global _tick_counter, _intermediate_ticks_buffer, _latest_price_info

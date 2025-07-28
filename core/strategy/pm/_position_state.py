@@ -5,9 +5,10 @@ Define la clase PositionState, responsable de almacenar y gestionar el estado
 de las posiciones lógicas (delegado a instancias de LogicalPositionTable) y
 físicas (agregadas) para ambos lados (long y short).
 
-v2.1 (Exchange Agnostic Refactor):
-- Elimina la dependencia de `live_operations`.
-- Pasa el `exchange_adapter` a las `LogicalPositionTable` que instancia.
+v2.2 (Sincronización):
+- Añadido el método `sync_logical_positions` para permitir la resincronización
+  completa del estado lógico, necesario al transicionar entre Operaciones.
+- Mejorado el tipado de los métodos para operar con objetos `LogicalPosition`.
 """
 import datetime
 import copy
@@ -37,7 +38,7 @@ class PositionState:
     def __init__(self,
                  config: Any,
                  utils: Any,
-                 exchange_adapter: AbstractExchange # <-- CAMBIO CLAVE
+                 exchange_adapter: AbstractExchange
                  ):
         """
         Inicializa el gestor de estado de posiciones.
@@ -45,7 +46,7 @@ class PositionState:
         # Inyección de dependencias
         self._config = config
         self._utils = utils
-        self._exchange = exchange_adapter # <-- CAMBIO CLAVE
+        self._exchange = exchange_adapter
         
         # Atributos de estado de la instancia
         self._initialized: bool = False
@@ -78,14 +79,14 @@ class PositionState:
                 is_live_mode=is_live_mode,
                 config_param=self._config,
                 utils=self._utils,
-                exchange_adapter=self._exchange if is_live_mode else None # <-- CAMBIO CLAVE
+                exchange_adapter=self._exchange if is_live_mode else None
             )
             self._short_table = LogicalPositionTable(
                 side='short',
                 is_live_mode=is_live_mode,
                 config_param=self._config,
                 utils=self._utils,
-                exchange_adapter=self._exchange if is_live_mode else None # <-- CAMBIO CLAVE
+                exchange_adapter=self._exchange if is_live_mode else None
             )
             self._initialized = True
             print("[Position State] Estado y Tablas Lógicas inicializados.")
@@ -95,6 +96,29 @@ class PositionState:
             memory_logger.log(traceback.format_exc(), level="ERROR")
             self._initialized = False
 
+    # --- INICIO DE LA MODIFICACIÓN: Implementación del método faltante ---
+    def sync_logical_positions(self, all_positions: Dict[str, List[LogicalPosition]]):
+        """
+        Sincroniza el estado de las tablas lógicas con un nuevo conjunto completo de posiciones.
+
+        Args:
+            all_positions: Un diccionario con claves 'long' y 'short' que contiene
+                           las listas completas de las nuevas posiciones lógicas.
+        """
+        if not self._initialized: return
+        
+        long_positions = all_positions.get('long', [])
+        short_positions = all_positions.get('short', [])
+        
+        if self._long_table:
+            self._long_table.sync_positions(long_positions)
+            
+        if self._short_table:
+            self._short_table.sync_positions(short_positions)
+        
+        memory_logger.log("PositionState sincronizado con el nuevo estado de la Operación.", level="DEBUG")
+    # --- FIN DE LA MODIFICACIÓN ---
+
     def _get_table_for_side(self, side: str) -> Optional[LogicalPositionTable]:
         """Método auxiliar para obtener la tabla correcta."""
         if side == 'long':
@@ -103,22 +127,22 @@ class PositionState:
             return self._short_table
         return None
 
-    # --- Métodos para Posiciones Lógicas (Sin cambios en su lógica interna) ---
+    # --- Métodos para Posiciones Lógicas (con tipado mejorado) ---
     
-    def add_logical_position(self, side: str, position_data: Dict[str, Any]) -> bool:
-        """Añade una nueva posición lógica a la tabla correspondiente."""
+    def add_logical_position_obj(self, side: str, position_obj: LogicalPosition) -> bool:
+        """Añade una nueva posición lógica (objeto) a la tabla correspondiente."""
         if not self._initialized: return False
         table = self._get_table_for_side(side)
-        return table.add_position(position_data) if table else False
+        return table.add_position(position_obj) if table else False
 
-    def remove_logical_position(self, side: str, index: int) -> Optional[Dict[str, Any]]:
-        """Elimina una posición lógica por índice."""
+    def remove_logical_position(self, side: str, index: int) -> Optional[LogicalPosition]:
+        """Elimina una posición lógica por índice y devuelve el objeto."""
         if not self._initialized: return None
         table = self._get_table_for_side(side)
         return table.remove_position_by_index(index) if table else None
 
-    def get_open_logical_positions(self, side: str) -> List[Dict[str, Any]]:
-        """Devuelve una copia de las posiciones lógicas abiertas."""
+    def get_open_logical_positions_objects(self, side: str) -> List[LogicalPosition]:
+        """Devuelve una copia de las posiciones lógicas abiertas como objetos."""
         if not self._initialized: return []
         table = self._get_table_for_side(side)
         return table.get_positions() if table else []
@@ -129,6 +153,31 @@ class PositionState:
         table = self._get_table_for_side(side)
         return table.update_position_details(position_id, details_to_update) if table else False
 
+    # --- (COMENTADO) Métodos antiguos que operaban con diccionarios. ---
+    # Se mantienen comentados para referencia, pero la nueva lógica usa los métodos
+    # basados en objetos (`_obj`) para mayor seguridad de tipos.
+    """
+    def add_logical_position(self, side: str, position_data: Dict[str, Any]) -> bool:
+        #Esta función ha sido reemplazada por add_logical_position_obj
+        if not self._initialized: return False
+        try:
+            pos_obj = LogicalPosition(**position_data)
+            table = self._get_table_for_side(side)
+            return table.add_position(pos_obj) if table else False
+        except TypeError as e:
+            memory_logger.log(f"ERROR [PS add_logical_position]: Datos de posición inválidos: {e}", "ERROR")
+            return False
+
+    def get_open_logical_positions(self, side: str) -> List[Dict[str, Any]]:
+        #Esta función ha sido reemplazada por get_open_logical_positions_objects
+        from dataclasses import asdict
+        if not self._initialized: return []
+        table = self._get_table_for_side(side)
+        if table:
+            return [asdict(pos) for pos in table.get_positions()]
+        return []
+    """
+
     def display_logical_table(self, side: str):
         """Solicita a la tabla lógica que imprima su estado."""
         if not self._initialized: return
@@ -136,7 +185,7 @@ class PositionState:
         if table:
             table.display_table()
 
-    # --- Métodos para Posiciones Físicas (Sin cambios en su lógica interna) ---
+    # --- Métodos para Posiciones Físicas ---
 
     def get_physical_position_state(self, side: str) -> Dict[str, Any]:
         """Devuelve una copia del estado físico en formato de diccionario."""
@@ -144,11 +193,9 @@ class PositionState:
         
         target_physical: PhysicalPosition = self.physical_long_position if side == 'long' else self.physical_short_position
         
-        # Convertir dataclass a diccionario para mantener la compatibilidad con la TUI
         from dataclasses import asdict
         state_dict = asdict(target_physical)
         
-        # Formatear el timestamp para la visualización
         ts = state_dict.get('last_update_ts')
         if self._utils and ts and isinstance(ts, datetime.datetime):
             state_dict['last_update_ts'] = self._utils.format_datetime(ts)

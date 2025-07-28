@@ -1,9 +1,10 @@
 """
 Orquestador Principal del Procesamiento de Eventos.
 
-v2.1: Corregidas las llamadas a funciones del paquete `workflow` para
-resolver el `AttributeError` y alinearse con la estructura de la fachada
-del paquete.
+v2.2 (Refactor de Hitos):
+- Eliminada la llamada a la función obsoleta `workflow.check_trend_limits`.
+  La lógica de los límites de tendencia ahora está integrada en la evaluación
+  de los Hitos de Finalización a través de `check_conditional_triggers`.
 """
 import sys
 import os
@@ -37,8 +38,7 @@ except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación de dependencias: {e}")
     config=None; utils=None; memory_logger=None; position_manager_api=None;
     ta=None; signal=None; workflow=None; signal_logger=None
-    # Aquí print está bien porque si falla la importación, el logger puede no estar disponible
-    traceback.print_exc() # Esto también está bien en este contexto de fallo de arranque.
+    traceback.print_exc()
     sys.exit(1)
 
 
@@ -66,7 +66,6 @@ def initialize(
     _global_stop_loss_event = global_stop_loss_event
     _pm_instance = pm_instance
     
-    # El __init__.py de workflow exporta las funciones de inicialización.
     workflow.initialize_data_processing()
     workflow.initialize_limit_checks()
 
@@ -82,7 +81,6 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
     if not _pm_instance:
         return
 
-    # Se llama directamente a la función exportada por el paquete workflow.
     if workflow.has_global_stop_loss_triggered():
         return
 
@@ -97,16 +95,15 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         return
 
     try:
-        # Se corrigen todas las llamadas para que apunten a las funciones
-        # directamente desde el objeto 'workflow', como define su __init__.py.
-        
-        # 2. Comprobar Triggers
+        # 1. Comprobar Triggers (Hitos)
+        # Esta función ahora maneja implícitamente los límites de la operación
+        # al evaluar las condiciones de los Hitos de Finalización.
         workflow.check_conditional_triggers(current_price, current_timestamp)
 
-        # 3. Procesar datos y generar señal
+        # 2. Procesar datos y generar señal
         signal_data = workflow.process_tick_and_generate_signal(current_timestamp, current_price)
         
-        # 4. Interacción con el Position Manager
+        # 3. Interacción con el Position Manager
         _pm_instance.check_and_close_positions(current_price, current_timestamp)
         _pm_instance.handle_low_level_signal(
             signal=signal_data.get("signal", "HOLD"),
@@ -114,11 +111,17 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             timestamp=current_timestamp
         )
 
-        # 5. Comprobar Límites
-        workflow.check_trend_limits(current_price, current_timestamp, _operation_mode)
+        # 4. Comprobar Límites de Sesión (Disyuntores Globales)
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # La siguiente línea es la causa del `AttributeError`.
+        # Se comenta porque su lógica ha sido integrada en `check_conditional_triggers`.
+        # workflow.check_trend_limits(current_price, current_timestamp, _operation_mode)
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         workflow.check_session_limits(current_price, current_timestamp, _operation_mode, _global_stop_loss_event)
         
-        # 6. Imprimir estado en consola
+        # 5. Imprimir estado en consola
         _print_tick_status_to_console(signal_data, current_timestamp, current_price)
 
     except workflow.GlobalStopLossException as e:
@@ -132,12 +135,12 @@ def _print_tick_status_to_console(signal_data: Optional[Dict], current_timestamp
     """
     Función de ayuda para imprimir el estado del tick en la consola.
     """
+    # Esta función no necesita cambios, su lógica es correcta.
     if _operation_mode.startswith(('live')) and getattr(config, 'PRINT_TICK_LIVE_STATUS', False):
         try:
-            # Reutilizamos la función de formateo UTC del módulo utils si existe
             if hasattr(utils, 'format_datetime_utc'):
                  ts_str_fmt = utils.format_datetime_utc(current_timestamp)
-            else: # Fallback al formato original
+            else:
                  ts_str_fmt = utils.format_datetime(current_timestamp)
 
             price_prec = getattr(config, 'PRICE_PRECISION', 4)
@@ -163,20 +166,21 @@ def _print_tick_status_to_console(signal_data: Optional[Dict], current_timestamp
             if getattr(config, 'POSITION_MANAGEMENT_ENABLED', False) and position_manager_api.is_initialized():
                 summary = position_manager_api.get_position_summary()
                 if summary and 'error' not in summary:
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Se reemplaza la lógica obsoleta del "modo manual" por la del estado de la tendencia.
-                    trend_status = summary.get('trend_status', {})
-                    trend_mode = trend_status.get('mode', 'NEUTRAL')
-                    print(f"    Modo de Tendencia: {trend_mode}")
-                    print(f"    Longs: {summary.get('open_long_positions_count', 0)}/{summary.get('max_logical_positions', 0)} | Shorts: {summary.get('open_short_positions_count', 0)}/{summary.get('max_logical_positions', 0)}")
+                    # Usamos el estado de la operación, que es el modelo actual
+                    op_status = summary.get('operation_status', {})
+                    op_tendencia = op_status.get('configuracion', {}).get('tendencia', 'NEUTRAL')
+                    
+                    op_params = pm_api_module.get_operation_parameters()
+                    max_pos = op_params.get('max_posiciones_logicas', 'N/A')
+
+                    print(f"    Modo de Operación: {op_tendencia}")
+                    print(f"    Longs: {summary.get('open_long_positions_count', 0)}/{max_pos} | Shorts: {summary.get('open_short_positions_count', 0)}/{max_pos}")
                     print(f"    PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
-                    # --- FIN DE LA MODIFICACIÓN ---
                 else:
                     print(f"    Error obteniendo resumen del PM: {summary.get('error', 'N/A')}")
             else:
                 print("    (Gestión desactivada o PM no inicializado)")
             print("=" * len(hdr))
         except Exception as e_print:
-            # Aquí print está bien porque es un error de la función de imprimir
             print(f"ERROR [Print Tick Status]: {e_print}") 
             traceback.print_exc()

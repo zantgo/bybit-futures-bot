@@ -1,21 +1,10 @@
-# core/strategy/pm/_entities.py
-
 """
 Módulo de Entidades de Dominio para el Position Manager.
 
-Este archivo define las estructuras de datos fundamentales utilizadas en la lógica
-de negocio del Position Manager, utilizando `dataclasses` para un tipado explícito
-y una mayor claridad.
-
-v2.1 (Refactor de Hitos):
-- Corregido el orden de los atributos en `MilestoneAction` para cumplir con
-  las reglas de Python sobre argumentos por defecto.
-
-v3.0 (Modelo de Operaciones):
-- Introducida la clase `Operacion` como entidad central del estado.
-- Refactorizados los Hitos para dividirse conceptualmente en tipos de
-  'Inicialización' y 'Finalización' con estructuras de condición y acción
-  especializadas.
+v5.2 (Sincronización de Entidades):
+- Asegura que la definición de `CondicionHito` coincida con su uso en la TUI,
+  utilizando `tipo_condicion_precio` y `valor_condicion_precio` para una
+  lógica de activación de un solo paso.
 """
 import datetime
 from dataclasses import dataclass, field
@@ -76,59 +65,7 @@ class Balances:
         return max(0.0, self.operational_short - self.used_short)
 
 
-# --- (COMENTADO) Entidades Antiguas para el Árbol de Decisiones (Hitos y Tendencias) ---
-# Se conservan comentadas como referencia durante la transición.
-
-# @dataclass
-# class TrendConfig:
-#     """
-#     Encapsula todos los parámetros que definen una Tendencia operativa.
-#     """
-#     mode: str
-#     individual_sl_pct: float = 0.0
-#     trailing_stop_activation_pct: float = 0.0
-#     trailing_stop_distance_pct: float = 0.0
-#     limit_trade_count: Optional[int] = None
-#     limit_duration_minutes: Optional[int] = None
-#     limit_tp_roi_pct: Optional[float] = None
-#     limit_sl_roi_pct: Optional[float] = None
-
-
-# @dataclass
-# class MilestoneCondition:
-#     """Define la condición de precio que activa un Hito."""
-#     type: str
-#     value: float
-
-
-# @dataclass
-# class MilestoneAction:
-#     """
-#     Define la acción que se ejecuta cuando un Hito se activa.
-#     """
-#     params: TrendConfig
-#     type: str = "START_TREND"
-
-
-# @dataclass
-# class Milestone:
-#     """
-#     Representa un Hito (Trigger) en el árbol de decisiones.
-#     """
-#     id: str
-#     condition: MilestoneCondition
-#     action: MilestoneAction
-    
-#     parent_id: Optional[str] = None
-#     level: int = 1
-    
-#     status: str = 'PENDING'
-    
-#     one_shot: bool = True
-#     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
-
-
-# --- INICIO: NUEVAS ENTIDADES PARA EL MODELO DE OPERACIONES SECUENCIALES ---
+# --- ENTIDADES PARA EL MODELO DE OPERACIONES SECUENCIALES ---
 
 # --- 1. La Entidad Central: Operacion ---
 
@@ -136,9 +73,8 @@ class Balances:
 class ConfiguracionOperacion:
     """
     Define los parámetros de configuración inmutables para una Operacion de trading.
-    Esta configuración es establecida por un Hito de Inicialización.
     """
-    tendencia: str  # 'LONG_ONLY', 'SHORT_ONLY', 'LONG_SHORT', o 'NEUTRAL'
+    tendencia: str
     tamaño_posicion_base_usdt: float
     max_posiciones_logicas: int
     apalancamiento: float
@@ -150,13 +86,10 @@ class ConfiguracionOperacion:
 @dataclass
 class Operacion:
     """
-    Representa un ciclo de vida completo de trading. Contiene tanto la
-    configuración de la operación como su estado dinámico en tiempo real.
+    Representa un ciclo de vida completo de trading.
     """
     id: str
     configuracion: ConfiguracionOperacion
-    
-    # --- Estado dinámico de la operación ---
     capital_inicial_usdt: float
     pnl_realizado_usdt: float = 0.0
     comercios_cerrados_contador: int = 0
@@ -166,66 +99,44 @@ class Operacion:
 
 # --- 2. Entidades para los Nuevos Hitos Especializados ---
 
-@dataclass
-class CondicionPrecioDosPasos:
-    """
-    Define la condición de activación de precio de dos pasos. El hito se "arma"
-    cuando se cumple la primera condición y se "dispara" cuando se cumple la segunda.
-    """
-    # El valor puede ser un float o el string 'market_price'
-    activacion_mayor_a: Union[float, str]
-    activacion_menor_a: Union[float, str]
-    
-    # Estado interno de la condición
-    estado_mayor_a_cumplido: bool = False
-    estado_menor_a_cumplido: bool = False
-
-
+# --- INICIO DE LA CORRECCIÓN: Definición correcta de CondicionHito ---
 @dataclass
 class CondicionHito:
     """
     Contenedor para todas las posibles condiciones que pueden activar un hito.
-    El tipo de hito ('INICIALIZACION' o 'FINALIZACION') determinará qué
-    atributos son relevantes.
     """
-    # Para Hitos de Inicialización
-    condicion_precio: Optional[CondicionPrecioDosPasos] = None
+    # Para Hitos de Inicialización (y opcionalmente de Finalización)
+    # tipo_condicion_precio puede ser: 'PRICE_ABOVE', 'PRICE_BELOW', 'MARKET'
+    tipo_condicion_precio: Optional[str] = None 
+    valor_condicion_precio: Optional[float] = None
     
     # Para Hitos de Finalización
     tp_roi_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
-
+# --- FIN DE LA CORRECCIÓN ---
 
 @dataclass
 class AccionHito:
     """
     Define la acción que se ejecuta cuando un Hito se activa.
     """
-    # Para Hitos de Inicialización
     configuracion_nueva_operacion: Optional[ConfiguracionOperacion] = None
-    
-    # Para Hitos de Finalización
     cerrar_posiciones_al_finalizar: bool = False
 
 
 @dataclass
 class Hito:
     """
-    La nueva entidad Hito, que representa un nodo en el árbol de decisiones.
-    Es agnóstica a su contenido, que está definido en CondicionHito y AccionHito.
+    La entidad Hito, que representa un nodo en el árbol de decisiones.
     """
     id: str
-    tipo_hito: str  # 'INICIALIZACION' o 'FINALIZACION'
+    tipo_hito: str
     condicion: CondicionHito
     accion: AccionHito
-    
-    # --- Atributos de gestión del árbol (igual que antes) ---
     parent_id: Optional[str] = None
     level: int = 1
-    status: str = 'PENDING'  # PENDING, ACTIVE, COMPLETED, CANCELLED
+    status: str = 'PENDING'
     one_shot: bool = True
     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
-
-# --- FIN: NUEVAS ENTIDADES ---
