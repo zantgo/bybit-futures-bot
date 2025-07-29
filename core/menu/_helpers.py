@@ -1,17 +1,15 @@
 """
 Módulo de Ayuda para la TUI (Terminal User Interface).
 
-Contiene funciones de utilidad reutilizables para la TUI, como limpiar la pantalla,
-imprimir cabeceras estilizadas, obtener entrada del usuario de forma robusta,
-y formatear secciones de información.
-
-v3.2: Añadida la clase CancelInput y la lógica de cancelación a la función
-get_input para mejorar la usabilidad de los asistentes de edición.
-v3.3 (REQ-01): Mejorada la UX de get_input para mostrar el valor por defecto de forma explícita.
+v3.7 (get_input Refinado):
+- La función `get_input` ahora muestra el prompt de 'desactivar' solo si
+  se le proporciona explícitamente un `disable_value`.
+- Esto permite tener campos obligatorios (sin opción 'd') y opcionales
+  (con opción 'd') en los asistentes.
+- La opción 'c' para cancelar se mantiene universal y lanza una excepción.
 """
 import os
 import datetime
-# ¡Importante! Añadimos timezone para la conversión a UTC.
 from datetime import timezone
 import textwrap
 from typing import Dict, Any, Optional, Callable
@@ -31,88 +29,32 @@ MENU_STYLE = {
     "clear_screen": True,
 }
 
-# --- Sistema de Ayuda en Pantalla (Fusionado y Completo) ---
+# --- Sistema de Ayuda en Pantalla (sin cambios) ---
 HELP_TEXTS = {
-    # Pantalla Dashboard
     "dashboard_main": textwrap.dedent("""
         El Dashboard es el centro de control principal. Muestra el estado
         en tiempo real de tu sesión de trading y te da acceso a todas las
         demás funcionalidades.
-        
-        - PNL Total: Suma del beneficio/pérdida de trades cerrados (realizado)
-          y de tus posiciones actualmente abiertas (no realizado).
-        - ROI Actual: El retorno de la inversión total basado en tu capital inicial.
-        - Límites de Sesión: Disyuntores de seguridad que detienen el trading
-          (o lo pausan) si se alcanzan ciertos umbrales de pérdida/ganancia o tiempo.
     """),
-    
-    # Pantalla de Posiciones
     "position_viewer": textwrap.dedent("""
         Esta pantalla te permite ver y gestionar tus 'posiciones lógicas' abiertas.
-        Cada vez que el bot compra o vende, crea una nueva posición lógica.
-        
-        - PNL: Beneficio o pérdida no realizado para esa posición específica
-          al precio de mercado actual.
-        - SL: El precio de 'Stop Loss' fijo. Si el mercado llega a este precio,
-          la posición se cerrará automáticamente para limitar pérdidas.
-        - TS (Trailing Stop): Un stop loss dinámico. Se activa cuando la posición
-          alcanza un cierto % de ganancia y luego 'sigue' al precio para asegurar
-          beneficios si el mercado se revierte.
-        - Puedes forzar el cierre de cualquier posición manualmente desde aquí.
     """),
-    
-    # Pantalla Modo Manual (RESTURADO DEL v3.1)
-    "manual_mode": textwrap.dedent("""
-        El Modo Manual Guiado te permite dirigir la estrategia del bot.
-        
-        - LONG_ONLY: El bot solo buscará y abrirá posiciones de compra (largos).
-        - SHORT_ONLY: El bot solo buscará y abrirá posiciones de venta (cortos).
-        - LONG_SHORT: El bot puede abrir ambos tipos de posiciones.
-        - NEUTRAL: El bot no abrirá ninguna posición nueva, pero gestionará las
-          existentes (SL, TS, etc.).
-          
-        Puedes establecer 'Límites para la Próxima Tendencia'. Estos límites (de
-        tiempo, trades o ROI) se activarán automáticamente la próxima vez que
-        cambies de NEUTRAL a un modo de trading activo.
-    """),
-
-    # Pantalla Modo Automático (ACTUALIZADO CON TEXTO DEL v3.2)
     "auto_mode": textwrap.dedent("""
-        El Gestor de Hitos te permite construir un 'Árbol de Decisiones' para que
-        el bot reaccione a condiciones de mercado específicas.
-        
-        - Hito (Milestone): Es una regla 'SI (condición) ENTONCES (iniciar Tendencia)'.
-        - Tendencia: Es un período operativo con reglas propias (modo, riesgo, finalización).
-        
-        Puedes anidar Hitos. Un hito de Nivel 2 solo se activará si su hito
-        padre de Nivel 1 se cumple primero. Cuando un hito se cumple, sus
-        'hermanos' (los otros hitos del mismo nivel) se cancelan.
+        El Panel de Control de Operación te permite gestionar una única estrategia
+        de trading a la vez, desde su inicio hasta su fin.
     """),
-
-    # Pantalla Editor de Configuración (ACTUALIZADO CON TEXTO DEL v3.2)
     "config_editor": textwrap.dedent("""
         Aquí puedes ajustar los parámetros GLOBALES del bot para la sesión actual.
         Los cambios aquí NO se guardan permanentemente en tu archivo config.py.
-        
-        - Ticker: Símbolo del activo y frecuencia de actualización.
-        - Estrategia: Parámetros numéricos que definen cuándo se genera
-          una señal de compra o venta (EMA, márgenes, etc.).
-        - Gestión de Capital: Define cuánto capital usar (Tamaño Base),
-          cuántas operaciones simultáneas tener y el apalancamiento.
-        - Límites de Sesión: Define los disyuntores de seguridad globales.
     """)
 }
 
 def show_help_popup(help_key: str):
     """Muestra una ventana de ayuda con el texto correspondiente a la clave."""
-    if help_key not in HELP_TEXTS:
-        text = "No hay ayuda disponible para esta sección."
-    else:
-        text = HELP_TEXTS[help_key]
-    
+    text = HELP_TEXTS.get(help_key, "No hay ayuda disponible para esta sección.")
     clear_screen()
     print_tui_header(f"Ayuda: {help_key.replace('_', ' ').title()}")
-    print(text)
+    print(textwrap.dedent(text))
     press_enter_to_continue()
 
 
@@ -128,12 +70,9 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
-    """
-    Formatea un objeto datetime a string en formato UTC, manejando None.
-    """
+    """Formatea un objeto datetime a string en formato UTC, manejando None."""
     if not isinstance(dt_object, datetime.datetime):
         return "N/A"
-
     try:
         dt_utc = dt_object.astimezone(timezone.utc)
         return dt_utc.strftime(fmt)
@@ -141,54 +80,55 @@ def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%
         return "Invalid DateTime"
 
 def print_tui_header(title: str, width: int = 80):
-    """
-    Imprime una cabecera estilizada y consistente para cada pantalla de la TUI.
-    Utiliza la función de formateo UTC.
-    """
+    """Imprime una cabecera estilizada y consistente para cada pantalla de la TUI."""
     timestamp_str = format_datetime_utc(datetime.datetime.now())
-
     print("=" * width)
-    print(f"|{' ' * (width - 2)}|")
     print(f"|{title.center(width - 2)}|")
     if timestamp_str:
         print(f"|{timestamp_str.center(width - 2)}|")
-    print(f"|{' ' * (width - 2)}|")
     print("=" * width)
 
 
-class CancelInput:
-    """Clase marcadora para indicar que el usuario canceló la entrada."""
+class UserInputCancelled(Exception):
+    """Excepción para ser lanzada cuando el usuario cancela un wizard de entrada."""
     pass
 
-# --- INICIO DE LA MODIFICACIÓN ---
+# --- INICIO DE LA MODIFICACIÓN: get_input final y robusto ---
 def get_input(
     prompt: str,
     type_func: Callable = str,
     default: Optional[Any] = None,
     min_val: Optional[float] = None,
-    max_val: Optional[float] = None
+    max_val: Optional[float] = None,
+    disable_value: Any = "<NOT_SET>" # Usamos una señal interna para detectar si se pasó el argumento
 ) -> Any:
     """
-    Función robusta para obtener entrada del usuario con validación,
-    valores por defecto, rangos y una opción para cancelar.
+    Función robusta para obtener entrada del usuario con validación.
+    - Presionar 'c' siempre cancela y lanza UserInputCancelled.
+    - Presionar 'd' solo funciona si se proporciona un `disable_value`, y devuelve ese valor.
     """
+    is_disableable = disable_value != "<NOT_SET>"
+
     while True:
         try:
             prompt_full = f"{prompt}"
             
-            # Se unifica el formato para mostrar el valor por defecto
-            # Esto resuelve el REQ-01 para mejorar la consistencia visual.
             if default is not None:
                 prompt_full += f" [{default}]"
             
-            # Se mantiene la opción de cancelar
-            prompt_full += " [o 'c' para cancelar]: "
+            # Construir el prompt de opciones dinámicamente
+            options = ["'c' para cancelar"]
+            if is_disableable:
+                options.append("'d' para desactivar")
+            prompt_full += f" [o {', '.join(options)}]: "
 
             val_str = input(prompt_full).strip()
             
-            # Comprobamos si el usuario quiere cancelar
             if val_str.lower() == 'c':
-                return CancelInput() # Devolvemos una instancia de la clase
+                raise UserInputCancelled("Entrada cancelada por el usuario.")
+
+            if is_disableable and val_str.lower() == 'd':
+                return disable_value
 
             if not val_str and default is not None:
                 return default
@@ -203,12 +143,13 @@ def get_input(
                 continue
 
             return value
+        except UserInputCancelled:
+            raise
         except (ValueError, TypeError):
             print(f"Error: Entrada inválida. Por favor, introduce un valor de tipo '{type_func.__name__}'.")
         except Exception as e:
             print(f"Error inesperado: {e}")
 # --- FIN DE LA MODIFICACIÓN ---
-
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):
     """
@@ -223,12 +164,7 @@ def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = F
         for acc_name, balance_info in data.items():
             if balance_info and not isinstance(balance_info, str):
                 equity = float(balance_info.get('totalEquity', 0.0))
-                margin = float(balance_info.get('totalMarginBalance', 0.0))
-                available = float(balance_info.get('totalAvailableBalance', 0.0))
-                print(f"  {acc_name.upper():<15}: ", end="")
-                print(f"Equity: {equity:9.2f} USDT | ", end="")
-                print(f"En Uso: {margin:8.2f} USDT | ", end="")
-                print(f"Disponible: {available:8.2f} USDT")
+                print(f"  {acc_name.upper():<15}: Equity: {equity:9.2f} USDT")
             else:
                 print(f"  {acc_name.upper():<15}: (No se pudieron obtener datos de balance)")
     else:

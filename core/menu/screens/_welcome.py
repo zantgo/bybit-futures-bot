@@ -1,10 +1,20 @@
 """
 Módulo para la Pantalla de Bienvenida y Configuración Inicial.
 
-v3.0 (Refactor de Contexto):
-- Se separa la configuración en "General" (pre-sesión) y "Sesión" (en-vivo).
-- Este menú ahora llama al editor en modo 'general'.
+v3.1 (Manejo de Cancelación por Excepción):
+- Se actualiza la importación de `_helpers` para usar la nueva excepción
+  `UserInputCancelled`.
+- La función `_run_position_test` ahora maneja la cancelación del usuario
+  a través de un bloque try-except, haciéndola más robusta.
 """
+# (COMENTARIO) Docstring de la versión anterior (v3.0) para referencia:
+# """
+# Módulo para la Pantalla de Bienvenida y Configuración Inicial.
+# 
+# v3.0 (Refactor de Contexto):
+# - Se separa la configuración en "General" (pre-sesión) y "Sesión" (en-vivo).
+# - Este menú ahora llama al editor en modo 'general'.
+# """
 from typing import Dict, Any, Tuple
 import time
 
@@ -14,7 +24,14 @@ except ImportError:
     TerminalMenu = None
 
 # --- Dependencias del Menú ---
-from .._helpers import clear_screen, print_tui_header, MENU_STYLE, press_enter_to_continue, get_input, CancelInput
+# --- INICIO DE LA MODIFICACIÓN: Importación corregida ---
+from .._helpers import (
+    clear_screen, print_tui_header, MENU_STYLE, 
+    press_enter_to_continue, get_input, UserInputCancelled
+)
+# (COMENTARIO) Importación anterior para referencia histórica.
+# from .._helpers import clear_screen, print_tui_header, MENU_STYLE, press_enter_to_continue, get_input, CancelInput
+# --- FIN DE LA MODIFICACIÓN ---
 from ._config_editor import show_config_editor_screen
 from . import _log_viewer
 # --- INICIO: Nuevas importaciones para las nuevas funcionalidades ---
@@ -46,7 +63,7 @@ def _display_balances(config_module: Any):
         balance_info = live_operations.get_unified_account_balance_info(account_name)
         if balance_info:
             equity = balance_info.get('totalEquity', 0.0)
-            print(f"  - Cuenta '{account_name}': {equity:.4f} USD")
+            print(f"  - Cuenta '{account_name}': {float(equity):.4f} USD")
         else:
             print(f"  - Cuenta '{account_name}': No se pudo obtener el balance.")
 
@@ -72,16 +89,19 @@ def _run_position_test(config_module: Any) -> Tuple[bool, str]:
     """Orquesta la prueba completa de apertura y cierre de posiciones."""
     print("\n--- Asistente de Prueba de Trading ---")
     
-    # 1. Obtener parámetros del usuario
-    ticker = get_input("Introduce el Ticker a probar", str, getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT'))
-    if isinstance(ticker, CancelInput): return False, "Prueba cancelada por el usuario."
-    ticker = ticker.upper()
+    # --- INICIO DE LA MODIFICACIÓN: Envolver en try-except ---
+    try:
+        # 1. Obtener parámetros del usuario
+        ticker = get_input("Introduce el Ticker a probar", str, getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT'))
+        ticker = ticker.upper()
 
-    size_usdt = get_input("Introduce el tamaño de la posición en USDT", float, 1.0, min_val=0.5)
-    if isinstance(size_usdt, CancelInput): return False, "Prueba cancelada por el usuario."
+        size_usdt = get_input("Introduce el tamaño de la posición en USDT", float, 1.0, min_val=0.5)
 
-    leverage = get_input("Introduce el apalancamiento a usar", float, 10.0, min_val=1.0)
-    if isinstance(leverage, CancelInput): return False, "Prueba cancelada por el usuario."
+        leverage = get_input("Introduce el apalancamiento a usar", float, 10.0, min_val=1.0)
+    
+    except UserInputCancelled:
+        return False, "Prueba cancelada por el usuario."
+    # --- FIN DE LA MODIFICACIÓN ---
     
     # 2. Obtener precio actual (necesario para calcular la cantidad de la orden)
     print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
@@ -100,7 +120,7 @@ def _run_position_test(config_module: Any) -> Tuple[bool, str]:
     try:
         # --- PASO A: Establecer Apalancamiento ---
         print("\nEstableciendo apalancamiento en las cuentas de trading...")
-        if not live_operations.set_leverage(symbol=ticker, buy_leverage=leverage, sell_leverage=leverage):
+        if not live_operations.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage)):
             return False, "Fallo al establecer el apalancamiento. Revisa los permisos de la API."
         print("  -> Apalancamiento establecido con éxito.")
         time.sleep(1)
@@ -153,7 +173,6 @@ def show_welcome_screen() -> bool:
         else:
             print("  (Error: No se pudo cargar la función de impresión de config)")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Iniciar Bot con esta configuración",
             "[2] Modificar configuración general del bot",
@@ -163,7 +182,6 @@ def show_welcome_screen() -> bool:
             None,
             "[6] Salir"
         ]
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -175,10 +193,7 @@ def show_welcome_screen() -> bool:
             return True
         
         elif choice_index == 1:
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Llamamos al editor en modo 'general'
             show_config_editor_screen(config_module, context='general')
-            # --- FIN DE LA MODIFICACIÓN ---
             continue
             
         elif choice_index == 2:
