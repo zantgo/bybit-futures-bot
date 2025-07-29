@@ -1,23 +1,20 @@
 """
 Módulo para la Pantalla del Dashboard Principal.
 
-v6.1 (Manejo de Errores en UI):
-- El dashboard ahora es resiliente a fallos al obtener el resumen de estado (summary).
-- Si ocurre un error de red o de API, se muestra una advertencia en la parte
-  superior de la pantalla y los datos se muestran como 'Error' o 'N/A',
-  permitiendo al usuario refrescar o salir sin que el bot se detenga.
+v6.2 (Refactor de Modularización):
+- Se actualizan las importaciones y llamadas para usar el nuevo módulo
+  `operation_manager` en lugar del archivo obsoleto `_milestone_manager`.
 """
-# (COMENTARIO) Docstring de la versión anterior (v6.0) para referencia:
+# (COMENTARIO) Docstring de la versión anterior (v6.1) para referencia:
 # """
 # Módulo para la Pantalla del Dashboard Principal.
 # 
-# v6.0 (Simplificación de UI):
-# - Se elimina la gestión de posiciones individuales desde el dashboard.
-# - Se simplifica la visualización de balances para mostrar solo el Equity.
-# - Se añade una nueva sección para mostrar el estado de la Operación Estratégica.
-# - El menú de acciones ha sido reestructurado para ser más directo.
+# v6.1 (Manejo de Errores en UI):
+# - El dashboard ahora es resiliente a fallos al obtener el resumen de estado (summary).
+# - Si ocurre un error de red o de API, se muestra una advertencia en la parte
+#   superior de la pantalla y los datos se muestran como 'Error' o 'N/A',
+#   permitiendo al usuario refrescar o salir sin que el bot se detenga.
 # """
-
 import time
 import datetime
 from datetime import timezone
@@ -35,7 +32,11 @@ from .._helpers import (
 )
 from .. import _helpers as helpers_module
 
-from . import _config_editor, _log_viewer, _milestone_manager
+# --- INICIO DE LA MODIFICACIÓN: Importar el nuevo módulo ---
+from . import _config_editor, _log_viewer, operation_manager
+# (COMENTARIO) Se elimina la importación del archivo obsoleto.
+# from . import _config_editor, _log_viewer, _milestone_manager
+# --- FIN DE LA MODIFICACIÓN ---
 
 try:
     from core.exchange._models import StandardBalance
@@ -45,7 +46,6 @@ except ImportError:
 _deps: Dict[str, Any] = {}
 
 def _handle_ticker_change(config_module: Any):
-    # ... (Esta función no necesita cambios)
     exchange_adapter = _deps.get('exchange_adapter')
     logger = _deps.get('memory_logger_module')
     if not exchange_adapter or not logger:
@@ -112,7 +112,6 @@ def show_dashboard_screen():
         pm_api.force_balance_update()
 
         error_message = None
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de manejo de errores ---
         try:
             current_price = pm_api.get_current_market_price() or 0.0
             
@@ -120,14 +119,12 @@ def show_dashboard_screen():
             
             if not summary or summary.get('error'):
                 error_message = f"ADVERTENCIA: No se pudo obtener el estado del bot: {summary.get('error', 'Reintentando...')}"
-                # Definir valores por defecto para mostrar en la UI en caso de error
                 unrealized_pnl, realized_pnl, total_pnl, initial_capital, current_roi = (0.0,) * 5
                 duration_str, ticker_symbol, status_display = "Error", "Error", "Error"
                 op_tendencia, leverage_val, base_size_val, max_pos_val = "Error", 0.0, 0.0, 0
                 sl_roi_str, tp_roi_str = "Error", "Error"
                 real_balances = {}
             else:
-                # Lógica de cálculo de datos normal
                 unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
                 realized_pnl = summary.get('total_realized_pnl_session', 0.0)
                 total_pnl = realized_pnl + unrealized_pnl
@@ -161,14 +158,12 @@ def show_dashboard_screen():
 
         except Exception as e:
             error_message = f"ERROR CRÍTICO: Excepción inesperada en el dashboard: {e}"
-            # Definir valores por defecto para la UI
             unrealized_pnl, realized_pnl, total_pnl, initial_capital, current_roi = (0.0,) * 5
             duration_str, ticker_symbol, status_display = "Error", "Error", "Error"
             op_tendencia, leverage_val, base_size_val, max_pos_val = "Error", 0.0, 0.0, 0
             sl_roi_str, tp_roi_str = "Error", "Error"
             real_balances, current_price = {}, 0.0
         
-        # --- Lógica de renderizado de la UI ---
         clear_screen()
         
         if error_message:
@@ -253,8 +248,13 @@ def show_dashboard_screen():
         
         if action == 'refresh': 
             continue
+        # --- INICIO DE LA MODIFICACIÓN: Llamar a la nueva función ---
         elif action == 'manage_operation': 
-            _milestone_manager.show_milestone_manager_screen()
+            operation_manager.show_operation_manager_screen()
+        # (COMENTADO) Se elimina la llamada a la función obsoleta.
+        # elif action == 'manage_operation': 
+        #     _milestone_manager.show_milestone_manager_screen()
+        # --- FIN DE LA MODIFICACIÓN ---
         elif action == 'edit_config':
             original_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
             changes_saved = _config_editor.show_config_editor_screen(config_module, context='session')
