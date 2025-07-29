@@ -15,13 +15,10 @@ class _Workflow:
 
     def handle_low_level_signal(self, signal: str, entry_price: float, timestamp: datetime.datetime):
         """Punto de entrada para señales desde el `event_processor`."""
-        if not self._initialized or not self._executor or not self.operacion_activa: return
+        operacion = self._om_api.get_operation()
+        if not self._initialized or not self._executor or not operacion: return
         
-        # (MODIFICADO) Acceso directo a 'tendencia'.
-        tendencia_operacion = self.operacion_activa.tendencia
-        # (COMENTADO) Código antiguo
-        # tendencia_operacion = self.operacion_activa.configuracion.tendencia
-        
+        tendencia_operacion = operacion.tendencia
         side_to_open = 'long' if signal == "BUY" else 'short'
         side_allowed = (side_to_open == 'long' and tendencia_operacion in ["LONG_ONLY", "LONG_SHORT"]) or \
                        (side_to_open == 'short' and tendencia_operacion in ["SHORT_ONLY", "LONG_SHORT"])
@@ -31,11 +28,12 @@ class _Workflow:
 
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """Revisa SL y TS para todas las posiciones abiertas en cada tick."""
-        if not self._initialized or not self._executor or not self.operacion_activa: return
+        operacion = self._om_api.get_operation()
+        if not self._initialized or not self._executor or not operacion: return
         
         for side in ['long', 'short']:
             # Hacemos una copia para evitar problemas de modificación durante la iteración
-            open_positions = list(self.operacion_activa.posiciones_activas.get(side, []))
+            open_positions = list(operacion.posiciones_activas.get(side, []))
             
             if not open_positions: continue
             
@@ -52,7 +50,7 @@ class _Workflow:
                 self._update_trailing_stop(side, pos, i, current_price)
                 
                 # Leemos la posición actualizada del estado del manager
-                pos_actualizada = self.operacion_activa.posiciones_activas[side][i]
+                pos_actualizada = operacion.posiciones_activas[side][i]
                 ts_stop_price = pos_actualizada.ts_stop_price
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or (side == 'short' and current_price >= ts_stop_price)):
                     indices_to_close.append(i)
@@ -61,45 +59,3 @@ class _Workflow:
             # Cerramos las posiciones marcadas, iterando en orden inverso para no alterar los índices
             for index in sorted(list(set(indices_to_close)), reverse=True):
                 self._close_logical_position(side, index, current_price, timestamp, reason=reasons.get(index, "UNKNOWN"))
-
-    # (COMENTADO) Toda esta función es obsoleta en el nuevo modelo de operación única.
-    # Su lógica ha sido reemplazada por las condiciones de entrada/salida directamente
-    # en el bucle principal (_run_operation_logic).
-    #
-    # def process_triggered_milestone(self, milestone_id: str):
-    #     """Procesa la cascada de un hito cumplido, reconstruyendo el estado del árbol."""
-    #     triggered_hito = next((m for m in self._milestones if m.id == milestone_id), None)
-    #     if not triggered_hito: return
-    #     
-    #     if self.operacion_activa and self.operacion_activa.configuracion.tendencia != 'NEUTRAL':
-    #          self._end_operation("Hito completado, iniciando nueva operación")
-    #
-    #     next_milestones_state = []
-    #     parent_id_of_triggered = triggered_hito.parent_id
-    #
-    #     for hito in self._milestones:
-    #         new_hito = hito
-    #         if hito.id == milestone_id:
-    #             new_hito.status = 'COMPLETED'
-    #         elif hito.parent_id == parent_id_of_triggered and hito.status in ['ACTIVE', 'PENDING']:
-    #             new_hito.status = 'CANCELLED'
-    #             self._memory_logger.log(f"Cascada: Hito hermano ...{hito.id[-6:]} cancelado.", "DEBUG")
-    #         elif hito.parent_id == milestone_id and hito.status == 'PENDING':
-    #             new_hito.status = 'ACTIVE'
-    #             self._memory_logger.log(f"Cascada: Hito hijo ...{hito.id[-6:]} activado.", "DEBUG")
-    #
-    #         next_milestones_state.append(new_hito)
-    #     
-    #     self._milestones = next_milestones_state
-    #
-    #     if triggered_hito.tipo_hito == 'INICIALIZACION':
-    #         config_nueva_op = triggered_hito.accion.configuracion_nueva_operacion
-    #         if config_nueva_op:
-    #             self._start_operation(config_nueva_op, triggered_hito.id)
-    #
-    #     elif triggered_hito.tipo_hito == 'FINALIZACION':
-    #         if triggered_hito.accion.cerrar_posiciones_al_finalizar:
-    #              self.close_all_logical_positions('long', reason=f"HITO_FIN_{milestone_id[-6:]}")
-    #              self.close_all_logical_positions('short', reason=f"HITO_FIN_{milestone_id[-6:]}")
-    #
-    #     self._cleanup_completed_milestones()

@@ -39,78 +39,6 @@ class _ApiActions:
 
     # --- Métodos para la Operación Estratégica Única ---
 
-    def create_or_update_operation(self, params: Dict[str, Any]) -> Tuple[bool, str]:
-        """
-        Actualiza la operación estratégica actual con un nuevo conjunto de parámetros.
-        """
-        if not self.operacion_activa:
-            return False, "Error: No hay una operación activa para modificar."
-
-        try:
-            changes_log = []
-            for key, value in params.items():
-                if hasattr(self.operacion_activa, key):
-                    old_value = getattr(self.operacion_activa, key)
-                    if old_value != value:
-                        setattr(self.operacion_activa, key, value)
-                        changes_log.append(f"'{key}': {old_value} -> {value}")
-
-            if 'tipo_cond_entrada' in [log.split("'")[1] for log in changes_log] or \
-               'valor_cond_entrada' in [log.split("'")[1] for log in changes_log]:
-                if self.operacion_activa.estado == 'ACTIVA':
-                    self.operacion_activa.estado = 'EN_ESPERA'
-                    self.operacion_activa.tiempo_inicio_ejecucion = None
-                    changes_log.append("'estado': ACTIVA -> EN_ESPERA (cond. de entrada modificada)")
-
-            # --- INICIO DE LA CORRECCIÓN ---
-            # (COMENTADO) Se elimina la llamada al método inexistente `save_state`.
-            # Los cambios ya se aplican directamente al objeto en memoria.
-            # self.save_state()
-            # --- FIN DE LA CORRECCIÓN ---
-
-            if not changes_log:
-                return True, "No se realizaron cambios en la operación."
-
-            log_message = "Parámetros de la operación actualizados: " + ", ".join(changes_log)
-            self._memory_logger.log(log_message, "WARN")
-            return True, "Operación actualizada con éxito."
-        except Exception as e:
-            error_msg = f"Error al actualizar la operación: {e}"
-            self._memory_logger.log(error_msg, "ERROR")
-            return False, error_msg
-
-    def force_start_operation(self) -> Tuple[bool, str]:
-        """
-        Fuerza el inicio de la operación, cambiando su estado a 'ACTIVA'.
-        """
-        if not self.operacion_activa:
-            return False, "No hay operación para iniciar."
-        if self.operacion_activa.estado == 'ACTIVA':
-            return False, "La operación ya está activa."
-        
-        self.operacion_activa.estado = 'ACTIVA'
-        self.operacion_activa.tiempo_inicio_ejecucion = datetime.datetime.now(timezone.utc)
-        self._memory_logger.log(f"OPERACIÓN INICIADA FORZOSAMENTE: Modo '{self.operacion_activa.tendencia}' está ahora ACTIVO.", "WARN")
-        return True, "Operación iniciada forzosamente."
-
-    def force_stop_operation(self, close_positions: bool = False) -> Tuple[bool, str]:
-        """
-        Fuerza la finalización de la operación activa actual y la resetea a NEUTRAL.
-        """
-        if not self.operacion_activa:
-            return False, "No hay operación para detener."
-
-        if self.operacion_activa.tendencia == 'NEUTRAL' and self.operacion_activa.estado != 'ACTIVA':
-             return False, "No hay una operación de trading activa para finalizar."
-
-        if close_positions:
-            self._memory_logger.log("Cierre forzoso de todas las posiciones por finalización de operación.", "WARN")
-            self.close_all_logical_positions('long', reason="OPERATION_FORCE_STOPPED")
-            self.close_all_logical_positions('short', reason="OPERATION_FORCE_STOPPED")
-
-        self._end_operation(reason="Finalización forzada por el usuario")
-        return True, "Operación finalizada. Volviendo a modo NEUTRAL."
-
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         """Cierra una posición lógica específica por su índice."""
         price = self.get_current_market_price()
@@ -125,9 +53,10 @@ class _ApiActions:
             self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR")
             return False
         
-        if not self.operacion_activa: return False
+        operacion = self._om_api.get_operation()
+        if not operacion: return False
         
-        count = len(self.operacion_activa.posiciones_activas[side])
+        count = len(operacion.posiciones_activas[side])
         if count == 0: return True
         
         for i in range(count - 1, -1, -1):

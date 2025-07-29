@@ -1,15 +1,24 @@
 """
 Módulo responsable de la inicialización de los componentes core del bot.
 
-v3.3 (Robustez):
-- Añadida validación explícita para la dependencia `event_processor_module`
-  para prevenir errores de `AttributeError` durante la inicialización.
+v3.4 (Arquitectura de OM/PM):
+- Esta función ahora es responsable de instanciar tanto el OperationManager (OM)
+  como el PositionManager (PM).
+- Inyecta la API del OM como una dependencia en el PM, completando la
+  separación de responsabilidades.
 """
+# (COMENTARIO) Docstring de la versión anterior (v3.3) para referencia:
+# """
+# Módulo responsable de la inicialización de los componentes core del bot.
+# 
+# v3.3 (Robustez):
+# - Añadida validación explícita para la dependencia `event_processor_module`
+#   para prevenir errores de `AttributeError` durante la inicialización.
+# """
 from typing import Any, Tuple, Dict
 import traceback
-import types # Importar el módulo `types` para la comprobación
+import types
 
-# Importamos AbstractExchange para el type hinting del valor de retorno
 from core.exchange import AbstractExchange
 
 def initialize_core_components(
@@ -34,6 +43,11 @@ def initialize_core_components(
         open_snapshot_logger_module = dependencies.get('open_snapshot_logger_module')
         closed_position_logger_module = dependencies.get('closed_position_logger_module')
         
+        # --- INICIO DE LA MODIFICACIÓN: Extraer dependencias del OM ---
+        OperationManager = dependencies['OperationManager']
+        operation_manager_api_module = dependencies['operation_manager_api_module']
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         PositionManager = dependencies['PositionManager']
         BalanceManager = dependencies['BalanceManager']
         PositionState = dependencies['PositionState']
@@ -46,26 +60,21 @@ def initialize_core_components(
         ta_manager_module = dependencies['ta_manager_module']
         event_processor_module = dependencies['event_processor_module']
 
-        # --- INICIO DE LA MODIFICACIÓN: Validación de Dependencias Críticas ---
         if not isinstance(event_processor_module, types.ModuleType) or not hasattr(event_processor_module, 'initialize'):
             error_msg = "La dependencia 'event_processor_module' es inválida o no tiene la función 'initialize'."
             if memory_logger_module:
                 memory_logger_module.log(f"ERROR FATAL: {error_msg}", "ERROR")
             return False, error_msg, None
-        # --- FIN DE LA MODIFICACIÓN ---
 
-        # --- 1. Verificaciones y Inicializaciones Previas ---
         if not connection_manager_module.get_initialized_accounts():
             return False, "No hay clientes API inicializados. No se puede continuar.", None
 
         ta_manager_module.initialize()
         pm_helpers_module.set_dependencies(config_module, utils_module)
 
-        # --- 2. Creación del Adaptador de Exchange ---
         print("Creando adaptador de exchange...")
         exchange_name = getattr(config_module, 'EXCHANGE_NAME', 'bybit').lower()
         exchange_adapter = None
-
         if exchange_name == 'bybit':
             from core.exchange._bybit_adapter import BybitAdapter
             exchange_adapter = BybitAdapter()
@@ -74,24 +83,31 @@ def initialize_core_components(
                 return False, f"Fallo al inicializar el adaptador de Bybit.", None
         else:
             return False, f"Exchange '{exchange_name}' no soportado.", None
-        
         print(f"Adaptador para '{exchange_name.upper()}' creado e inicializado con éxito.")
 
-        # --- 3. Construcción del Grafo de Objetos del PM ---
-        print("Construyendo grafo de objetos del Position Manager...")
+        # --- INICIO DE LA MODIFICACIÓN: Instanciar el OperationManager PRIMERO ---
+        print("Instanciando Operation Manager...")
+        om_instance = OperationManager(
+            config=config_module,
+            memory_logger_instance=memory_logger_module
+        )
+        operation_manager_api_module.init_om_api(om_instance)
+        print("Operation Manager inicializado.")
+        # --- FIN DE LA MODIFICACIÓN ---
 
+        print("Construyendo grafo de objetos del Position Manager...")
         balance_manager_instance = BalanceManager(
             config=config_module,
             utils=utils_module,
             exchange_adapter=exchange_adapter
         )
-        
         position_state_instance = PositionState(
             config=config_module,
             utils=utils_module,
             exchange_adapter=exchange_adapter
         )
         
+        # --- INICIO DE LA MODIFICACIÓN: Inyectar la API del OM en el PM ---
         pm_instance = PositionManager(
             balance_manager=balance_manager_instance,
             position_state=position_state_instance,
@@ -99,8 +115,10 @@ def initialize_core_components(
             config=config_module,
             utils=utils_module,
             memory_logger=memory_logger_module,
-            helpers=pm_helpers_module
+            helpers=pm_helpers_module,
+            operation_manager_api=operation_manager_api_module # <-- NUEVA DEPENDENCIA
         )
+        # --- FIN DE LA MODIFICACIÓN ---
 
         executor_instance = PositionExecutor(
             config=config_module,
@@ -113,32 +131,27 @@ def initialize_core_components(
             closed_position_logger=closed_position_logger_module,
             state_manager=pm_instance
         )
-        
         pm_instance.set_executor(executor_instance)
         
-        # --- 4. Inicialización de los Componentes Instanciados ---
         balance_manager_instance.initialize(
             base_position_size_usdt=base_size,
             initial_max_logical_positions=initial_slots
         )
         
-        pm_instance.initialize(
-            operation_mode=operation_mode,
-            base_size=base_size,
-            max_pos=initial_slots
-        )
+        # El PM ahora solo inicializa su propio estado, no la operación.
+        pm_instance.initialize(operation_mode=operation_mode)
 
         position_manager_api_module.init_pm_api(pm_instance)
         
-        # Esta llamada ahora es segura gracias a la validación anterior
         event_processor_module.initialize(
             operation_mode=operation_mode,
-            pm_instance=pm_instance
+            pm_instance=pm_instance,
+            # (NOTA: El event_processor no necesita el om_instance directamente,
+            # ya que su workflow (_triggers) importa la API de forma estática)
         )
 
-        # --- 5. Verificación Final ---
-        if not position_manager_api_module.is_initialized():
-            return False, "El Position Manager no se inicializó correctamente.", None
+        if not position_manager_api_module.is_initialized() or not operation_manager_api_module.is_initialized():
+            return False, "El Position Manager o el Operation Manager no se inicializaron correctamente.", None
 
         print("Componentes Core inicializados con éxito.")
         return True, "Inicialización completa.", exchange_adapter

@@ -31,11 +31,17 @@ try:
     from core.strategy import ta
     from core.strategy import event_processor
     
-    # Clases y Módulos del PM refactorizado
+    # --- INICIO DE LA MODIFICACIÓN: Importar componentes del OM y PM ---
+    # Módulos del Operation Manager (OM)
+    from core.strategy.om import api as om_api_module
+    from core.strategy.om import OperationManager
+
+    # Módulos del Position Manager (PM)
     from core.strategy.pm import api as pm_api_module
     from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
     from core.strategy.pm import _helpers as pm_helpers_module
     from core.strategy.pm import _calculations as pm_calculations_module
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # Paquete de Conexión
     from connection import manager as connection_manager
@@ -75,20 +81,25 @@ if __name__ == "__main__":
         "connection_ticker_module": connection_ticker,
         "live_operations_module": live_operations,
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Módulos de logging (se añade el paquete completo para el apagado)
+        # Módulos de logging
         "logging_package": logging_package,
-        # --- FIN DE LA MODIFICACIÓN ---
         "memory_logger_module": memory_logger,
         "open_snapshot_logger_module": open_position_logger,
         "closed_position_logger_module": closed_position_logger,
         "signal_logger_module": signal_logger,
         
-        # Módulos de estrategia (los que no son del PM)
+        # Módulos de estrategia (los que no son del PM/OM)
         "ta_manager_module": ta,
         "event_processor_module": event_processor,
         
-        # Fachada de la API del PM (para la TUI y otros consumidores)
+        # --- INICIO DE LA MODIFICACIÓN: Añadir dependencias del OM ---
+        # Fachada de la API del OM
+        "operation_manager_api_module": om_api_module,
+        # Clase del OM (para que el runner la instancie)
+        "OperationManager": OperationManager,
+        # --- FIN DE LA MODIFICACIÓN ---
+        
+        # Fachada de la API del PM
         "position_manager_api_module": pm_api_module,
         
         # Clases del PM (para que el runner las instancie)

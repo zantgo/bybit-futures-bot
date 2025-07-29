@@ -32,38 +32,49 @@ class _ApiGetters:
         """
         if not self._initialized: return {"error": "PM no instanciado"}
         
+        operacion = self._om_api.get_operation()
+        if not operacion:
+            return {"error": "Operación no disponible"}
+
         ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
 
-        open_longs = self.operacion_activa.posiciones_activas['long'] if self.operacion_activa else []
-        open_shorts = self.operacion_activa.posiciones_activas['short'] if self.operacion_activa else []
+        open_longs = operacion.posiciones_activas['long']
+        open_shorts = operacion.posiciones_activas['short']
         
         # (COMENTADO) La referencia a _milestones es obsoleta.
         # milestones_as_dicts = [asdict(m) for m in self._milestones]
         
         operation_unrealized_pnl = 0.0
-        if self.operacion_activa:
-            for side in ['long', 'short']:
-                for pos in self.operacion_activa.posiciones_activas[side]:
-                    entry = pos.entry_price
-                    size = pos.size_contracts
-                    if side == 'long': operation_unrealized_pnl += (current_market_price - entry) * size
-                    else: operation_unrealized_pnl += (entry - current_market_price) * size
-            
-            operation_total_pnl = self.operacion_activa.pnl_realizado_usdt + operation_unrealized_pnl
-            initial_capital_op = self.operacion_activa.capital_inicial_usdt
-            operation_roi = self._utils.safe_division(operation_total_pnl, initial_capital_op) * 100 if initial_capital_op > 0 else 0.0
+        for side in ['long', 'short']:
+            for pos in operacion.posiciones_activas[side]:
+                entry = pos.entry_price
+                size = pos.size_contracts
+                if side == 'long': operation_unrealized_pnl += (current_market_price - entry) * size
+                else: operation_unrealized_pnl += (entry - current_market_price) * size
+        
+        operation_total_pnl = operacion.pnl_realizado_usdt + operation_unrealized_pnl
+        initial_capital_op = operacion.capital_inicial_usdt
+        operation_roi = self._utils.safe_division(operation_total_pnl, initial_capital_op) * 100 if initial_capital_op > 0 else 0.0
+
+        # Lógica replicada de get_operation_state para mantener la estructura del summary
+        op_dict = asdict(operacion)
+        if operacion.tiempo_inicio_ejecucion:
+            duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
+            total_seconds = int(duration.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            op_dict['tiempo_ejecucion_str'] = f"{hours:02}:{minutes:02}:{seconds:02}"
         else:
-            operation_total_pnl = 0.0
-            operation_roi = 0.0
+            op_dict['tiempo_ejecucion_str'] = "00:00:00"
 
         summary_data = {
             "initialized": True,
-            # (MODIFICADO) Se usa la tendencia de la operacion_activa para ser más preciso.
-            "operation_mode": self.operacion_activa.tendencia if self.operacion_activa else 'NEUTRAL',
+            # (MODIFICADO) Se usa la tendencia de la operacion para ser más preciso.
+            "operation_mode": operacion.tendencia,
             # (COMENTADO) Código anterior
             # "operation_mode": self._operation_mode,
-            "operation_status": self.get_operation_state(),
+            "operation_status": op_dict,
             "operation_pnl": operation_total_pnl,
             "operation_roi": operation_roi,
             "bm_balances": self._balance_manager.get_balances_summary(),
@@ -84,11 +95,12 @@ class _ApiGetters:
     def get_unrealized_pnl(self, current_price: float) -> float:
         """Calcula el PNL no realizado total de todas las posiciones abiertas en la sesión."""
         total_pnl = 0.0
-        if not self.operacion_activa:
+        operacion = self._om_api.get_operation()
+        if not operacion:
             return 0.0
             
         for side in ['long', 'short']:
-            for pos in self.operacion_activa.posiciones_activas[side]:
+            for pos in operacion.posiciones_activas[side]:
                 entry = pos.entry_price
                 size = pos.size_contracts
                 if side == 'long': total_pnl += (current_price - entry) * size
@@ -97,48 +109,6 @@ class _ApiGetters:
     
     # (COMENTADO) get_trend_state es obsoleto y reemplazado por get_operation_state ---
     # def get_trend_state(self) -> Dict[str, Any]: ...
-
-    def get_operation(self) -> Optional[Operacion]:
-        """Devuelve el objeto de la operación estratégica actual."""
-        return self.operacion_activa
-
-    def get_operation_state(self) -> Dict[str, Any]:
-        """Devuelve un diccionario con el estado completo de la operación activa."""
-        if not self.operacion_activa:
-            # (MODIFICADO) Devolver un estado NEUTRAL por defecto para evitar errores en la TUI.
-            return Operacion().to_dict()
-            # (COMENTADO) Código anterior
-            # return {'error': 'Operacion no inicializada'}
-        
-        op_dict = asdict(self.operacion_activa)
-
-        # (MODIFICADO) Añadir tiempo de ejecución formateado para la TUI.
-        if self.operacion_activa.tiempo_inicio_ejecucion:
-            duration = datetime.datetime.now(datetime.timezone.utc) - self.operacion_activa.tiempo_inicio_ejecucion
-            total_seconds = int(duration.total_seconds())
-            hours, remainder = divmod(total_seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            op_dict['tiempo_ejecucion_str'] = f"{hours:02}:{minutes:02}:{seconds:02}"
-        else:
-            op_dict['tiempo_ejecucion_str'] = "00:00:00"
-
-        return op_dict
-
-    def get_operation_parameters(self) -> Dict[str, Any]:
-        """Devuelve solo los parámetros de configuración de la operación activa."""
-        if not self.operacion_activa:
-            return {}
-        
-        config_fields = [
-            'estado', 'tipo_cond_entrada', 'valor_cond_entrada',
-            'tendencia', 'tamaño_posicion_base_usdt', 'max_posiciones_logicas',
-            'apalancamiento', 'sl_posicion_individual_pct', 'tsl_activacion_pct',
-            'tsl_distancia_pct', 'tp_roi_pct', 'sl_roi_pct', 'tiempo_maximo_min',
-            'max_comercios'
-        ]
-        
-        op_dict = asdict(self.operacion_activa)
-        return {key: op_dict.get(key) for key in config_fields}
 
     def get_session_start_time(self) -> Optional[datetime.datetime]: 
         """Obtiene la hora de inicio de la sesión."""

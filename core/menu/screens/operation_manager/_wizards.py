@@ -39,7 +39,7 @@ def init(dependencies: Dict[str, Any]):
 
 # --- Funciones de Asistente ---
 
-def _operation_setup_wizard(pm_api: Any, current_op: Operacion, is_modification: bool = False):
+def _operation_setup_wizard(om_api: Any, current_op: Operacion, is_modification: bool = False):
     """Asistente único para configurar o modificar la operación estratégica."""
     title = "Modificar Operación Activa" if is_modification else "Configurar Nueva Operación"
     clear_screen(); print_tui_header(title)
@@ -159,16 +159,24 @@ def _operation_setup_wizard(pm_api: Any, current_op: Operacion, is_modification:
         return
 
     if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"], title="\n¿Guardar estos cambios?", **MENU_STYLE).show() == 0:
-        success, msg = pm_api.create_or_update_operation(params_to_update)
+        success, msg = om_api.create_or_update_operation(params_to_update)
         print(f"\n{msg}"); time.sleep(2)
         
-def _force_stop_wizard(pm_api: Any):
+def _force_stop_wizard(om_api: Any, pm_api: Any):
     """Asistente para forzar la finalización de la operación actual."""
     title = "¿Cómo deseas finalizar la operación actual?"
     end_menu_items = ["[1] Mantener posiciones y finalizar", "[2] Cerrar todas las posiciones y finalizar", None, "[c] Cancelar"]
     choice = TerminalMenu(end_menu_items, title=title).show()
     if choice in [0, 1]:
-        success, msg = pm_api.force_stop_operation(close_positions=(choice == 1))
+        # Primero, detenemos la operación lógicamente
+        success, msg = om_api.force_stop_operation()
+
+        # Si el usuario también quiso cerrar posiciones, lo hacemos ahora
+        if success and choice == 1:
+            pm_api.close_all_logical_positions('long', reason="OPERATION_FORCE_STOPPED")
+            pm_api.close_all_logical_positions('short', reason="OPERATION_FORCE_STOPPED")
+            msg += " Todas las posiciones han sido cerradas."
+
         print(f"\n{msg}"); time.sleep(2)
 
 def _force_close_all_wizard(pm_api: Any):

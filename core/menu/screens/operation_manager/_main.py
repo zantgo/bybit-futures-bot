@@ -51,12 +51,13 @@ def show_operation_manager_screen():
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
 
     pm_api = _deps.get("position_manager_api_module")
-    if not pm_api:
-        print("ERROR CRÍTICO: PM API no inyectada."); time.sleep(3); return
+    om_api = _deps.get("operation_manager_api_module")
+    if not pm_api or not om_api:
+        print("ERROR CRÍTICO: PM o OM API no inyectada."); time.sleep(3); return
 
     while True:
         try:
-            operacion = pm_api.get_operation()
+            operacion = om_api.get_operation()
             if not operacion:
                 print("\n\033[93mEsperando inicialización de la operación...\033[0m")
                 time.sleep(2)
@@ -110,9 +111,9 @@ def show_operation_manager_screen():
             action = action_map.get(choice)
 
             # Llamadas a funciones del módulo de wizards
-            if action == "start_new": _wizards._operation_setup_wizard(pm_api, operacion)
-            elif action == "modify": _wizards._operation_setup_wizard(pm_api, operacion, is_modification=True)
-            elif action == "stop": _wizards._force_stop_wizard(pm_api)
+            if action == "start_new": _wizards._operation_setup_wizard(om_api, operacion)
+            elif action == "modify": _wizards._operation_setup_wizard(om_api, operacion, is_modification=True)
+            elif action == "stop": _wizards._force_stop_wizard(om_api, pm_api)
             elif action == "panic_close": _wizards._force_close_all_wizard(pm_api)
             elif action == "refresh": continue
             elif action == "help": show_help_popup("auto_mode")
