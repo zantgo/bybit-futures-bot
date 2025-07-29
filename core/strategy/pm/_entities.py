@@ -1,19 +1,16 @@
 """
 Módulo de Entidades de Dominio para el Position Manager.
 
-v6.0 (Modelo de Operación Estratégica Única):
-- Se elimina por completo el concepto de Hitos. Las clases `Hito`,
-  `CondicionHito` y `AccionHito` han sido comentadas y serán eliminadas.
-- La clase `Operacion` se convierte en la única entidad estratégica,
-  conteniendo ahora su propio estado, condiciones de entrada y
-  condiciones de salida.
-- `ConfiguracionOperacion` se fusiona dentro de `Operacion` para simplificar.
+v6.3 (Condición de Salida por Precio):
+- Se añaden los campos `tipo_cond_salida` y `valor_cond_salida` a la entidad
+  `Operacion` para permitir la finalización de una estrategia basada en un
+  nivel de precio específico, además de los límites existentes.
 """
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
-# --- Entidades de Posiciones (Sin cambios) ---
+# --- Entidades de Posiciones ---
 
 @dataclass
 class LogicalPosition:
@@ -27,10 +24,16 @@ class LogicalPosition:
     stop_loss_price: Optional[float] = None
     est_liq_price: Optional[float] = None
     
+    # Parámetros de Trailing Stop fijados en el momento de la apertura
+    tsl_activation_pct_at_open: float = 0.0
+    tsl_distance_pct_at_open: float = 0.0
+    
+    # Estado dinámico del Trailing Stop
     ts_is_active: bool = False
     ts_peak_price: Optional[float] = None
     ts_stop_price: Optional[float] = None
     
+    # Datos de la API
     api_order_id: Optional[str] = None
     api_avg_fill_price: Optional[float] = None
     api_filled_qty: Optional[float] = None
@@ -46,7 +49,7 @@ class PhysicalPosition:
     last_update_ts: Optional[datetime.datetime] = None
 
 
-# --- Entidades de Balance y Capital (Sin cambios) ---
+# --- Entidades de Balance y Capital ---
 
 @dataclass
 class Balances:
@@ -68,21 +71,23 @@ class Balances:
         return max(0.0, self.operational_short - self.used_short)
 
 
+# --- Entidad de Operación Única ---
+
 @dataclass
 class Operacion:
     """
     Representa una única Operación Estratégica configurable. Contiene toda la
     lógica de estado, condiciones y parámetros de trading.
     """
-    # --- Identificación y Estado ---
+    # Identificación y Estado
     id: str
-    estado: str = 'EN_ESPERA'  # 'EN_ESPERA', 'ACTIVA', 'FINALIZADA'
+    estado: str = 'EN_ESPERA'
 
-    # --- Condición de Entrada ---
-    tipo_cond_entrada: Optional[str] = 'MARKET' # 'PRICE_ABOVE', 'PRICE_BELOW', 'MARKET'
+    # Condición de Entrada
+    tipo_cond_entrada: Optional[str] = 'MARKET'
     valor_cond_entrada: Optional[float] = 0.0
 
-    # --- Parámetros de Trading (antes en ConfiguracionOperacion) ---
+    # Parámetros de Trading
     tendencia: str = 'NEUTRAL'
     tamaño_posicion_base_usdt: float = 1.0
     max_posiciones_logicas: int = 5
@@ -91,13 +96,19 @@ class Operacion:
     tsl_activacion_pct: float = 0.4
     tsl_distancia_pct: float = 0.1
 
-    # --- Condiciones de Salida (Límites de la Operación) ---
+    # Condiciones de Salida (Límites)
     tp_roi_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
     
-    # --- Estado Dinámico (se actualiza durante la ejecución) ---
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Nueva Condición de Salida por Precio
+    tipo_cond_salida: Optional[str] = None # 'PRICE_ABOVE', 'PRICE_BELOW'
+    valor_cond_salida: Optional[float] = None
+    # --- FIN DE LA MODIFICACIÓN ---
+    
+    # Estado Dinámico
     capital_inicial_usdt: float = 0.0
     pnl_realizado_usdt: float = 0.0
     comercios_cerrados_contador: int = 0

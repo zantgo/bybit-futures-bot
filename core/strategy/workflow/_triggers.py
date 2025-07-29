@@ -1,11 +1,10 @@
 """
 Módulo para la gestión de Triggers de la Operación Estratégica.
 
-v6.0 (Modelo de Operación Estratégica Única):
-- Se elimina por completo la lógica de evaluación de Hitos.
-- La función `check_conditional_triggers` ha sido reescrita para una única
-  responsabilidad: comprobar las condiciones de entrada y salida de la
-  operación estratégica única gestionada por el Position Manager.
+v6.1 (Condición de Salida por Precio):
+- La función `_evaluate_exit_conditions` ha sido actualizada para comprobar
+  la nueva condición de salida por precio (`tipo_cond_salida` y
+  `valor_cond_salida`) definida en la entidad `Operacion`.
 """
 import sys
 import os
@@ -23,9 +22,7 @@ if __name__ != "__main__":
 try:
     from core.strategy.pm import api as position_manager
     from core.logging import memory_logger
-    # (COMENTADO) La entidad Hito ya no es necesaria.
-    # from core.strategy.pm._entities import Hito 
-    from core.strategy.pm._entities import Operacion # Importamos la nueva entidad
+    from core.strategy.pm._entities import Operacion
     from core import utils
 except ImportError as e:
     print(f"ERROR [Workflow Triggers Import]: Falló importación de dependencias: {e}")
@@ -36,7 +33,7 @@ except ImportError as e:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
 
-# --- INICIO DE LA MODIFICACIÓN: Nueva Lógica de Triggers para Operación Única ---
+# --- Lógica de Triggers para Operación Única ---
 
 def check_conditional_triggers(current_price: float, timestamp: datetime.datetime):
     """
@@ -55,7 +52,6 @@ def check_conditional_triggers(current_price: float, timestamp: datetime.datetim
             condition_met, reason = _evaluate_entry_condition(operacion, current_price)
             if condition_met:
                 memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA: {reason}", "INFO")
-                # El PM se encargará de cambiar el estado a 'ACTIVA'.
                 position_manager.force_start_operation()
 
         # Escenario 2: La operación está ACTIVA, comprobamos sus condiciones de salida.
@@ -63,8 +59,7 @@ def check_conditional_triggers(current_price: float, timestamp: datetime.datetim
             condition_met, reason = _evaluate_exit_conditions(operacion, current_price)
             if condition_met:
                 memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA: {reason}", "INFO")
-                # El PM se encargará de finalizar la operación.
-                position_manager.force_stop_operation(close_positions=False) # Por defecto, no se cierran posiciones
+                position_manager.force_stop_operation(close_positions=False)
 
     except Exception as e_main:
         memory_logger.log(f"ERROR CRÍTICO [Workflow Triggers]: {e_main}", level="ERROR")
@@ -114,4 +109,14 @@ def _evaluate_exit_conditions(operacion: Operacion, current_price: float) -> Tup
         if elapsed_minutes >= operacion.tiempo_maximo_min:
             return True, f"Límite de duración de {operacion.tiempo_maximo_min} min alcanzado"
             
+    # --- INICIO DE LA MODIFICACIÓN: Comprobar nueva condición de salida por precio ---
+    cond_type_salida = operacion.tipo_cond_salida
+    cond_value_salida = operacion.valor_cond_salida
+    if cond_type_salida and cond_value_salida is not None:
+        if cond_type_salida == 'PRICE_ABOVE' and current_price > cond_value_salida:
+            return True, f"Precio ({current_price:.4f}) superó umbral de salida ({cond_value_salida:.4f})"
+        if cond_type_salida == 'PRICE_BELOW' and current_price < cond_value_salida:
+            return True, f"Precio ({current_price:.4f}) cayó por debajo de umbral de salida ({cond_value_salida:.4f})"
+    # --- FIN DE LA MODIFICACIÓN ---
+
     return False, ""

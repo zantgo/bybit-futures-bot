@@ -179,7 +179,7 @@ def get_input(
             # Se unifica el formato para mostrar el valor por defecto
             # Esto resuelve el REQ-01 para mejorar la consistencia visual.
             if default is not None:
-                prompt_full += f" [default: {default}]"
+                prompt_full += f" [{default}]"
             
             # Se mantiene la opción de cancelar
             prompt_full += " [o 'c' para cancelar]: "

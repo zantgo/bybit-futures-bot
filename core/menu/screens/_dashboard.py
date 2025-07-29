@@ -1,12 +1,23 @@
-# core/menu/screens/_dashboard.py
-
 """
 Módulo para la Pantalla del Dashboard Principal.
 
-v4.1 (Refactor de Contexto):
-- La opción de editar configuración ahora llama al editor en modo 'session',
-  mostrando solo los parámetros de capital y límites.
+v6.1 (Manejo de Errores en UI):
+- El dashboard ahora es resiliente a fallos al obtener el resumen de estado (summary).
+- Si ocurre un error de red o de API, se muestra una advertencia en la parte
+  superior de la pantalla y los datos se muestran como 'Error' o 'N/A',
+  permitiendo al usuario refrescar o salir sin que el bot se detenga.
 """
+# (COMENTARIO) Docstring de la versión anterior (v6.0) para referencia:
+# """
+# Módulo para la Pantalla del Dashboard Principal.
+# 
+# v6.0 (Simplificación de UI):
+# - Se elimina la gestión de posiciones individuales desde el dashboard.
+# - Se simplifica la visualización de balances para mostrar solo el Equity.
+# - Se añade una nueva sección para mostrar el estado de la Operación Estratégica.
+# - El menú de acciones ha sido reestructurado para ser más directo.
+# """
+
 import time
 import datetime
 from datetime import timezone
@@ -20,13 +31,11 @@ except ImportError:
 from .._helpers import (
     clear_screen,
     print_tui_header,
-    press_enter_to_continue,
-    print_section
+    press_enter_to_continue
 )
 from .. import _helpers as helpers_module
 
-# Importamos el nuevo gestor de hitos y eliminamos los antiguos.
-from . import _config_editor, _position_viewer, _log_viewer, _milestone_manager
+from . import _config_editor, _log_viewer, _milestone_manager
 
 try:
     from core.exchange._models import StandardBalance
@@ -35,9 +44,8 @@ except ImportError:
 
 _deps: Dict[str, Any] = {}
 
-
 def _handle_ticker_change(config_module: Any):
-    """Valida y aplica un cambio de ticker, con fallback en caso de error."""
+    # ... (Esta función no necesita cambios)
     exchange_adapter = _deps.get('exchange_adapter')
     logger = _deps.get('memory_logger_module')
     if not exchange_adapter or not logger:
@@ -66,53 +74,11 @@ def _handle_ticker_change(config_module: Any):
         setattr(config_module, 'TICKER_SYMBOL', default_symbol)
         time.sleep(3.5)
 
-
-def _print_positions_table(title: str, positions: List[Dict[str, Any]], current_price: float, side: str):
-    """Imprime una tabla formateada para las posiciones abiertas."""
-    print(f"\n--- {title} ({len(positions)}) " + "-" * (76 - len(title) - 4 - len(str(len(positions)))))
-    
-    if not positions:
-        print("  (No hay posiciones abiertas)")
-        return
-
-    header = f"{'Idx':<4} {'Entrada':>10} {'Tamaño':>12} {'Margen':>10} {'SL':>10} {'PNL (U)':>15}"
-    print(header)
-    print("-" * len(header))
-
-    COLOR_GREEN = "\033[92m"
-    COLOR_RED = "\033[91m"
-    COLOR_RESET = "\033[0m"
-
-    for i, pos in enumerate(positions):
-        entry_price = pos.get('entry_price', 0.0)
-        size_contracts = pos.get('size_contracts', 0.0)
-        margin_usdt = pos.get('margin_usdt', 0.0)
-        stop_loss_price = pos.get('stop_loss_price')
-
-        pnl = 0.0
-        if current_price > 0 and entry_price > 0 and size_contracts > 0:
-            pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
-        
-        pnl_color = COLOR_GREEN if pnl >= 0 else COLOR_RED
-        
-        idx_str = f"{i:<4}"
-        entry_str = f"{entry_price:10.4f}"
-        size_str = f"{size_contracts:12.4f}"
-        margin_str = f"{margin_usdt:9.2f}$"
-        sl_str = f"{stop_loss_price:10.4f}" if stop_loss_price else f"{'N/A':>10}"
-        pnl_str = f"{pnl_color}{pnl:14.4f}${COLOR_RESET}"
-
-        print(f"{idx_str} {entry_str} {size_str} {margin_str} {sl_str} {pnl_str}")
-
 def init(dependencies: Dict[str, Any]):
-    """Recibe las dependencias inyectadas desde el controlador principal."""
     global _deps
     _deps = dependencies
 
 def show_dashboard_screen():
-    """
-    Muestra el dashboard principal en un bucle con un diseño mejorado.
-    """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado.")
         time.sleep(2)
@@ -145,54 +111,68 @@ def show_dashboard_screen():
     while True:
         pm_api.force_balance_update()
 
+        error_message = None
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de manejo de errores ---
         try:
             current_price = pm_api.get_current_market_price() or 0.0
             
             summary = pm_api.get_position_summary()
+            
             if not summary or summary.get('error'):
-                print(f"\nError al obtener el estado del bot: {summary.get('error', 'Desconocido')}")
-                press_enter_to_continue()
-                continue
-            
-            unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
-            realized_pnl = summary.get('total_realized_pnl_session', 0.0)
-            total_pnl = realized_pnl + unrealized_pnl
-            initial_capital = summary.get('initial_total_capital', 0.0)
-            current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
-            
-            session_start_time = pm_api.get_session_start_time()
-            duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds() if session_start_time else 0
-            duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
-            
-            ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-            
-            # --- Lógica de visualización original ---
-            # En lugar de leer `operation_status`, leemos `trend_status` como antes.
-            # pm.api.get_trend_state() está comentado, así que esto usará la lógica que aún exista
-            # o fallará si ya no existe, lo cual nos indicará el siguiente paso.
-            trend_status = summary.get('trend_status', {}) 
-            if not trend_status:
-                 # Fallback si `trend_status` no existe, usamos `operation_status`
-                 op_status = summary.get('operation_status', {})
-                 trend_mode = op_status.get('configuracion', {}).get('tendencia', 'NEUTRAL')
-                 milestone_id = None # No tenemos un análogo directo
+                error_message = f"ADVERTENCIA: No se pudo obtener el estado del bot: {summary.get('error', 'Reintentando...')}"
+                # Definir valores por defecto para mostrar en la UI en caso de error
+                unrealized_pnl, realized_pnl, total_pnl, initial_capital, current_roi = (0.0,) * 5
+                duration_str, ticker_symbol, status_display = "Error", "Error", "Error"
+                op_tendencia, leverage_val, base_size_val, max_pos_val = "Error", 0.0, 0.0, 0
+                sl_roi_str, tp_roi_str = "Error", "Error"
+                real_balances = {}
             else:
-                 trend_mode = trend_status.get('mode', 'NEUTRAL')
-                 milestone_id = trend_status.get('milestone_id', None)
+                # Lógica de cálculo de datos normal
+                unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
+                realized_pnl = summary.get('total_realized_pnl_session', 0.0)
+                total_pnl = realized_pnl + unrealized_pnl
+                initial_capital = summary.get('initial_total_capital', 0.0)
+                current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
+                
+                session_start_time = pm_api.get_session_start_time()
+                duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds() if session_start_time else 0
+                duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
+                
+                ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+                
+                op_status = summary.get('operation_status', {})
+                op_tendencia = op_status.get('tendencia', 'NEUTRAL')
+                op_estado = 'ACTIVA' if op_tendencia != 'NEUTRAL' else 'EN ESPERA'
+                status_display = f"Modo: {op_tendencia} ({op_estado})"
 
-            status_display = f"Tendencia: {trend_mode}"
-            if milestone_id:
-                status_display += f" (Hito: ...{milestone_id[-6:]})"
-            elif trend_mode == 'NEUTRAL':
-                status_display = "Modo: NEUTRAL (Esperando Hito)"
+                op_params = summary.get('operation_status', {})
+                leverage_val = op_params.get('apalancamiento', 0.0)
+                base_size_val = op_params.get('tamaño_posicion_base_usdt', 0.0)
+                max_pos_val = op_params.get('max_posiciones_logicas', 0)
+                
+                sl_roi_enabled = getattr(config_module, 'SESSION_ROI_SL_ENABLED', False)
+                tp_roi_enabled = getattr(config_module, 'SESSION_ROI_TP_ENABLED', False)
+                sl_roi_val = pm_api.get_global_sl_pct() or 0.0
+                tp_roi_val = pm_api.get_global_tp_pct() or 0.0
+                sl_roi_str = f"Activo (-{sl_roi_val:.1f}%)" if sl_roi_enabled else "Desactivado"
+                tp_roi_str = f"Activo (+{tp_roi_val:.1f}%)" if tp_roi_enabled else "Desactivado"
+
+                real_balances = summary.get('real_account_balances', {})
 
         except Exception as e:
-            clear_screen()
-            print(f"Error al recopilar datos para el dashboard: {e}")
-            time.sleep(2)
-            continue
+            error_message = f"ERROR CRÍTICO: Excepción inesperada en el dashboard: {e}"
+            # Definir valores por defecto para la UI
+            unrealized_pnl, realized_pnl, total_pnl, initial_capital, current_roi = (0.0,) * 5
+            duration_str, ticker_symbol, status_display = "Error", "Error", "Error"
+            op_tendencia, leverage_val, base_size_val, max_pos_val = "Error", 0.0, 0.0, 0
+            sl_roi_str, tp_roi_str = "Error", "Error"
+            real_balances, current_price = {}, 0.0
         
+        # --- Lógica de renderizado de la UI ---
         clear_screen()
+        
+        if error_message:
+            print(f"\033[91m{error_message}\033[0m")
         
         header_title = f"Dashboard: {ticker_symbol} @ {current_price:.4f} USDT | {status_display}"
         print_tui_header(header_title)
@@ -204,32 +184,12 @@ def show_dashboard_screen():
             "PNL Realizado": f"{realized_pnl:+.4f} USDT", "PNL No Realizado": f"{unrealized_pnl:+.4f} USDT",
             "PNL Total": f"{total_pnl:+.4f} USDT", "ROI Sesión": f"{current_roi:+.2f}%",
         }
-        
-        sl_roi_enabled = getattr(config_module, 'SESSION_ROI_SL_ENABLED', False)
-        tp_roi_enabled = getattr(config_module, 'SESSION_ROI_TP_ENABLED', False)
-        sl_roi_val = getattr(config_module, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
-        tp_roi_val = getattr(config_module, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
-        sl_roi_str = f"Activo (-{sl_roi_val:.1f}%)" if sl_roi_enabled else "Desactivado"
-        tp_roi_str = f"Activo (+{tp_roi_val:.1f}%)" if tp_roi_enabled else "Desactivado"
-        
-        duration_limit = getattr(config_module, 'SESSION_MAX_DURATION_MINUTES', 0)
-        action_on_limit = getattr(config_module, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
-        duration_limit_str = f"{duration_limit} min (Acción: {action_on_limit})" if duration_limit > 0 else "Desactivado"
-
-        trades_limit = getattr(config_module, 'SESSION_MAX_TRADES', 0)
-        trades_limit_str = str(trades_limit) if trades_limit > 0 else "Ilimitados"
-        
-        # --- Lógica de visualización original ---
-        # Leemos los parámetros desde `config_module` como antes
-        leverage_val = getattr(config_module, 'POSITION_LEVERAGE', 0.0)
-        base_size_val = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 0.0)
-        max_pos_val = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 0)
 
         col2_data = {
             "Apalancamiento": f"{leverage_val:.1f}x",
             "Tamaño Base / Max Pos": f"{base_size_val:.2f}$ / {max_pos_val}",
-            "Límite de Duración": duration_limit_str,
-            "Límite de Trades": trades_limit_str,
+            "Límite de Duración": "N/A", 
+            "Límite de Trades": "N/A",
             "SL Sesión (ROI)": sl_roi_str,
             "TP Sesión (ROI)": tp_roi_str,
         }
@@ -251,36 +211,36 @@ def show_dashboard_screen():
                 line += f"|  {key:<{max_key_len2}} : {col2_data[key]}"
             print(line)
 
-        print("\n--- Estado Cuentas Reales " + "-"*56)
-        real_balances = summary.get('real_account_balances', {})
+        print("\n--- Balances de Cuentas Reales " + "-"*50)
         if not real_balances:
-            print("  (No hay datos de balance disponibles)")
+            print("  (No hay datos de balance disponibles o hubo un error)")
         else:
             for acc_name, balance_info in real_balances.items():
                 if isinstance(balance_info, StandardBalance):
                     equity = balance_info.total_equity_usd
-                    available = balance_info.available_balance_usd
-                    margin_used = equity - available
-                    print(f"  {acc_name.upper():<15}: Equity: {equity:9.2f}$ | En Uso: {margin_used:8.2f}$ | Disponible: {available:8.2f}$")
+                    print(f"  {acc_name.upper():<15}: Equity: {equity:9.2f}$")
                 else:
                     print(f"  {acc_name.upper():<15}: ({str(balance_info)})")
-
-        _print_positions_table("Posiciones LONG", summary.get('open_long_positions', []), current_price, 'long')
-        _print_positions_table("Posiciones SHORT", summary.get('open_short_positions', []), current_price, 'short')
-
-        # --- INICIO DE LA CORRECCIÓN ---
+        
+        print("\n--- Operación " + "-"*70)
+        print(f"  ESTADO: {op_tendencia}")
+        
         menu_items = [
             "[1] Refrescar", 
-            "[2] Gestionar Posiciones", 
-            "[3] Gestionar Operaciones y Hitos", # Texto actualizado
+            "[2] Gestionar Operación", 
             None,
-            "[4] Editar Configuración de Sesión", 
-            "[5] Ver Logs en Tiempo Real",
+            "[3] Editar Configuración de Sesión", 
+            "[4] Ver Logs en Tiempo Real",
             None,
             "[h] Ayuda", 
             "[q] Salir del Bot"
         ]
-        # --- FIN DE LA CORRECCIÓN ---
+        
+        action_map = {
+            0: 'refresh', 1: 'manage_operation',
+            3: 'edit_config', 4: 'view_logs',
+            6: 'help', 7: 'exit'
+        }
         
         menu_options = helpers_module.MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -289,19 +249,12 @@ def show_dashboard_screen():
         menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
         choice = menu.show()
         
-        action_map = {
-            0: 'refresh', 1: 'view_positions', 2: 'milestone_manager',
-            4: 'edit_config', 5: 'view_logs', 7: 'help', 8: 'exit'
-        }
         action = action_map.get(choice)
         
         if action == 'refresh': 
             continue
-        elif action == 'view_positions': 
-            _position_viewer.show_position_viewer_screen(pm_api)
-        elif action == 'milestone_manager': 
+        elif action == 'manage_operation': 
             _milestone_manager.show_milestone_manager_screen()
-        
         elif action == 'edit_config':
             original_symbol = getattr(config_module, 'TICKER_SYMBOL', 'BTCUSDT')
             changes_saved = _config_editor.show_config_editor_screen(config_module, context='session')
@@ -310,7 +263,6 @@ def show_dashboard_screen():
                 if new_symbol != original_symbol:
                     _handle_ticker_change(config_module)
             continue
-            
         elif action == 'view_logs': 
             _log_viewer.show_log_viewer()
         elif action == 'help': 
