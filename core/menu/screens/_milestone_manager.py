@@ -1,13 +1,21 @@
 """
 Módulo para la Pantalla de Gestión de la Operación Estratégica.
 
-v6.6 (Claridad y Seguridad del Asistente):
-- Se reestructura el `_operation_setup_wizard` para separar claramente los
-  parámetros de trading obligatorios de los de riesgo opcionales.
-- Se elimina la opción de 'desactivar' para campos críticos como el tamaño
-  de posición y el apalancamiento, mejorando la seguridad.
-- Se ha reordenado la secuencia de preguntas para un flujo más lógico.
+v6.10 (Feedback Visual en Asistente):
+- El asistente de configuración ahora proporciona feedback visual inmediato
+  después de cada entrada del usuario, confirmando el valor seleccionado.
+- Se mejora la claridad y el flujo del asistente para una experiencia
+  de usuario superior.
 """
+# (COMENTARIO) Docstring de la versión anterior (v6.9) para referencia:
+# """
+# Módulo para la Pantalla de Gestión de la Operación Estratégica.
+# 
+# v6.9 (Refinamiento de UI):
+# - Se corrige la lógica de los valores por defecto en el asistente para que
+#   los límites opcionales desactivados (valor 0) muestren [DESACTIVADO]
+#   en el prompt, en lugar de [0], mejorando la claridad.
+# """
 import time
 from typing import Any, Dict, Optional, List
 from dataclasses import asdict
@@ -185,21 +193,27 @@ def _operation_setup_wizard(pm_api: Any, current_op: Operacion, is_modification:
             print("\n--- 1. Condición de Entrada ---")
             cond_menu_items = ["[1] Activación Inmediata", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
             cond_choice = TerminalMenu(cond_menu_items, title="Elige la condición de activación:").show()
-            if cond_choice == 0: new_cond_type, new_cond_value = 'MARKET', 0.0
+            if cond_choice == 0: 
+                new_cond_type, new_cond_value = 'MARKET', 0.0
+                print("  -> Condición seleccionada: Activación Inmediata")
             elif cond_choice == 1:
                 new_cond_type = 'PRICE_ABOVE'
                 new_cond_value = get_input("Activar si precio SUPERA", float, default=current_op.valor_cond_entrada)
+                print(f"  -> Condición seleccionada: Precio > {new_cond_value}")
             elif cond_choice == 2:
                 new_cond_type = 'PRICE_BELOW'
                 new_cond_value = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada)
+                print(f"  -> Condición seleccionada: Precio < {new_cond_value}")
             else: return
             params_to_update['tipo_cond_entrada'] = new_cond_type
             params_to_update['valor_cond_entrada'] = new_cond_value
 
             print("\n--- 2. Tendencia de Trading ---")
-            tendencia_idx = TerminalMenu(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"], title=f"Elige la Tendencia [Actual: {current_op.tendencia}]").show()
+            tendencia_options = ["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]
+            tendencia_idx = TerminalMenu(tendencia_options, title=f"Elige la Tendencia [Actual: {current_op.tendencia}]").show()
             if tendencia_idx is None: return
-            params_to_update['tendencia'] = ["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"][tendencia_idx]
+            params_to_update['tendencia'] = tendencia_options[tendencia_idx]
+            print(f"  -> Tendencia seleccionada: {params_to_update['tendencia']}")
         else:
             print(f"\nModificando Operación ACTIVA (Tendencia: {current_op.tendencia}).")
         
@@ -207,59 +221,75 @@ def _operation_setup_wizard(pm_api: Any, current_op: Operacion, is_modification:
         default_base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 1.0) if use_config_defaults else current_op.tamaño_posicion_base_usdt
         default_max_pos = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5) if use_config_defaults else current_op.max_posiciones_logicas
         default_leverage = getattr(config_module, 'POSITION_LEVERAGE', 10.0) if use_config_defaults else current_op.apalancamiento
-        default_sl_ind = getattr(config_module, 'DEFAULT_TREND_INDIVIDUAL_SL_PCT', 10.0) if use_config_defaults else current_op.sl_posicion_individual_pct
+        default_sl_ind = None if use_config_defaults else current_op.sl_posicion_individual_pct
         default_tsl_act = getattr(config_module, 'DEFAULT_TREND_TS_ACTIVATION_PCT', 0.4) if use_config_defaults else current_op.tsl_activacion_pct
         default_tsl_dist = getattr(config_module, 'DEFAULT_TREND_TS_DISTANCE_PCT', 0.1) if use_config_defaults else current_op.tsl_distancia_pct
-        default_tp_roi = getattr(config_module, 'DEFAULT_TREND_LIMIT_TP_ROI_PCT', 2.5) if use_config_defaults else (current_op.tp_roi_pct or 0.0)
-        default_sl_roi = getattr(config_module, 'DEFAULT_TREND_LIMIT_SL_ROI_PCT', -1.5) if use_config_defaults else (current_op.sl_roi_pct or 0.0)
-        default_max_trades = getattr(config_module, 'DEFAULT_TREND_LIMIT_TRADE_COUNT', 0) if use_config_defaults else (current_op.max_comercios or 0)
-        default_max_duracion = getattr(config_module, 'DEFAULT_TREND_LIMIT_DURATION_MINUTES', 0) if use_config_defaults else (current_op.tiempo_maximo_min or 0)
+        default_tp_roi = getattr(config_module, 'DEFAULT_TREND_LIMIT_TP_ROI_PCT', 2.5) if use_config_defaults else current_op.tp_roi_pct
+        default_sl_roi = getattr(config_module, 'DEFAULT_TREND_LIMIT_SL_ROI_PCT', -1.5) if use_config_defaults else current_op.sl_roi_pct
+        
+        max_trades_val = getattr(config_module, 'DEFAULT_TREND_LIMIT_TRADE_COUNT', 0) if use_config_defaults else current_op.max_comercios
+        default_max_trades = max_trades_val if max_trades_val else None
+        max_duracion_val = getattr(config_module, 'DEFAULT_TREND_LIMIT_DURATION_MINUTES', 0) if use_config_defaults else current_op.tiempo_maximo_min
+        default_max_duracion = max_duracion_val if max_duracion_val else None
+        
         default_exit_val = current_op.valor_cond_salida
         
-        section_num_trading = 1 if is_modification else 3
+        section_num_trading = 3 if not is_modification else 1
         
         print(f"\n--- {section_num_trading}. Parámetros de Trading (Obligatorios) ---")
-        # --- INICIO DE LA MODIFICACIÓN: Llamadas a get_input sin disable_value ---
-        base_size = get_input("Tamaño base (USDT)", float, default=default_base_size)
+        base_size = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01)
+        print(f"  -> Tamaño Base establecido en: {base_size:.2f} USDT")
         params_to_update['tamaño_posicion_base_usdt'] = base_size
-        max_pos = get_input("Máx. posiciones", int, default=default_max_pos)
+        max_pos = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1)
+        print(f"  -> Máx. Posiciones establecido en: {max_pos}")
         params_to_update['max_posiciones_logicas'] = max_pos
-        leverage = get_input("Apalancamiento", float, default=default_leverage)
+        leverage = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
+        print(f"  -> Apalancamiento establecido en: {leverage:.1f}x")
         params_to_update['apalancamiento'] = leverage
-        # --- FIN DE LA MODIFICACIÓN ---
 
         section_num_risk = section_num_trading + 1
         print(f"\n--- {section_num_risk}. Riesgo por Posición (Opcional) ---")
-        tsl_act = get_input("Activación TSL (%)", float, default=default_tsl_act, disable_value=0.0)
+        tsl_act = get_input("Activación TSL (%)", float, default=default_tsl_act, disable_value=None)
+        print(f"  -> Activación TSL: {'DESACTIVADO' if tsl_act is None else f'{tsl_act}%'}")
         params_to_update['tsl_activacion_pct'] = tsl_act
-        tsl_dist = get_input("Distancia TSL (%)", float, default=default_tsl_dist, disable_value=0.0)
+        tsl_dist = get_input("Distancia TSL (%)", float, default=default_tsl_dist, disable_value=None)
+        print(f"  -> Distancia TSL: {'DESACTIVADO' if tsl_dist is None else f'{tsl_dist}%'}")
         params_to_update['tsl_distancia_pct'] = tsl_dist
-        sl_ind = get_input("SL individual (%)", float, default=default_sl_ind, disable_value=0.0)
+        sl_ind = get_input("SL individual (%)", float, default=default_sl_ind, disable_value=None)
+        print(f"  -> SL Individual: {'DESACTIVADO' if sl_ind is None else f'{sl_ind}%'}")
         params_to_update['sl_posicion_individual_pct'] = sl_ind
         
         section_num_limits = section_num_risk + 1
         print(f"\n--- {section_num_limits}. Condiciones de Salida por Límites (Opcional) ---")
         tp_roi = get_input("TP por ROI (%)", float, default=default_tp_roi, disable_value=None)
+        print(f"  -> TP por ROI: {'DESACTIVADO' if tp_roi is None else f'{tp_roi}%'}")
         params_to_update['tp_roi_pct'] = tp_roi
         sl_roi = get_input("SL por ROI (%)", float, default=default_sl_roi, disable_value=None)
+        print(f"  -> SL por ROI: {'DESACTIVADO' if sl_roi is None else f'{sl_roi}%'}")
         params_to_update['sl_roi_pct'] = sl_roi
-        max_trades = get_input("Máx. trades", int, default=default_max_trades, disable_value=None)
+        max_trades = get_input("Máx. trades", int, default=default_max_trades, min_val=1, disable_value=None)
+        print(f"  -> Máx. Trades: {'DESACTIVADO' if max_trades is None else max_trades}")
         params_to_update['max_comercios'] = max_trades
-        max_duracion = get_input("Duración máx. (min)", int, default=default_max_duracion, disable_value=None)
+        max_duracion = get_input("Duración máx. (min)", int, default=default_max_duracion, min_val=1, disable_value=None)
+        print(f"  -> Duración Máx.: {'DESACTIVADA' if max_duracion is None else f'{max_duracion} min'}")
         params_to_update['tiempo_maximo_min'] = max_duracion
 
         section_num_exit_price = section_num_limits + 1
         print(f"\n--- {section_num_exit_price}. Condición de Salida por Precio (Opcional) ---")
-        exit_cond_choice = TerminalMenu(["[1] Salir si Precio SUPERIOR a", "[2] Salir si Precio INFERIOR a", "[3] Sin condición de precio"], title="Añadir/Modificar condición de salida por precio:").show()
+        exit_cond_choice = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si Precio SUPERIOR a", "[3] Salir si Precio INFERIOR a"], title="Añadir/Modificar condición de salida por precio:").show()
         if exit_cond_choice == 0:
-            params_to_update['tipo_cond_salida'] = 'PRICE_ABOVE'
-            params_to_update['valor_cond_salida'] = get_input("Salir si precio SUPERA", float, default=default_exit_val)
+            params_to_update['tipo_cond_salida'], params_to_update['valor_cond_salida'] = None, None
+            print("  -> Condición de Salida por Precio: DESACTIVADA")
         elif exit_cond_choice == 1:
-            params_to_update['tipo_cond_salida'] = 'PRICE_BELOW'
-            params_to_update['valor_cond_salida'] = get_input("Salir si precio BAJA DE", float, default=default_exit_val)
+            params_to_update['tipo_cond_salida'] = 'PRICE_ABOVE'
+            val = get_input("Salir si precio SUPERA", float, default=default_exit_val)
+            params_to_update['valor_cond_salida'] = val
+            print(f"  -> Condición de Salida por Precio: > {val}")
         elif exit_cond_choice == 2:
-            params_to_update['tipo_cond_salida'] = None
-            params_to_update['valor_cond_salida'] = None
+            params_to_update['tipo_cond_salida'] = 'PRICE_BELOW'
+            val = get_input("Salir si precio BAJA DE", float, default=default_exit_val)
+            params_to_update['valor_cond_salida'] = val
+            print(f"  -> Condición de Salida por Precio: < {val}")
             
     except UserInputCancelled:
         print("\n\nAsistente de configuración cancelado.")
@@ -270,7 +300,7 @@ def _operation_setup_wizard(pm_api: Any, current_op: Operacion, is_modification:
         print("\nNo se realizaron cambios."); time.sleep(1.5)
         return
 
-    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"]).show() == 0:
+    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"], title="\n¿Guardar estos cambios?", **MENU_STYLE).show() == 0:
         success, msg = pm_api.create_or_update_operation(params_to_update)
         print(f"\n{msg}"); time.sleep(2)
         

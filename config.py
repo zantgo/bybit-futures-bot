@@ -80,18 +80,18 @@ POSITION_MIN_TRANSFER_AMOUNT_USDT = 0.001
 POSITION_COMMISSION_RATE = 0.001
 
 #-- Risk Management: Default Trend & Position Parameters ---
-# Estos son los valores por defecto que se mostrarán en la TUI al crear un nuevo Hito.
+# Estos son los valores por defecto que se mostrarán en la TUI al crear un nuevo OPERACION.
 
-# Defaults para el Riesgo de Posiciones Individuales (dentro de una tendencia)
-DEFAULT_TREND_INDIVIDUAL_SL_PCT = 10.0
+# Defaults para el Riesgo de Posiciones Individuales (dentro de una OPERACION)
+DEFAULT_TREND_INDIVIDUAL_SL_PCT = 10.0 
 DEFAULT_TREND_TS_ACTIVATION_PCT = 0.4
 DEFAULT_TREND_TS_DISTANCE_PCT = 0.1
 
-# Defaults para los Límites de Finalización de Tendencia
+# Defaults para los Límites de Finalización de OPERACION
 DEFAULT_TREND_LIMIT_TRADE_COUNT = 0     # 0 para ilimitado
 DEFAULT_TREND_LIMIT_DURATION_MINUTES = 0 # 0 para ilimitado
 DEFAULT_TREND_LIMIT_TP_ROI_PCT = 2.5    # 0 para desactivado
-DEFAULT_TREND_LIMIT_SL_ROI_PCT = -1.5   # 0 para desactivado. ¡Nota: Debe ser negativo!
+DEFAULT_TREND_LIMIT_SL_ROI_PCT = -1.5   # 0 para desactivado.
 
 # --- Session Limits (Circuit Breakers) ---
 SESSION_STOP_LOSS_ROI_PCT = 20.0
