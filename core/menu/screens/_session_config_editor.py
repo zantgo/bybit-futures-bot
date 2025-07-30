@@ -1,11 +1,5 @@
 """
-Módulo para la Pantalla de Edición de Configuración.
-
-v4.0 (Arquitectura de Controladores):
-- Refactorizado para tener menús distintos y claros para los contextos
-  'general' (BotController) y 'session' (SessionManager).
-- La lógica de aplicación de cambios se simplifica, ya que los controladores
-  serán responsables de propagar las actualizaciones a sus componentes hijos.
+Módulo para la Pantalla de Edición de Configuración de la Sesión.
 """
 from typing import Any, Dict
 import time
@@ -19,7 +13,6 @@ except ImportError:
 from .._helpers import (
     get_input,
     MENU_STYLE,
-    press_enter_to_continue,
     show_help_popup,
     UserInputCancelled
 )
@@ -32,39 +25,25 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- LÓGICA DE LA PANTALLA PRINCIPAL ---
+# --- LÓGICA PRINCIPAL ---
 
-def show_config_editor_screen(config_module: Any, context: str) -> bool:
+def show_session_config_editor_screen(config_module: Any) -> bool:
     """
-    Muestra la pantalla de edición para un contexto específico ('general' o 'session')
-    y devuelve True si se guardaron cambios.
+    Muestra la pantalla de edición de configuración de sesión y devuelve True si se guardaron cambios.
     """
     logger = _deps.get("memory_logger_module")
     if not TerminalMenu:
-        if logger:
-            logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
-        print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return False
+        if logger: logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
+        return False
 
-    # Crear una copia temporal de la configuración para editar de forma segura
-    class TempConfig:
-        pass
+    class TempConfig: pass
     temp_config = TempConfig()
     for attr in dir(config_module):
         if attr.isupper() and not attr.startswith('_'):
-            value = getattr(config_module, attr)
-            if not callable(value):
-                setattr(temp_config, attr, copy.deepcopy(value))
+            setattr(temp_config, attr, copy.deepcopy(getattr(config_module, attr)))
 
-    # Lanzar el menú correspondiente al contexto
-    if context == 'general':
-        changes_made = _show_general_config_menu(temp_config)
-    elif context == 'session':
-        changes_made = _show_session_config_menu(temp_config)
-    else:
-        print(f"Error: Contexto de editor desconocido: '{context}'"); time.sleep(2)
-        return False
+    changes_made = _show_session_config_menu(temp_config)
 
-    # Si se guardaron cambios, aplicarlos a la configuración real
     if changes_made:
         _apply_changes_to_real_config(temp_config, config_module, logger)
         return True
@@ -76,61 +55,15 @@ def show_config_editor_screen(config_module: Any, context: str) -> bool:
 def _apply_changes_to_real_config(temp_cfg: Any, real_cfg: Any, logger: Any):
     """Compara la config temporal con la real, aplica los cambios y los loguea."""
     if not logger: return
-
-    logger.log("Aplicando cambios de configuración desde la TUI...", "WARN")
-    changes_found = False
-
+    logger.log("Aplicando cambios de configuración de sesión...", "WARN")
     for attr in dir(temp_cfg):
-        if not attr.startswith('__') and not callable(getattr(temp_cfg, attr)):
+        if attr.isupper() and not attr.startswith('_'):
             new_value = getattr(temp_cfg, attr)
-            old_value = getattr(real_cfg, attr, None)
-            
-            if new_value != old_value:
-                changes_found = True
-                logger.log(f"  -> {attr}: '{old_value}' -> '{new_value}'", "WARN")
+            if hasattr(real_cfg, attr) and new_value != getattr(real_cfg, attr):
+                logger.log(f"  -> {attr}: '{getattr(real_cfg, attr)}' -> '{new_value}'", "WARN")
                 setattr(real_cfg, attr, new_value)
 
-    if not changes_found:
-        logger.log("No se detectaron cambios en la configuración.", "INFO")
-
-# --- MENÚS PRINCIPALES POR CONTEXTO ---
-
-def _show_general_config_menu(temp_cfg: Any) -> bool:
-    """Muestra el menú principal para editar la configuración general del bot."""
-    while True:
-        menu_items = [
-            f"[1] Exchange (Actual: {getattr(temp_cfg, 'EXCHANGE_NAME', 'N/A')})",
-            f"[2] Modo Testnet (Actual: {'Activado' if getattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False) else 'Desactivado'})",
-            None,
-            "[h] Ayuda",
-            None,
-            "[s] Guardar y Volver",
-            "[c] Cancelar (Descartar Cambios)"
-        ]
-        action_map = {0: 'exchange', 1: 'testnet', 3: 'help', 5: 'save', 6: 'cancel'}
-        
-        menu = TerminalMenu(menu_items, title="Editor de Configuración General", **MENU_STYLE)
-        choice = menu.show()
-        action = action_map.get(choice)
-
-        try:
-            if action == 'exchange':
-                # En el futuro, podría ser un menú si se soportan más exchanges.
-                new_val = get_input("\nNuevo Exchange (ej. bybit)", str, getattr(temp_cfg, 'EXCHANGE_NAME', 'bybit'))
-                setattr(temp_cfg, 'EXCHANGE_NAME', new_val.lower())
-            elif action == 'testnet':
-                current_val = getattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False)
-                setattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', not current_val)
-            elif action == 'help':
-                show_help_popup("config_editor")
-            elif action == 'save':
-                print("\nCambios guardados."); time.sleep(1.5)
-                return True
-            elif action == 'cancel' or choice is None:
-                print("\nCambios descartados."); time.sleep(1.5)
-                return False
-        except UserInputCancelled:
-            print("\n\nEdición cancelada por el usuario."); time.sleep(1)
+# --- MENÚ DE EDICIÓN ---
 
 def _show_session_config_menu(temp_cfg: Any) -> bool:
     """Muestra el menú principal para editar la configuración de una sesión."""
@@ -149,8 +82,10 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
         action_map = {0: 'ticker', 1: 'strategy', 2: 'capital', 3: 'limits', 5: 'help', 7: 'save', 8: 'cancel'}
 
         menu = TerminalMenu(menu_items, title="Editor de Configuración de Sesión", **MENU_STYLE)
-        choice = menu.show()
-        action = action_map.get(choice)
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        action = action_map.get(menu.show())
+        # --- FIN DE LA CORRECCIÓN ---
 
         if action == 'ticker': _show_ticker_config_menu(temp_cfg)
         elif action == 'strategy': _show_strategy_config_menu(temp_cfg)
@@ -158,20 +93,17 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
         elif action == 'limits': _show_session_limits_menu(temp_cfg)
         elif action == 'help': show_help_popup("config_editor")
         elif action == 'save':
-            print("\nCambios guardados."); time.sleep(1.5)
-            return True
-        elif action == 'cancel' or choice is None:
-            print("\nCambios descartados."); time.sleep(1.5)
-            return False
+            print("\nCambios guardados."); time.sleep(1.5); return True
+        elif action == 'cancel' or action is None:
+            print("\nCambios descartados."); time.sleep(1.5); return False
 
-# --- SUBMENÚS DE EDICIÓN (Lógica de bajo nivel, sin cambios) ---
-
+# --- SUBMENÚS DE EDICIÓN ---
 def _show_ticker_config_menu(cfg: Any):
     try:
         while True:
             menu_items = [
                 f"[1] Símbolo del Ticker (Actual: {getattr(cfg, 'TICKER_SYMBOL', 'N/A')})",
-                f"[2] Intervalo de Estrategia (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
+                f"[2] Intervalo (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
                 None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Configuración del Ticker", **MENU_STYLE)
@@ -180,10 +112,11 @@ def _show_ticker_config_menu(cfg: Any):
                 new_val = get_input("\nNuevo Símbolo (ej. ETHUSDT)", str, getattr(cfg, 'TICKER_SYMBOL', 'N/A'))
                 setattr(cfg, 'TICKER_SYMBOL', new_val.upper())
             elif choice == 1:
-                new_val = get_input("\nNuevo Intervalo (segundos, ej. 1, 5)", float, getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1), min_val=0.1)
+                new_val = get_input("\nNuevo Intervalo (segundos)", float, getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1), min_val=0.1)
                 setattr(cfg, 'TICKER_INTERVAL_SECONDS', new_val)
             else: break
     except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
+
 
 def _show_strategy_config_menu(cfg: Any):
     try:

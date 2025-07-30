@@ -162,24 +162,24 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
 
 # --- Funciones de _triggers.py ---
 def check_conditional_triggers(current_price: float, timestamp: datetime.datetime):
-    if not (pm_api and pm_api.is_initialized() and om_api and om_api.is_initialized()):
+    if not (pm_api and pm_api.api.is_initialized() and om_api and om_api.api.is_initialized()):
         return
 
     try:
-        operacion = om_api.get_operation()
+        operacion = om_api.api.get_operation()
         if not operacion: return
 
         if operacion.estado == 'EN_ESPERA':
             condition_met, reason = _evaluate_entry_condition(operacion, current_price)
             if condition_met:
                 memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA: {reason}", "INFO")
-                om_api.force_start_operation()
+                om_api.api.force_start_operation()
 
         elif operacion.estado == 'ACTIVA':
             condition_met, reason = _evaluate_exit_conditions(operacion, current_price)
             if condition_met:
                 memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA: {reason}", "INFO")
-                om_api.force_stop_operation()
+                om_api.api.force_stop_operation()
     except Exception as e:
         memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
@@ -193,7 +193,7 @@ def _evaluate_entry_condition(operacion: 'Operacion', current_price: float) -> T
     return False, ""
 
 def _evaluate_exit_conditions(operacion: 'Operacion', current_price: float) -> Tuple[bool, str]:
-    summary = pm_api.get_position_summary()
+    summary = pm_api.api.get_position_summary()
     if summary and 'error' not in summary:
         roi = summary.get('operation_roi', 0.0)
         if operacion.tp_roi_pct is not None and roi >= operacion.tp_roi_pct: return True, f"TP-ROI alcanzado ({roi:.2f}%)"
@@ -236,12 +236,12 @@ def _process_tick_and_generate_signal(timestamp: datetime.datetime, price: float
 # --- Funciones de _limit_checks.py ---
 def _check_session_limits(current_price: float, timestamp: datetime.datetime, op_mode: str, stop_event: Optional[threading.Event]):
     global _global_stop_loss_triggered
-    if not (pm_api and pm_api.is_initialized()) or _global_stop_loss_triggered: return
+    if not (pm_api and pm_api.api.is_initialized()) or _global_stop_loss_triggered: return
 
     # Lógica de límite de tiempo de sesión
-    time_limit_cfg = pm_api.get_session_time_limit()
+    time_limit_cfg = pm_api.api.get_session_time_limit()
     max_minutes, action = time_limit_cfg.get("duration", 0), time_limit_cfg.get("action", "NEUTRAL").upper()
-    start_time = pm_api.get_session_start_time()
+    start_time = pm_api.api.get_session_start_time()
     if start_time and max_minutes > 0:
         elapsed_minutes = (timestamp - start_time).total_seconds() / 60.0
         if elapsed_minutes >= max_minutes:
@@ -249,38 +249,38 @@ def _check_session_limits(current_price: float, timestamp: datetime.datetime, op
                 _global_stop_loss_triggered = True
                 msg = f"LÍMITE DE TIEMPO DE SESIÓN (STOP) ALCANZADO ({elapsed_minutes:.2f} >= {max_minutes} min)"
                 memory_logger.log(msg, "ERROR")
-                pm_api.close_all_logical_positions('long', "TIME_LIMIT_STOP")
-                pm_api.close_all_logical_positions('short', "TIME_LIMIT_STOP")
+                pm_api.api.close_all_logical_positions('long', "TIME_LIMIT_STOP")
+                pm_api.api.close_all_logical_positions('short', "TIME_LIMIT_STOP")
                 if stop_event: stop_event.set()
                 raise GlobalStopLossException(msg)
-            elif not pm_api.is_session_tp_hit():
+            elif not pm_api.api.is_session_tp_hit():
                 memory_logger.log(f"LÍMITE DE TIEMPO DE SESIÓN (NEUTRAL) ALCANZADO", "INFO")
                 # El PM ahora es responsable de cambiar su estado interno a "neutral"
-                # pm_api.set_session_tp_hit(True)
+                # pm_api.api.set_session_tp_hit(True)
 
     # Lógica de límites de ROI de sesión
-    summary = pm_api.get_position_summary()
+    summary = pm_api.api.get_position_summary()
     initial_capital = summary.get('initial_total_capital', 0.0)
     if initial_capital < 1e-9: return
 
-    unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
+    unrealized_pnl = pm_api.api.get_unrealized_pnl(current_price)
     realized_pnl = summary.get('total_realized_pnl_session', 0.0)
     current_roi = utils.safe_division(realized_pnl + unrealized_pnl, initial_capital) * 100.0
 
-    if getattr(config, 'SESSION_ROI_TP_ENABLED', False) and not pm_api.is_session_tp_hit():
-        tp_pct = pm_api.get_global_tp_pct()
+    if getattr(config, 'SESSION_ROI_TP_ENABLED', False) and not pm_api.api.is_session_tp_hit():
+        tp_pct = pm_api.api.get_global_tp_pct()
         if tp_pct and tp_pct > 0 and current_roi >= tp_pct:
             memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
-            # pm_api.set_session_tp_hit(True)
+            # pm_api.api.set_session_tp_hit(True)
 
     if getattr(config, 'SESSION_ROI_SL_ENABLED', False):
-        sl_pct = pm_api.get_global_sl_pct()
+        sl_pct = pm_api.api.get_global_sl_pct()
         if sl_pct and sl_pct > 0 and current_roi <= -abs(sl_pct):
             _global_stop_loss_triggered = True
             msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ALCANZADO ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
             memory_logger.log(msg, "ERROR")
-            pm_api.close_all_logical_positions('long', "GLOBAL_SL_ROI")
-            pm_api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
+            pm_api.api.close_all_logical_positions('long', "GLOBAL_SL_ROI")
+            pm_api.api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
             if stop_event: stop_event.set()
             raise GlobalStopLossException(msg)
 
@@ -292,7 +292,7 @@ def _print_tick_status_to_console(signal_data: Dict, timestamp: datetime.datetim
             price_prec = getattr(config, 'PRICE_PRECISION', 4)
             price_str = f"{price:.{price_prec}f}"
             
-            summary = pm_api.get_position_summary()
+            summary = pm_api.api.get_position_summary()
             op_status = summary.get('operation_status', {})
             op_tendencia = op_status.get('tendencia', 'NEUTRAL')
             max_pos = op_status.get('max_posiciones_logicas', 'N/A')

@@ -21,7 +21,7 @@ from .._helpers import (
     print_tui_header,
 )
 from .. import _helpers as helpers_module
-from . import _config_editor, _log_viewer, operation_manager, _position_viewer
+from . import _log_viewer, operation_manager, _position_viewer
 
 try:
     from core.exchange._models import StandardBalance
@@ -41,6 +41,8 @@ def init(dependencies: Dict[str, Any]):
 
 # --- Lógica Principal de la Pantalla ---
 def show_dashboard_screen(session_manager: Any):
+    from ._session_config_editor import show_session_config_editor_screen
+
     """
     Muestra el dashboard y gestiona el ciclo de vida de la sesión de trading.
 
@@ -183,7 +185,7 @@ def show_dashboard_screen(session_manager: Any):
         elif action == 'manage_positions':
             _position_viewer.show_position_viewer_screen(pm_api)
         elif action == 'edit_config':
-            changes_saved = _config_editor.show_config_editor_screen(config_module, context='session')
+            changes_saved = _config_editor.show_session_config_editor_screen(config_module)
             if changes_saved:
                 # Si se guardaron cambios, los notificamos al SessionManager para que los aplique
                 # Esta es una simplificación; idealmente, el editor devolvería los cambios.

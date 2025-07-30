@@ -17,10 +17,6 @@ except NameError:
     PROJECT_ROOT = os.path.abspath(os.getcwd())
     print(f"Advertencia [config]: __file__ no definido, usando CWD como PROJECT_ROOT: {PROJECT_ROOT}")
 
-# --- Exchange Configuration (NUEVO) ---
-# Define qué adaptador de exchange cargar. Opciones: "bybit"
-EXCHANGE_NAME = "bybit"
-
 # --- Log Level Configuration ---
 # Define el nivel de detalle de los logs. Opciones: "DEBUG", "INFO", "WARN", "ERROR"
 LOG_LEVEL = "INFO"
@@ -44,6 +40,11 @@ ACCOUNT_UID_ENV_VAR_MAP = {
     ACCOUNT_PROFIT: "BYBIT_PROFIT_UID",
 }
 ACCOUNTS_TO_INITIALIZE = [ACCOUNT_MAIN, ACCOUNT_LONGS, ACCOUNT_SHORTS, ACCOUNT_PROFIT]
+
+# --- Exchange Configuration (NUEVO) ---
+# Define qué adaptador de exchange cargar. Opciones: "bybit"
+EXCHANGE_NAME = "bybit"
+PAPER_TRADING_MODE = False
 
 # --- General API Settings ---
 UNIVERSAL_TESTNET_MODE = False

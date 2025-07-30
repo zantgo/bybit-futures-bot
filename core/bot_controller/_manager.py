@@ -21,9 +21,6 @@ try:
     # Módulos de soporte que el BotController utiliza
     from core.logging import memory_logger
     from core.api import trading as trading_api
-    # --- INICIO DE LA MODIFICACIÓN: Se elimina la importación global de core.api ---
-    # from core import api as core_api 
-    # --- FIN DE LA MODIFICACIÓN ---
     from connection import manager as connection_manager
     from core.menu._helpers import get_input, UserInputCancelled
 
@@ -73,23 +70,47 @@ class BotController:
         """Indica si las conexiones API han sido inicializadas con éxito."""
         return self._connections_initialized
 
+    # =================== INICIO DE LA MODIFICACIÓN ===================
+    # Esta función ahora es más verbosa para mostrar el progreso una por una.
     def initialize_connections(self) -> Tuple[bool, str]:
-        """Orquesta la inicialización y validación de todas las cuentas API."""
+        """
+        Orquesta la inicialización y validación de todas las cuentas API,
+        mostrando el progreso en la consola.
+        """
         if self._connections_initialized:
             return True, "Las conexiones ya han sido validadas previamente."
 
         memory_logger.log("BotController: Iniciando validación de conexiones...", "INFO")
+        
+        # Aunque llamamos a una función que inicializa todo, mostraremos el resultado
+        # individualmente para una mejor UX.
         try:
             self._connection_manager.initialize_all_clients()
-            self._active_clients = {
-                name: self._connection_manager.get_client(name)
-                for name in self._connection_manager.get_initialized_accounts()
-            }
-            if not self._active_clients:
-                 return False, "No se inicializó ninguna cuenta API."
+            
+            accounts_to_check = getattr(self._config, 'ACCOUNTS_TO_INITIALIZE', [])
+            successful_accounts = self._connection_manager.get_initialized_accounts()
+
+            if not accounts_to_check:
+                return False, "No hay cuentas configuradas para inicializar."
+
+            print("-" * 80)
+            for account_name in accounts_to_check:
+                if account_name in successful_accounts:
+                    print(f"  ✓ Conexión para '{account_name}': ÉXITO")
+                    self._active_clients[account_name] = self._connection_manager.get_client(account_name)
+                else:
+                    print(f"  ✗ Conexión para '{account_name}': FALLO")
+            print("-" * 80)
+
+            if not successful_accounts:
+                self._connections_initialized = False
+                error_msg = "Error: No se pudo establecer conexión con NINGUNA cuenta."
+                memory_logger.log(error_msg, "ERROR")
+                return False, error_msg
 
             self._connections_initialized = True
-            msg = "Conexiones API inicializadas con éxito."
+            msg = "Validación completada. Al menos una conexión fue exitosa."
+            time.sleep(3)
             memory_logger.log(f"BotController: {msg}", "INFO")
             return True, msg
 
@@ -100,23 +121,22 @@ class BotController:
             return False, str(e)
         except Exception as e:
             self._connections_initialized = False
-            error_msg = f"Excepción inesperada de conexión: {e}"
+            error_msg = f"Excepción inesperada durante la conexión: {e}"
             memory_logger.log(error_msg, "ERROR")
             traceback.print_exc()
             return False, error_msg
+    # ==================== FIN DE LA MODIFICACIÓN =====================
 
     def get_balances(self) -> Optional[Dict[str, Dict[str, Any]]]:
         """Obtiene y devuelve los balances de todas las cuentas configuradas."""
         if not self._connections_initialized:
             return None
         
-        # --- INICIO DE LA MODIFICACIÓN: Importación local para romper dependencias ---
         from core import api as core_api
-        # --- FIN DE LA MODIFICACIÓN ---
 
         balances = {}
-        accounts_to_check = getattr(self._config, 'ACCOUNTS_TO_INITIALIZE', [])
-        for account_name in accounts_to_check:
+        # Usamos las cuentas que se inicializaron con éxito.
+        for account_name in self._active_clients.keys():
             balance_info = core_api.get_unified_account_balance_info(account_name)
             balances[account_name] = balance_info
         return balances
@@ -221,7 +241,11 @@ class BotController:
     def get_general_config(self) -> Dict[str, Any]:
         """Obtiene la configuración a nivel de aplicación."""
         if not self._config: return {}
-        return { 'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'), 'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False) }
+        return { 
+            'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
+            'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
+            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False) # <--- LÍNEA AÑADIDA
+        }
 
     def update_general_config(self, params: Dict[str, Any]) -> bool:
         """Actualiza la configuración a nivel de aplicación."""
