@@ -158,9 +158,17 @@ def _operation_setup_wizard(om_api: Any, current_op: Operacion, is_modification:
         print("\nNo se realizaron cambios."); time.sleep(1.5)
         return
 
-    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"], title="\n¿Guardar estos cambios?", **MENU_STYLE).show() == 0:
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Crea una copia local del estilo del menú para modificarlo sin afectar al resto de la aplicación.
+    confirm_menu_style = MENU_STYLE.copy()
+    # Desactiva la opción de borrar la pantalla para este menú específico.
+    confirm_menu_style['clear_screen'] = False
+
+    # Utiliza el nuevo estilo local en lugar del global.
+    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"], title="\n¿Guardar estos cambios?", **confirm_menu_style).show() == 0:
         success, msg = om_api.create_or_update_operation(params_to_update)
         print(f"\n{msg}"); time.sleep(2)
+    # --- FIN DE LA CORRECCIÓN ---
         
 def _force_stop_wizard(om_api: Any, pm_api: Any):
     """Asistente para forzar la finalización de la operación actual."""
