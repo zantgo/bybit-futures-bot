@@ -73,7 +73,6 @@ class _LifecycleManager:
         """Inyecta el executor después de la inicialización para romper la dependencia circular."""
         self._executor = executor
         
-    # --- INICIO DE LA CORRECCIÓN: Actualizar la firma del método ---
     def initialize(self, operation_mode: str):
         """
         Inicializa el estado del PositionManager para una nueva sesión.
@@ -95,7 +94,6 @@ class _LifecycleManager:
         
         self._initialized = True
         self._memory_logger.log("PositionManager inicializado. Gestionando estado de posiciones.", level="INFO")
-    # --- FIN DE LA CORRECCIÓN ---
 
     def _reset_all_states(self):
         """Resetea todos los atributos de estado del manager a sus valores iniciales."""

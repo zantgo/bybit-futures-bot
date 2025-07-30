@@ -12,6 +12,7 @@ import sys
 from typing import Optional, Dict, Tuple
 from pybit.unified_trading import HTTP
 import time
+import uuid
 # --- Dependencias del Proyecto ---
 import config
 from core.logging import memory_logger
@@ -141,7 +142,7 @@ def test_subaccount_transfers() -> Tuple[bool, str]:
         
         # --- Transferencia de Ida (Fuente -> Profit) ---
         try:
-            transfer_id_forward = f"bot_test_{source_account}_{int(time.time() * 1000)}"
+            transfer_id_forward = str(uuid.uuid4())
             print(f"  -> Probando: {source_account} -> {profit_account} ({test_amount} {coin})... ", end="")
             
             response_fwd = main_session.create_universal_transfer(
@@ -163,7 +164,7 @@ def test_subaccount_transfers() -> Tuple[bool, str]:
 
         # --- Transferencia de Vuelta (Profit -> Fuente) ---
         try:
-            transfer_id_backward = f"bot_test_return_{source_account}_{int(time.time() * 1000)}"
+            transfer_id_backward = str(uuid.uuid4())
             print(f"  -> Devolviendo: {profit_account} -> {source_account} ({test_amount} {coin})... ", end="")
 
             response_bwd = main_session.create_universal_transfer(

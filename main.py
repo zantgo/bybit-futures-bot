@@ -1,58 +1,27 @@
 """
 Punto de Entrada Principal del Bot de Trading.
 
-Este archivo es el lanzador de la aplicación. Su responsabilidad es:
-1. Importar todos los componentes y dependencias necesarios del bot.
-2. Ensamblar un diccionario de dependencias (Clases y Módulos).
-3. Inyectar estas dependencias en el orquestador principal (la TUI).
-4. Ceder el control total del ciclo de vida de la aplicación al paquete 'core.menu'.
+v4.0 (Arquitectura de Controladores):
+- Este archivo es el lanzador de la aplicación. Su responsabilidad es:
+1. Llamar al ensamblador de dependencias para obtener un diccionario con
+   todas las clases y módulos del sistema.
+2. Instanciar el controlador de más alto nivel (BotController).
+3. Inyectar el BotController en el orquestador de la TUI (launch_bot).
+4. Ceder el control total del ciclo de vida de la aplicación al paquete 'menu'.
 """
 import sys
-import os
 import traceback
 
 # --- Importaciones de Componentes y Dependencias ---
 try:
-    # Configuración y Utilidades
-    import config
-    from core import utils
-    
     # Paquete del Menú (TUI)
     from core.menu import launch_bot
     
-    # Paquete de la API (capa de bajo nivel para Bybit)
-    from core import api as live_operations
-    
     # Paquete de Logging
     from core import logging as logging_package
-    from core.logging import open_position_logger, closed_position_logger, signal_logger, memory_logger
-    
-    # Componentes de Estrategia
-    from core.strategy import ta
-    from core.strategy import event_processor
-    
-    # --- INICIO DE LA MODIFICACIÓN: Importar componentes del OM y PM ---
-    # Módulos del Operation Manager (OM)
-    from core.strategy.om import api as om_api_module
-    from core.strategy.om import OperationManager
 
-    # Módulos del Position Manager (PM)
-    from core.strategy.pm import api as pm_api_module
-    from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
-    from core.strategy.pm import _helpers as pm_helpers_module
-    from core.strategy.pm import _calculations as pm_calculations_module
-    # --- FIN DE LA MODIFICACIÓN ---
-
-    # Paquete de Conexión
-    from connection import manager as connection_manager
-    from connection import ticker as connection_ticker
-    
-    # Paquete Runner
-    from runner import initialize_bot_backend, shutdown_bot_backend
-    
-    # Capa de Abstracción de Exchange
-    from core.exchange import AbstractExchange
-    from core.exchange._bybit_adapter import BybitAdapter
+    # Paquete Runner (ahora solo para el ensamblador de dependencias)
+    from runner._initializer import assemble_dependencies
 
 except ImportError as e:
     print("="*80)
@@ -65,72 +34,50 @@ except ImportError as e:
 # --- Punto de Entrada Principal ---
 if __name__ == "__main__":
     """
-    Ensambla el diccionario de dependencias y lanza el controlador principal de la TUI.
+    Ensambla las dependencias, instancia el BotController y lanza la TUI.
     """
     
-    # Inicializar el sistema de logging asíncrono de archivos ANTES que cualquier otra cosa.
+    # 1. Inicializar el sistema de logging asíncrono de archivos PRIMERO.
     logging_package.initialize_loggers()
 
-    dependencies = {
-        # Módulos base
-        "config_module": config,
-        "utils_module": utils,
-        
-        # Módulos de bajo nivel (API y Conexión)
-        "connection_manager_module": connection_manager,
-        "connection_ticker_module": connection_ticker,
-        "live_operations_module": live_operations,
-        
-        # Módulos de logging
-        "logging_package": logging_package,
-        "memory_logger_module": memory_logger,
-        "open_snapshot_logger_module": open_position_logger,
-        "closed_position_logger_module": closed_position_logger,
-        "signal_logger_module": signal_logger,
-        
-        # Módulos de estrategia (los que no son del PM/OM)
-        "ta_manager_module": ta,
-        "event_processor_module": event_processor,
-        
-        # --- INICIO DE LA MODIFICACIÓN: Añadir dependencias del OM ---
-        # Fachada de la API del OM
-        "operation_manager_api_module": om_api_module,
-        # Clase del OM (para que el runner la instancie)
-        "OperationManager": OperationManager,
-        # --- FIN DE LA MODIFICACIÓN ---
-        
-        # Fachada de la API del PM
-        "position_manager_api_module": pm_api_module,
-        
-        # Clases del PM (para que el runner las instancie)
-        "PositionManager": PositionManager,
-        "BalanceManager": BalanceManager,
-        "PositionState": PositionState,
-        "PositionExecutor": PositionExecutor,
-        
-        # Módulos de soporte del PM
-        "pm_helpers_module": pm_helpers_module,
-        "pm_calculations_module": pm_calculations_module,
+    # 2. Ensamblar el diccionario de dependencias (clases y módulos).
+    # Esta función ahora solo recoge las "recetas", no cocina nada.
+    dependencies = assemble_dependencies()
+    
+    if not dependencies:
+        print("Fallo al ensamblar las dependencias. No se puede iniciar el bot.")
+        sys.exit(1)
 
-        # Funciones del Runner
-        "initialize_bot_backend": initialize_bot_backend,
-        "shutdown_bot_backend": shutdown_bot_backend,
-
-        # Clases de la capa de Exchange
-        "AbstractExchange": AbstractExchange,
-        "BybitAdapter": BybitAdapter,
-    }
-
+    # 3. Instanciar el controlador de más alto nivel (BotController).
+    # El BotController es el "cerebro" de la aplicación.
     try:
-        # Ceder el control total al lanzador del menú, inyectando todas las dependencias.
-        launch_bot(dependencies)
+        BotController = dependencies['BotController']
+        bot_controller_instance = BotController(dependencies)
+    except KeyError as e:
+        print(f"Error fatal: La dependencia '{e}' no fue encontrada por el ensamblador.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n!!! ERROR FATAL AL INSTANCIAR EL BOTCONTROLLER !!!")
+        print(f"  Mensaje: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+        
+    # 4. Ceder el control total al lanzador de la TUI.
+    # Ahora pasamos tanto la instancia del controlador como el diccionario de dependencias.
+    try:
+        launch_bot(bot_controller_instance, dependencies)
     except Exception as e:
         print("\n" + "="*80)
-        print("!!! ERROR FATAL EN EL LANZADOR PRINCIPAL !!!")
+        print("!!! ERROR FATAL NO CAPTURADO EN EL LANZADOR PRINCIPAL (main.py) !!!")
         print(f"  Tipo de Error: {type(e).__name__}")
         print(f"  Mensaje: {e}")
         print("-" * 80)
         traceback.print_exc()
         print("=" * 80)
-        print("El bot no pudo iniciarse. Saliendo.")
+        print("El bot se ha detenido de forma inesperada.")
+        
+        # Asegurar el apagado de los loggers en caso de un crash
+        if logging_package:
+            logging_package.shutdown_loggers()
+            
         sys.exit(1)

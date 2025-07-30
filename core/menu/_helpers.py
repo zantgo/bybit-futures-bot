@@ -1,34 +1,17 @@
 """
 Módulo de Ayuda para la TUI (Terminal User Interface).
 
-v3.9 (Corrección de Bucle Infinito en get_input):
-- Se ha corregido un bug que causaba un bucle infinito si el usuario
-  presionaba Enter en un campo opcional que no tenía un valor por defecto.
-- Ahora, si la entrada está vacía en un campo opcional, se interpreta
-  correctamente como una solicitud para desactivar ese campo.
+v4.2 (get_input Definitivo):
+- Refactorizada la función get_input para ser explícita en su comportamiento.
+- Se elimina el parámetro 'disable_value' y se introduce 'is_optional'.
+- Ahora maneja correctamente campos obligatorios con default, campos opcionales
+  y cancelación sin ambigüedades.
 """
-# (COMENTARIO) Docstring de la versión anterior (v3.8) para referencia:
-# """
-# Módulo de Ayuda para la TUI (Terminal User Interface).
-# 
-# v3.8 (get_input Final):
-# - La función `get_input` ahora es completamente dinámica.
-# - Muestra '[DESACTIVADO]' si el valor `default` es `None` para un campo opcional.
-# - Muestra la opción "[o 'd' para desactivar]" solo si el argumento `disable_value`
-#   es proporcionado, permitiendo tener campos obligatorios y opcionales.
-# - Se ha corregido la lógica de `min_val` para permitir valores negativos.
-# """
 import os
 import datetime
 from datetime import timezone
 import textwrap
 from typing import Dict, Any, Optional, Callable
-
-# --- Dependencias del Proyecto (importaciones seguras) ---
-try:
-    from core import _utils
-except ImportError:
-    _utils = None
 
 # --- Estilo Visual Consistente para simple-term-menu ---
 MENU_STYLE = {
@@ -90,52 +73,52 @@ class UserInputCancelled(Exception):
     """Excepción para ser lanzada cuando el usuario cancela un wizard de entrada."""
     pass
 
+# --- INICIO DE LA VERSIÓN CORREGIDA Y DEFINITIVA ---
 def get_input(
     prompt: str,
-    type_func: Callable = str,
+    type_func: Callable,
     default: Optional[Any] = None,
     min_val: Optional[float] = None,
     max_val: Optional[float] = None,
-    disable_value: Any = "<NOT_SET>"
+    is_optional: bool = False
 ) -> Any:
     """
     Función robusta para obtener entrada del usuario con validación.
+
+    Args:
+        is_optional (bool): Si es True, una entrada vacía devuelve None.
+                            Si es False, una entrada vacía usa el default o da error.
     """
-    is_disableable = disable_value != "<NOT_SET>"
-
     while True:
+        prompt_parts = [f"\n{prompt}"]
+        
+        default_display = default
+        if is_optional and default is None:
+            default_display = "DESACTIVADO"
+        
+        if default is not None:
+            prompt_parts.append(f"[{default_display}]")
+        
+        options = ["'c' para cancelar"]
+        if is_optional:
+            options.append("Enter para desactivar")
+            
+        prompt_parts.append(f"(o {', '.join(options)}):")
+        full_prompt = " ".join(prompt_parts) + " "
+        
         try:
-            prompt_full = f"{prompt}"
-            
-            default_display = default
-            if is_disableable and default is None:
-                default_display = "DESACTIVADO"
-            
-            if default is not None:
-                prompt_full += f" [{default_display}]"
-            
-            options = ["'c' para cancelar"]
-            if is_disableable:
-                options.append("'d' para desactivar")
-            prompt_full += f" [o {', '.join(options)}]: "
+            val_str = input(full_prompt).strip()
 
-            val_str = input(prompt_full).strip()
-            
             if val_str.lower() == 'c':
                 raise UserInputCancelled("Entrada cancelada por el usuario.")
 
-            if is_disableable and val_str.lower() == 'd':
-                return disable_value
-
-            # --- INICIO DE LA CORRECCIÓN: Manejo de entrada vacía ---
-            if not val_str:
+            if not val_str: # Usuario presionó Enter
+                if is_optional:
+                    return None # Desactivar campo opcional
                 if default is not None:
-                    return default
-                # Si no hay valor por defecto pero el campo es opcional,
-                # tratar Enter como una solicitud para desactivar.
-                if is_disableable:
-                    return disable_value
-            # --- FIN DE LA CORRECCIÓN ---
+                    return default # Usar default para campo obligatorio
+                print("Error: Este campo es obligatorio y no puede estar vacío.")
+                continue
 
             value = type_func(val_str)
 
@@ -145,14 +128,16 @@ def get_input(
             if max_val is not None and value > max_val:
                 print(f"Error: El valor no puede ser mayor que {max_val}.")
                 continue
-
+            
             return value
+
         except UserInputCancelled:
             raise
         except (ValueError, TypeError):
-            print(f"Error: Entrada inválida. Por favor, introduce un valor de tipo '{type_func.__name__}'.")
+            print(f"Error: Entrada inválida. Introduce un valor de tipo '{type_func.__name__}'.")
         except Exception as e:
             print(f"Error inesperado: {e}")
+# --- FIN DE LA VERSIÓN CORREGIDA Y DEFINITIVA ---
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):
     print(f"\n--- {title} {'-' * (76 - len(title))}")

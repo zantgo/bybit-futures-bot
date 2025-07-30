@@ -1,50 +1,60 @@
 """
-Módulo responsable de la secuencia de apagado limpio del bot.
+Módulo responsable de la secuencia de apagado limpio de una sesión de trading.
 
-Su única responsabilidad es detener hilos, guardar estados finales y
-liberar recursos de manera ordenada.
+v4.0 (Arquitectura de Controladores):
+- La responsabilidad de este módulo se ha redefinido. Ahora se centra en el
+  apagado de los componentes de una sesión específica, no de todo el bot.
+- La lógica es invocada por el BotController cuando una sesión termina.
+- Recibe la instancia del SessionManager para orquestar el apagado.
 """
 from typing import Any, Dict
 
-def perform_shutdown(
+def shutdown_session_backend(
+    session_manager: Any,
     final_summary: Dict[str, Any],
-    bot_started: bool,
-    # --- Módulos de dependencia inyectados ---
+    # --- Módulos de dependencia inyectados (para soporte) ---
     config_module: Any,
-    connection_ticker_module: Any,
-    position_manager_module: Any,
     open_snapshot_logger_module: Any
 ):
     """
-    Ejecuta la secuencia de limpieza y apagado del bot.
+    Ejecuta la secuencia de limpieza y apagado para una sesión de trading.
+    
+    Args:
+        session_manager: La instancia del SessionManager que está finalizando.
+        final_summary: Un diccionario para almacenar el resumen final.
+        config_module: El módulo de configuración.
+        open_snapshot_logger_module: El logger para el snapshot final.
     """
-    print("\n--- Limpieza Final del Runner ---")
+    print("\n--- Limpieza Final de la Sesión de Trading ---")
+    
+    if not session_manager:
+        print("Advertencia: No se proporcionó un SessionManager para el apagado.")
+        return
 
-    # 1. Detener el ticker de precios si estaba corriendo
-    if bot_started and connection_ticker_module:
-        print("Deteniendo el Ticker de precios...")
-        # La lógica de si está vivo o no está encapsulada en la función stop
-        connection_ticker_module.stop_ticker_thread()
+    # 1. Detener el ticker de precios de la sesión
+    # La responsabilidad de detener el ticker ahora es del SessionManager.
+    if session_manager.is_running():
+        print("Deteniendo el Ticker de precios de la sesión...")
+        session_manager.stop()
         print("Ticker detenido.")
 
-    # 2. Obtener y guardar el resumen final del Position Manager
-    if bot_started and getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
-        if not position_manager_module or not hasattr(position_manager_module, 'is_initialized') or not position_manager_module.is_initialized():
-            print("PM no inicializado, no se puede obtener resumen final.")
-        else:
-            print("Obteniendo resumen final del Position Manager...")
-            summary = position_manager_module.get_position_summary()
-            
-            if summary and not summary.get('error'):
-                final_summary.clear()
-                final_summary.update(summary)
+    # 2. Obtener y guardar el resumen final de la sesión
+    if getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
+        print("Obteniendo resumen final de la sesión...")
+        summary = session_manager.get_session_summary()
+        
+        if summary and not summary.get('error'):
+            final_summary.clear()
+            final_summary.update(summary)
 
-                if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-                    open_snapshot_logger_module.log_open_positions_snapshot(summary)
-                
-                print("Resumen final obtenido.")
-            else:
-                final_summary['error'] = 'No se pudo obtener el resumen final del PM.'
-                print(f"No se pudo obtener el resumen final del PM: {summary.get('error', 'Error desconocido')}")
+            # Loguear el snapshot final de posiciones abiertas si está configurado
+            if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
+                open_snapshot_logger_module.log_open_positions_snapshot(summary)
+            
+            print("Resumen final de la sesión obtenido.")
+        else:
+            final_summary['error'] = 'No se pudo obtener el resumen final de la sesión.'
+            error_msg = summary.get('error', 'Error desconocido')
+            print(f"No se pudo obtener el resumen final: {error_msg}")
     
-    print("Secuencia de apagado completada.")
+    print("Secuencia de apagado de la sesión completada.")

@@ -1,13 +1,15 @@
 """
 Controlador Principal del Ciclo de Vida de la TUI.
 
-v2.2: Implementa la recepción explícita del `exchange_adapter` desde el
-inicializador del backend. Esto resuelve la dependencia crítica para arrancar
-el ticker y completa la corrección del flujo de arranque.
+v4.0 (Arquitectura de Controladores):
+- Este módulo ya no orquesta el ciclo de vida del bot.
+- Su única responsabilidad es recibir la instancia del BotController, inicializar
+  las fachadas API de los componentes y lanzar la pantalla de bienvenida, que
+  actúa como la vista principal del BotController y contiene el bucle de la
+  aplicación.
 """
 import sys
 import os
-import time
 import traceback
 from typing import Dict, Any
 
@@ -16,99 +18,47 @@ try:
 except ImportError:
     TerminalMenu = None
 
+# --- Dependencias del Proyecto ---
 from . import screens
 from ._helpers import clear_screen, press_enter_to_continue
 
-_deps: Dict[str, Any] = {}
+# Importar las APIs que este controlador necesita inicializar
+from core.bot_controller import api as bc_api
+from core.strategy.sm import api as sm_api
 
-def launch_bot(dependencies: Dict[str, Any]):
+
+def launch_bot(bot_controller_instance: Any, dependencies: Dict[str, Any]):
     """
-    Punto de entrada principal para la TUI. Orquesta todo el ciclo de vida.
+    Punto de entrada principal para la TUI. Lanza la interfaz de usuario.
+    
+    Args:
+        bot_controller_instance: La instancia activa del BotController.
+        dependencies: El diccionario completo de dependencias del sistema.
     """
-    global _deps
     if not TerminalMenu:
         print("ERROR: La librería 'simple-term-menu' no está instalada.")
         sys.exit(1)
 
-    _deps = dependencies
-    
-    # --- PASO 1: LÓGICA DE PRE-INICIO ---
-    print("Inicializando gestor de conexiones y cargando credenciales API...")
     try:
-        connection_manager = _deps.get("connection_manager_module")
-        if connection_manager:
-            connection_manager.initialize_all_clients()
-        else:
-            raise RuntimeError("El módulo 'connection_manager' no fue inyectado.")
-        print("Gestor de conexiones inicializado.")
-        time.sleep(1)
-    except Exception as e:
-        print(f"ERROR FATAL: No se pudo inicializar el gestor de conexiones: {e}")
-        traceback.print_exc()
-        sys.exit(1)
-
-    if hasattr(screens, 'init_screens'):
-        screens.init_screens(dependencies)
-    
-    # --- PASO 2: PANTALLA DE BIENVENIDA Y DECISIÓN DEL USUARIO ---
-    if not screens.show_welcome_screen():
-        print("\nSalida solicitada por el usuario. ¡Hasta luego!")
-        sys.exit(0)
-
-    # --- PASO 3: CICLO DE VIDA DEL BOT ---
-    bot_started = False
-    try:
-        # --- 3a. Inicialización y Arranque del Backend ---
-        initialize_bot_backend = _deps.get("initialize_bot_backend")
-        if not initialize_bot_backend:
-            raise RuntimeError("La función 'initialize_bot_backend' no fue encontrada.")
-
-        config_module = _deps["config_module"]
-        base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 10.0)
-        initial_slots = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5)
-
-        # La función de inicialización ahora devuelve el adaptador creado.
-        success, message, exchange_adapter = initialize_bot_backend(
-            operation_mode="live_interactive",
-            base_size=base_size,
-            initial_slots=initial_slots,
-            **_deps
-        )
+        # 1. Inicializar las fachadas API
+        bc_api.init_bc_api(bot_controller_instance)
         
-        if not success:
-            raise RuntimeError(f"Fallo en la inicialización del backend: {message}")
-
-        # Inyectamos la instancia del adaptador en las dependencias para que esté disponible para las pantallas.
-        _deps['exchange_adapter'] = exchange_adapter
-
-        bot_started = True
-        print("\nComponentes Core del bot inicializados con éxito.")
+        # Las APIs de la sesión (SM, OM, PM) se inicializan dinámicamente
+        # cuando el BotController crea una nueva sesión.
         
-        # --- 3b. Arranque de Servicios en Segundo Plano (Ticker) ---
-        print("Iniciando servicios en segundo plano (Ticker de precios)...")
-        connection_ticker_module = _deps.get("connection_ticker_module")
-        event_processor_module = _deps.get("event_processor_module")
+        # 2. Inyectar dependencias en todas las pantallas de la TUI.
+        # Usamos el diccionario de dependencias que recibimos como argumento.
+        if hasattr(screens, 'init_screens'):
+            screens.init_screens(dependencies)
         
-        # Usamos el `exchange_adapter` que nos devolvió la función de inicialización.
-        if not all([connection_ticker_module, event_processor_module, exchange_adapter]):
-             raise RuntimeError("Dependencias críticas para el ticker no encontradas.")
-
-        connection_ticker_module.start_ticker_thread(
-            exchange_adapter=exchange_adapter,
-            raw_event_callback=event_processor_module.process_event
-        )
-        print("Ticker de precios operativo.")
-        time.sleep(1.5)
-
-        # --- 3c. Iniciar la Interfaz de Usuario (TUI) ---
-        screens.show_dashboard_screen()
+        # 3. Lanzar la pantalla de bienvenida, que ahora controla el flujo principal.
+        # Esta función contendrá su propio bucle y gestionará la creación de sesiones
+        # y el apagado del bot a través del BotController.
+        screens.show_welcome_screen(bot_controller_instance)
 
     except (KeyboardInterrupt, SystemExit):
         print("\n\n[Main Controller] Interrupción detectada. Saliendo de forma ordenada...")
-    except RuntimeError as e:
-        print(f"\nERROR CRÍTICO EN TIEMPO DE EJECUCIÓN: {e}")
-        traceback.print_exc()
-        press_enter_to_continue()
+        # El apagado final lo gestionará el BotController a través de la TUI.
     except Exception as e:
         clear_screen()
         print("\n" + "="*80)
@@ -120,28 +70,7 @@ def launch_bot(dependencies: Dict[str, Any]):
         print("=" * 80)
         press_enter_to_continue()
     finally:
-        # --- 4. Secuencia de Apagado Limpio ---
-        print("\n[Main Controller] Iniciando secuencia de apagado final...")
-        final_summary = {}
-        
-        shutdown_bot_backend_func = _deps.get("shutdown_bot_backend")
-        if shutdown_bot_backend_func:
-            shutdown_bot_backend_func(
-                final_summary=final_summary,
-                bot_started=bot_started,
-                config_module=_deps.get("config_module"),
-                connection_ticker_module=_deps.get("connection_ticker_module"),
-                position_manager_module=_deps.get("position_manager_api_module"),
-                open_snapshot_logger_module=_deps.get("open_snapshot_logger_module")
-            )
-        
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Apagar los hilos de logging de archivos de forma segura
-        logging_package = _deps.get("logging_package")
-        if logging_package and hasattr(logging_package, 'shutdown_loggers'):
-            print("[Main Controller] Deteniendo hilos de logging de archivos...")
-            logging_package.shutdown_loggers()
-        # --- FIN DE LA MODIFICACIÓN ---
-        
-        print("\nPrograma finalizado. ¡Hasta luego!")
+        # La lógica de apagado ahora es responsabilidad del BotController,
+        # invocada desde la TUI, por lo que este bloque `finally` se simplifica.
+        print("\n[Main Controller] Saliendo del programa. ¡Hasta luego!")
         os._exit(0)

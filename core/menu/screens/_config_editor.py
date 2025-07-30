@@ -1,21 +1,12 @@
 """
 Módulo para la Pantalla de Edición de Configuración.
 
-v3.6 (Manejo de Cancelación por Excepción):
-- Se actualiza el manejo de la entrada del usuario para usar el nuevo
-  sistema de `UserInputCancelled` en lugar de la clase `CancelInput`.
-- Todos los submenús de edición ahora capturan la excepción para permitir
-  una cancelación limpia del proceso de entrada.
+v4.0 (Arquitectura de Controladores):
+- Refactorizado para tener menús distintos y claros para los contextos
+  'general' (BotController) y 'session' (SessionManager).
+- La lógica de aplicación de cambios se simplifica, ya que los controladores
+  serán responsables de propagar las actualizaciones a sus componentes hijos.
 """
-# (COMENTARIO) Docstring de la versión anterior (v3.5) para referencia:
-# """
-# Módulo para la Pantalla de Edición de Configuración.
-# 
-# v3.5 (Refactor de Contexto):
-# - La función principal ahora acepta un 'context' ('general' o 'session').
-# - Muestra dinámicamente solo las opciones de configuración relevantes
-#   para el contexto proporcionado.
-# """
 from typing import Any, Dict
 import time
 import copy
@@ -25,40 +16,38 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- INICIO DE LA CORRECCIÓN: Importación actualizada ---
 from .._helpers import (
     get_input,
     MENU_STYLE,
     press_enter_to_continue,
     show_help_popup,
-    UserInputCancelled # Se importa la nueva excepción
+    UserInputCancelled
 )
-# (COMENTARIO) Importación anterior para referencia histórica.
-# from .._helpers import CancelInput
-# --- FIN DE LA CORRECCIÓN ---
 
+# --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
+    """Recibe las dependencias inyectadas desde el controlador principal."""
     global _deps
     _deps = dependencies
 
 # --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
-def show_config_editor_screen(config_module: Any, context: str = 'session') -> bool:
+def show_config_editor_screen(config_module: Any, context: str) -> bool:
     """
-    Muestra la pantalla de edición y devuelve True si se guardaron cambios.
-    Acepta un 'context' para mostrar diferentes menús.
+    Muestra la pantalla de edición para un contexto específico ('general' o 'session')
+    y devuelve True si se guardaron cambios.
     """
     logger = _deps.get("memory_logger_module")
     if not TerminalMenu:
         if logger:
-            logger.log("Error: 'simple-term-menu' no está instalado. No se puede mostrar el editor.", level="ERROR")
+            logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return False
 
+    # Crear una copia temporal de la configuración para editar de forma segura
     class TempConfig:
         pass
-    
     temp_config = TempConfig()
     for attr in dir(config_module):
         if attr.isupper() and not attr.startswith('_'):
@@ -66,75 +55,25 @@ def show_config_editor_screen(config_module: Any, context: str = 'session') -> b
             if not callable(value):
                 setattr(temp_config, attr, copy.deepcopy(value))
 
-    while True:
-        if context == 'general':
-            title = "Editor de Configuración General del Bot"
-            menu_items = [
-                "[1] Configuración del Ticker",
-                "[2] Parámetros de la Estrategia (TA y Señal)",
-                None,
-                "[h] Ayuda sobre el Editor de Configuración",
-                None,
-                "[b] Guardar y Volver",
-                "[c] Cancelar (Descartar Cambios)"
-            ]
-            action_map = {
-                0: 'ticker', 1: 'strategy',
-                3: 'help', 5: 'save_back', 6: 'cancel_back'
-            }
-        elif context == 'session':
-            title = "Editor de Configuración de la Sesión"
-            menu_items = [
-                "[1] Gestión de Posiciones (Capital)",
-                "[2] Límites de la Sesión (Disyuntores)",
-                None,
-                "[h] Ayuda sobre el Editor de Configuración",
-                None,
-                "[b] Guardar y Volver",
-                "[c] Cancelar (Descartar Cambios)"
-            ]
-            action_map = {
-                0: 'capital', 1: 'limits',
-                3: 'help', 5: 'save_back', 6: 'cancel_back'
-            }
-        else:
-            print(f"Error: Contexto de editor de configuración desconocido: '{context}'"); time.sleep(2); return False
+    # Lanzar el menú correspondiente al contexto
+    if context == 'general':
+        changes_made = _show_general_config_menu(temp_config)
+    elif context == 'session':
+        changes_made = _show_session_config_menu(temp_config)
+    else:
+        print(f"Error: Contexto de editor desconocido: '{context}'"); time.sleep(2)
+        return False
 
-        main_menu = TerminalMenu(menu_items, title=title, **MENU_STYLE)
-        choice_index = main_menu.show()
-        
-        action = action_map.get(choice_index)
+    # Si se guardaron cambios, aplicarlos a la configuración real
+    if changes_made:
+        _apply_changes_to_real_config(temp_config, config_module, logger)
+        return True
+    
+    return False
 
-        if action == 'ticker':
-            _show_ticker_config_menu(temp_config)
-        elif action == 'strategy':
-            _show_strategy_config_menu(temp_config)
-        elif action == 'capital':
-            _show_pm_capital_config_menu(temp_config)
-        elif action == 'limits':
-            _show_session_limits_menu(temp_config)
-        elif action == 'help':
-            show_help_popup("config_editor")
-        
-        elif action == 'save_back':
-            pm_api = _deps.get("position_manager_api_module")
-            _apply_and_log_changes(temp_config, config_module, pm_api, logger)
-            if logger:
-                logger.log("Cambios guardados y aplicados en la sesión.", level="INFO")
-            print("\nCambios guardados y aplicados en la sesión.")
-            time.sleep(1.5)
-            return True
-            
-        elif action == 'cancel_back' or choice_index is None:
-            if logger:
-                logger.log("Cambios en la configuración descartados.", level="INFO")
-            print("\nCambios descartados.")
-            time.sleep(1.5)
-            return False
+# --- Lógica de Aplicación de Cambios ---
 
-# --- Lógica de Aplicación de Cambios (sin cambios) ---
-
-def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: Any):
+def _apply_changes_to_real_config(temp_cfg: Any, real_cfg: Any, logger: Any):
     """Compara la config temporal con la real, aplica los cambios y los loguea."""
     if not logger: return
 
@@ -150,33 +89,90 @@ def _apply_and_log_changes(temp_cfg: Any, real_cfg: Any, pm_api: Any, logger: An
                 changes_found = True
                 logger.log(f"  -> {attr}: '{old_value}' -> '{new_value}'", "WARN")
                 setattr(real_cfg, attr, new_value)
-                
-                if pm_api:
-                    if attr == 'SESSION_STOP_LOSS_ROI_PCT':
-                        if getattr(real_cfg, 'SESSION_ROI_SL_ENABLED', False):
-                            pm_api.set_global_stop_loss_pct(new_value)
-                    elif attr == 'SESSION_TAKE_PROFIT_ROI_PCT':
-                         if getattr(real_cfg, 'SESSION_ROI_TP_ENABLED', False):
-                            pm_api.set_global_take_profit_pct(new_value)
-
-                    elif attr == 'SESSION_ROI_SL_ENABLED':
-                        pm_api.set_global_stop_loss_pct(getattr(temp_cfg, 'SESSION_STOP_LOSS_ROI_PCT') if new_value else 0)
-                    elif attr == 'SESSION_ROI_TP_ENABLED':
-                        pm_api.set_global_take_profit_pct(getattr(temp_cfg, 'SESSION_TAKE_PROFIT_ROI_PCT') if new_value else 0)
 
     if not changes_found:
         logger.log("No se detectaron cambios en la configuración.", "INFO")
 
-# --- SUBMENÚS DE CONFIGURACIÓN ---
+# --- MENÚS PRINCIPALES POR CONTEXTO ---
+
+def _show_general_config_menu(temp_cfg: Any) -> bool:
+    """Muestra el menú principal para editar la configuración general del bot."""
+    while True:
+        menu_items = [
+            f"[1] Exchange (Actual: {getattr(temp_cfg, 'EXCHANGE_NAME', 'N/A')})",
+            f"[2] Modo Testnet (Actual: {'Activado' if getattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False) else 'Desactivado'})",
+            None,
+            "[h] Ayuda",
+            None,
+            "[s] Guardar y Volver",
+            "[c] Cancelar (Descartar Cambios)"
+        ]
+        action_map = {0: 'exchange', 1: 'testnet', 3: 'help', 5: 'save', 6: 'cancel'}
+        
+        menu = TerminalMenu(menu_items, title="Editor de Configuración General", **MENU_STYLE)
+        choice = menu.show()
+        action = action_map.get(choice)
+
+        try:
+            if action == 'exchange':
+                # En el futuro, podría ser un menú si se soportan más exchanges.
+                new_val = get_input("\nNuevo Exchange (ej. bybit)", str, getattr(temp_cfg, 'EXCHANGE_NAME', 'bybit'))
+                setattr(temp_cfg, 'EXCHANGE_NAME', new_val.lower())
+            elif action == 'testnet':
+                current_val = getattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False)
+                setattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', not current_val)
+            elif action == 'help':
+                show_help_popup("config_editor")
+            elif action == 'save':
+                print("\nCambios guardados."); time.sleep(1.5)
+                return True
+            elif action == 'cancel' or choice is None:
+                print("\nCambios descartados."); time.sleep(1.5)
+                return False
+        except UserInputCancelled:
+            print("\n\nEdición cancelada por el usuario."); time.sleep(1)
+
+def _show_session_config_menu(temp_cfg: Any) -> bool:
+    """Muestra el menú principal para editar la configuración de una sesión."""
+    while True:
+        menu_items = [
+            "[1] Parámetros del Ticker",
+            "[2] Parámetros de Estrategia (TA y Señal)",
+            "[3] Parámetros de Capital (Posiciones)",
+            "[4] Parámetros de Límites (Disyuntores)",
+            None,
+            "[h] Ayuda",
+            None,
+            "[s] Guardar y Volver",
+            "[c] Cancelar (Descartar Cambios)"
+        ]
+        action_map = {0: 'ticker', 1: 'strategy', 2: 'capital', 3: 'limits', 5: 'help', 7: 'save', 8: 'cancel'}
+
+        menu = TerminalMenu(menu_items, title="Editor de Configuración de Sesión", **MENU_STYLE)
+        choice = menu.show()
+        action = action_map.get(choice)
+
+        if action == 'ticker': _show_ticker_config_menu(temp_cfg)
+        elif action == 'strategy': _show_strategy_config_menu(temp_cfg)
+        elif action == 'capital': _show_pm_capital_config_menu(temp_cfg)
+        elif action == 'limits': _show_session_limits_menu(temp_cfg)
+        elif action == 'help': show_help_popup("config_editor")
+        elif action == 'save':
+            print("\nCambios guardados."); time.sleep(1.5)
+            return True
+        elif action == 'cancel' or choice is None:
+            print("\nCambios descartados."); time.sleep(1.5)
+            return False
+
+# --- SUBMENÚS DE EDICIÓN (Lógica de bajo nivel, sin cambios) ---
+
 def _show_ticker_config_menu(cfg: Any):
-    # --- INICIO DE LA MODIFICACIÓN: Envolver en try-except ---
     try:
         while True:
             menu_items = [
                 f"[1] Símbolo del Ticker (Actual: {getattr(cfg, 'TICKER_SYMBOL', 'N/A')})",
                 f"[2] Intervalo de Estrategia (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
-                None,
-                "[b] Volver"
+                None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Configuración del Ticker", **MENU_STYLE)
             choice = submenu.show()
@@ -186,15 +182,10 @@ def _show_ticker_config_menu(cfg: Any):
             elif choice == 1:
                 new_val = get_input("\nNuevo Intervalo (segundos, ej. 1, 5)", float, getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1), min_val=0.1)
                 setattr(cfg, 'TICKER_INTERVAL_SECONDS', new_val)
-            else:
-                break
-    except UserInputCancelled:
-        print("\n\nEdición cancelada por el usuario.")
-        time.sleep(1)
-    # --- FIN DE LA MODIFICACIÓN ---
+            else: break
+    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_strategy_config_menu(cfg: Any):
-    # --- INICIO DE LA MODIFICACIÓN: Envolver en try-except ---
     try:
         while True:
             menu_items = [
@@ -202,131 +193,65 @@ def _show_strategy_config_menu(cfg: Any):
                 f"[2] Margen de Venta (%) (Actual: {getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)})",
                 f"[3] Umbral de Decremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0)})",
                 f"[4] Umbral de Incremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0)})",
-                None,
                 f"[5] Período EMA (Actual: {getattr(cfg, 'TA_EMA_WINDOW', 0)})",
-                None,
-                "[b] Volver"
+                None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Parámetros de la Estrategia (TA y Señal)", **MENU_STYLE)
             choice = submenu.show()
-            if choice == 0:
-                new_val = get_input("\nNuevo Margen de Compra (ej. -0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_BUY', 0.0))
-                setattr(cfg, 'STRATEGY_MARGIN_BUY', new_val)
-            elif choice == 1:
-                new_val = get_input("\nNuevo Margen de Venta (ej. 0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0))
-                setattr(cfg, 'STRATEGY_MARGIN_SELL', new_val)
-            elif choice == 2:
-                new_val = get_input("\nNuevo Umbral de Decremento (0-1)", float, getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0)
-                setattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', new_val)
-            elif choice == 3:
-                new_val = get_input("\nNuevo Umbral de Incremento (0-1)", float, getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0)
-                setattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', new_val)
-            elif choice == 5:
-                new_val = get_input("\nNuevo Período para la EMA", int, getattr(cfg, 'TA_EMA_WINDOW', 0), min_val=1)
-                setattr(cfg, 'TA_EMA_WINDOW', new_val)
-            else:
-                break
-    except UserInputCancelled:
-        print("\n\nEdición cancelada por el usuario.")
-        time.sleep(1)
-    # --- FIN DE LA MODIFICACIÓN ---
+            if choice == 0: setattr(cfg, 'STRATEGY_MARGIN_BUY', get_input("\nNuevo Margen de Compra (ej. -0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_BUY', 0.0)))
+            elif choice == 1: setattr(cfg, 'STRATEGY_MARGIN_SELL', get_input("\nNuevo Margen de Venta (ej. 0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)))
+            elif choice == 2: setattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', get_input("\nNuevo Umbral de Decremento (0-1)", float, getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
+            elif choice == 3: setattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', get_input("\nNuevo Umbral de Incremento (0-1)", float, getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
+            elif choice == 4: setattr(cfg, 'TA_EMA_WINDOW', get_input("\nNuevo Período para la EMA", int, getattr(cfg, 'TA_EMA_WINDOW', 0), min_val=1))
+            else: break
+    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_pm_capital_config_menu(cfg: Any):
-    # --- INICIO DE LA MODIFICACIÓN: Envolver en try-except ---
     try:
         while True:
             menu_items = [
                 f"[1] Tamaño Base por Posición (USDT) (Actual: {getattr(cfg, 'POSITION_BASE_SIZE_USDT', 0.0):.2f})",
                 f"[2] Máximo de Posiciones por Lado (Actual: {getattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', 0)})",
                 f"[3] Apalancamiento (Actual: {getattr(cfg, 'POSITION_LEVERAGE', 0.0):.1f}x)",
-                None,
-                f"[4] Dif. Mín. Precio LONG (%) (Actual: {getattr(cfg, 'POSITION_MIN_PRICE_DIFF_LONG_PCT', 0.0):.2f}%)",
-                f"[5] Dif. Mín. Precio SHORT (%) (Actual: {getattr(cfg, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', 0.0):.2f}%)",
-                f"[6] % de Reinversión de Ganancias (Actual: {getattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', 0.0):.1f}%)",
-                None,
-                "[b] Volver"
+                f"[4] % de Reinversión de Ganancias (Actual: {getattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', 0.0):.1f}%)",
+                None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Gestión de Posiciones (Capital)", **MENU_STYLE)
             choice = submenu.show()
-            if choice == 0:
-                new_val = get_input("\nNuevo Tamaño Base (USDT)", float, getattr(cfg, 'POSITION_BASE_SIZE_USDT', 0.0), min_val=0.1)
-                setattr(cfg, 'POSITION_BASE_SIZE_USDT', new_val)
-            elif choice == 1:
-                new_val = get_input("\nNuevo Máximo de Posiciones por Lado", int, getattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', 0), min_val=1)
-                setattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', new_val)
-            elif choice == 2:
-                new_val = get_input("\nNuevo Apalancamiento (ej. 10.0)", float, getattr(cfg, 'POSITION_LEVERAGE', 0.0), min_val=1.0, max_val=100.0)
-                setattr(cfg, 'POSITION_LEVERAGE', new_val)
-            elif choice == 4:
-                new_val = get_input("\nNueva Dif. Mín. LONG (% , ej: -0.25)", float, getattr(cfg, 'POSITION_MIN_PRICE_DIFF_LONG_PCT', 0.0))
-                setattr(cfg, 'POSITION_MIN_PRICE_DIFF_LONG_PCT', new_val)
-            elif choice == 5:
-                new_val = get_input("\nNueva Dif. Mín. SHORT (% , ej: 0.25)", float, getattr(cfg, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', 0.0))
-                setattr(cfg, 'POSITION_MIN_PRICE_DIFF_SHORT_PCT', new_val)
-            elif choice == 6:
-                new_val = get_input("\nNuevo % de Reinversión (0-100)", float, getattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', 0.0), min_val=0.0, max_val=100.0)
-                setattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', new_val)
-            else:
-                break
-    except UserInputCancelled:
-        print("\n\nEdición cancelada por el usuario.")
-        time.sleep(1)
-    # --- FIN DE LA MODIFICACIÓN ---
+            if choice == 0: setattr(cfg, 'POSITION_BASE_SIZE_USDT', get_input("\nNuevo Tamaño Base (USDT)", float, getattr(cfg, 'POSITION_BASE_SIZE_USDT', 0.0), min_val=0.1))
+            elif choice == 1: setattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', get_input("\nNuevo Máximo de Posiciones por Lado", int, getattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', 0), min_val=1))
+            elif choice == 2: setattr(cfg, 'POSITION_LEVERAGE', get_input("\nNuevo Apalancamiento (ej. 10.0)", float, getattr(cfg, 'POSITION_LEVERAGE', 0.0), min_val=1.0, max_val=100.0))
+            elif choice == 3: setattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', get_input("\nNuevo % de Reinversión (0-100)", float, getattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', 0.0), min_val=0.0, max_val=100.0))
+            else: break
+    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_session_limits_menu(cfg: Any):
-    # --- INICIO DE LA MODIFICACIÓN: Envolver en try-except ---
     try:
         while True:
-            action = getattr(cfg, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')
             duration = getattr(cfg, 'SESSION_MAX_DURATION_MINUTES', 0)
-            duration_str = f"{duration} min (Acción: {action})" if duration > 0 else "Desactivado"
-            sl_roi_enabled = getattr(cfg, 'SESSION_ROI_SL_ENABLED', False)
-            tp_roi_enabled = getattr(cfg, 'SESSION_ROI_TP_ENABLED', False)
-            sl_roi_status = "Activado" if sl_roi_enabled else "Desactivado"
-            tp_roi_status = "Activado" if tp_roi_enabled else "Desactivado"
-            sl_roi_val = getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
-            tp_roi_val = getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
+            duration_str = f"{duration} min (Acción: {getattr(cfg, 'SESSION_TIME_LIMIT_ACTION', 'NEUTRAL')})" if duration > 0 else "Desactivado"
+            sl_roi_status = "Activado" if getattr(cfg, 'SESSION_ROI_SL_ENABLED', False) else "Desactivado"
+            tp_roi_status = "Activado" if getattr(cfg, 'SESSION_ROI_TP_ENABLED', False) else "Desactivado"
             
             menu_items = [
-                f"[1] Límite de Duración (minutos) (Actual: {duration_str})",
-                f"[2] Límite de Trades Totales (Actual: {'Ilimitados' if getattr(cfg, 'SESSION_MAX_TRADES', 0) == 0 else getattr(cfg, 'SESSION_MAX_TRADES', 0)})",
-                None,
-                f"[3] Stop Loss de Sesión por ROI (Estado: {sl_roi_status})",
-                f"[4]    └─ Umbral de SL (%): (Actual: -{sl_roi_val:.2f})",
-                None,
-                f"[5] Take Profit de Sesión por ROI (Estado: {tp_roi_status})",
-                f"[6]    └─ Umbral de TP (%): (Actual: +{tp_roi_val:.2f})",
-                None,
-                "[b] Volver"
+                f"[1] Límite de Duración (min) (Actual: {duration_str})",
+                f"[2] Stop Loss de Sesión por ROI (Estado: {sl_roi_status})",
+                f"[3]    └─ Umbral de SL (%): (Actual: -{getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0):.2f})",
+                f"[4] Take Profit de Sesión por ROI (Estado: {tp_roi_status})",
+                f"[5]    └─ Umbral de TP (%): (Actual: +{getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0):.2f})",
+                None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Límites de Sesión (Disyuntores)", **MENU_STYLE)
             choice = submenu.show()
             if choice == 0:
-                new_duration = get_input("\nNueva duración máxima (minutos, 0 para desactivar)", int, duration, min_val=0)
+                new_duration = get_input("\nDuración máx (min, 0=desactivar)", int, duration, min_val=0)
                 setattr(cfg, 'SESSION_MAX_DURATION_MINUTES', new_duration)
                 if new_duration > 0:
-                    action_idx = TerminalMenu(["[1] Pasar a modo NEUTRAL", "[2] Parada de Emergencia (STOP)"], title="Acción al alcanzar el límite:").show()
-                    if action_idx is not None:
-                        new_action = "STOP" if action_idx == 1 else "NEUTRAL"
-                        setattr(cfg, 'SESSION_TIME_LIMIT_ACTION', new_action)
-            elif choice == 1:
-                new_val = get_input("\nNuevo límite de trades (0 para ilimitados)", int, getattr(cfg, 'SESSION_MAX_TRADES', 0), min_val=0)
-                setattr(cfg, 'SESSION_MAX_TRADES', new_val)
-            elif choice == 3:
-                setattr(cfg, 'SESSION_ROI_SL_ENABLED', not getattr(cfg, 'SESSION_ROI_SL_ENABLED', False))
-            elif choice == 4:
-                new_val = get_input("\nNuevo % de SL de Sesión (ej. 10 para -10%)", float, sl_roi_val, min_val=0.1)
-                setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', new_val)
-            
-            elif choice == 6:
-                setattr(cfg, 'SESSION_ROI_TP_ENABLED', not getattr(cfg, 'SESSION_ROI_TP_ENABLED', False))
-            elif choice == 7:
-                new_val = get_input("\nNuevo % de TP de Sesión (ej. 5 para +5%)", float, tp_roi_val, min_val=0.1)
-                setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', new_val)
-                
-            else:
-                break
-    except UserInputCancelled:
-        print("\n\nEdición cancelada por el usuario.")
-        time.sleep(1)
-    # --- FIN DE LA MODIFICACIÓN ---
+                    action_idx = TerminalMenu(["[1] NEUTRAL", "[2] STOP"], title="Acción al alcanzar límite:").show()
+                    if action_idx is not None: setattr(cfg, 'SESSION_TIME_LIMIT_ACTION', "STOP" if action_idx == 1 else "NEUTRAL")
+            elif choice == 1: setattr(cfg, 'SESSION_ROI_SL_ENABLED', not getattr(cfg, 'SESSION_ROI_SL_ENABLED', False))
+            elif choice == 2: setattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', get_input("\nNuevo % de SL (ej. 10 para -10%)", float, getattr(cfg, 'SESSION_STOP_LOSS_ROI_PCT', 0.0), min_val=0.1))
+            elif choice == 3: setattr(cfg, 'SESSION_ROI_TP_ENABLED', not getattr(cfg, 'SESSION_ROI_TP_ENABLED', False))
+            elif choice == 4: setattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', get_input("\nNuevo % de TP (ej. 5 para +5%)", float, getattr(cfg, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0), min_val=0.1))
+            else: break
+    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)

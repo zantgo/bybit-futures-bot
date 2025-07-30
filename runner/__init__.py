@@ -1,29 +1,25 @@
 """
-Paquete Runner: Orquesta los diferentes modos de ejecución del bot.
+Paquete Runner: Ensambla dependencias y orquesta el apagado de sesión.
 
-Este __init__.py actúa como una fachada para el paquete, exponiendo las
-funciones de alto nivel que los lanzadores (como main.py) y los controladores
-(como _main_controller.py) necesitan.
+v4.0 (Arquitectura de Controladores):
+- Este paquete ya no contiene la lógica de inicialización activa del bot.
+- Su responsabilidad se ha centrado en exponer el ensamblador de dependencias
+  y la lógica de apagado de la sesión, que son invocados por los controladores
+  de nivel superior.
 """
-# --- INICIO DE LA NUEVA ESTRUCTURA CORRECTA ---
 
-# Importar la función de inicialización desde su módulo especializado.
-# Le damos un alias público para que el resto de la aplicación la conozca
-# con un nombre claro y consistente.
-from ._initializer import initialize_core_components as initialize_bot_backend
+# --- Importar las funciones públicas de los módulos internos ---
 
-# Importar la función de apagado desde su módulo especializado.
-# También le damos un alias público.
-from ._shutdown import perform_shutdown as shutdown_bot_backend
+# Importar la nueva función desde su módulo especializado.
+from ._initializer import assemble_dependencies
 
-# El orquestador principal no necesita ser público, es llamado por el controlador de la TUI
-# directamente (si es necesario), pero el patrón actual lo mantiene interno.
+# Importar la función de apagado refactorizada desde su módulo especializado.
+from ._shutdown import shutdown_session_backend
 
-# Definir __all__ para una API pública limpia y explícita.
+# --- Definir la API pública del paquete ---
 # Esto define qué se importa cuando otro módulo hace `from runner import *`.
+# Ahora exportamos las funciones con sus nuevos nombres correctos.
 __all__ = [
-    'initialize_bot_backend',
-    'shutdown_bot_backend',
+    'assemble_dependencies',
+    'shutdown_session_backend',
 ]
-
-# --- FIN DE LA NUEVA ESTRUCTURA CORRECTA ---

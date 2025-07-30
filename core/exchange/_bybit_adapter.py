@@ -13,14 +13,12 @@ import uuid
 from ._interface import AbstractExchange
 from ._models import StandardOrder, StandardPosition, StandardBalance, StandardInstrumentInfo, StandardTicker
 
-# --- INICIO DE LA MODIFICACIÓN ---
 # Importamos las excepciones que vamos a manejar
 try:
     from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError:
     class InvalidRequestError(Exception): pass
     class FailedRequestError(Exception): pass
-# --- FIN DE LA MODIFICACIÓN ---
 
 class BybitAdapter(AbstractExchange):
     """Implementación del protocolo de Exchange para Bybit."""
@@ -112,7 +110,6 @@ class BybitAdapter(AbstractExchange):
         
         category = getattr(config, 'CATEGORY_LINEAR', 'linear')
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         try:
             response = session.get_tickers(category=category, symbol=symbol)
             
@@ -142,7 +139,6 @@ class BybitAdapter(AbstractExchange):
             # Capturamos errores de parseo de la respuesta.
             memory_logger.log(f"[BybitAdapter get_ticker] Error parseando respuesta para '{symbol}': {e}", "WARN")
             return None
-        # --- FIN DE LA MODIFICACIÓN ---
 
     def place_order(self, order: StandardOrder, account_purpose: str) -> Tuple[bool, str]:
         account_name = self._purpose_to_account_name_map.get(account_purpose)
@@ -204,9 +200,7 @@ class BybitAdapter(AbstractExchange):
         amount_str = f"{amount:.4f}"
         
         try:
-            # <<< INICIO DE LA CORRECCIÓN >>>
             transfer_id = str(uuid.uuid4())
-            # <<< FIN DE LA CORRECCIÓN >>>
 
             response = session.create_universal_transfer(
                 transferId=transfer_id, coin=coin.upper(), amount=amount_str,
@@ -215,14 +209,12 @@ class BybitAdapter(AbstractExchange):
                 toAccountType=getattr(config, 'UNIVERSAL_TRANSFER_TO_TYPE', 'UNIFIED')
             )
             
-            # <<< INICIO DE MEJORA DE LOGGING >>>
             if response and response.get('retCode') == 0:
                 return True
             else:
                 error_msg = response.get('retMsg', 'Error desconocido') if response else "Sin respuesta de la API"
                 memory_logger.log(f"[BybitAdapter] Fallo en la transferencia: {error_msg}", "ERROR")
                 return False
-            # <<< FIN DE MEJORA DE LOGGING >>>
 
         except Exception as e:
             memory_logger.log(f"[BybitAdapter] Excepción en la transferencia: {e}", "ERROR")

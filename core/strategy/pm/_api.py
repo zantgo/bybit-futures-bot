@@ -1,19 +1,26 @@
 """
 Interfaz Pública del Position Manager (PM API).
 
-v6.0 (Modelo de Operación Estratégica Única):
-- Se eliminan todas las funciones relacionadas con la gestión de múltiples hitos.
-- Se introducen nuevas funciones para crear, modificar y forzar el inicio/fin
-  de la única operación estratégica.
+v7.0 (Arquitectura de Controladores):
+- La función `get_current_market_price` ahora delega la llamada al `SessionManager`,
+  que es el propietario del Ticker en la nueva arquitectura, mejorando la
+  separación de responsabilidades.
+- Las funciones de gestión de Operación han sido movidas a la API del OM (`om_api`).
+  Esta API se centra exclusivamente en la gestión de posiciones y estado de sesión.
 """
 import datetime
 from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import PositionManager
-    from ._entities import Operacion
+    from core.strategy.om._entities import Operacion
+
+# --- Módulos API de Dependencia ---
+# El PM API ahora necesita conocer al SM API para obtener el precio
+from core.strategy.sm import api as sm_api
 
 _pm_instance: Optional['PositionManager'] = None
+
 
 def init_pm_api(instance: 'PositionManager'):
     """Inicializa esta fachada API inyectando la instancia principal del PositionManager."""
@@ -38,8 +45,18 @@ def get_session_start_time() -> Optional[datetime.datetime]:
 def get_global_tp_pct() -> Optional[float]:
     return _pm_instance.get_global_tp_pct() if _pm_instance else None
 
+# --- INICIO DE LA MODIFICACIÓN: La función is_session_tp_hit() debe ser movida o renombrada ---
+# Esta lógica ahora es más propia del SessionManager, pero el PM la usa internamente.
+# Mantenemos la función pero renombramos para claridad futura.
+def set_session_tp_hit(value: bool):
+    """Establece el estado del TP de la sesión. Es llamado por el SM o el Event Processor."""
+    if _pm_instance and hasattr(_pm_instance, 'set_session_tp_hit'):
+        _pm_instance.set_session_tp_hit(value)
+
 def is_session_tp_hit() -> bool:
     return _pm_instance.is_session_tp_hit() if _pm_instance else False
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 def get_global_sl_pct() -> Optional[float]:
     return _pm_instance.get_global_sl_pct() if _pm_instance else None
@@ -66,28 +83,12 @@ def set_global_take_profit_pct(value: float) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
     return _pm_instance.set_global_take_profit_pct(value)
     
-# --- INICIO: Nuevas Funciones para la Operación Estratégica Única (v6.0) ---
-def get_operation() -> Optional['Operacion']:
-    """Obtiene el objeto de la operación estratégica actual."""
-    if not _pm_instance: return None
-    return _pm_instance.get_operation()
-
-def create_or_update_operation(params: Dict[str, Any]) -> Tuple[bool, str]:
-    """Crea una nueva operación (si no hay ninguna) o actualiza la existente."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.create_or_update_operation(params)
-
-def force_start_operation() -> Tuple[bool, str]:
-    """Fuerza el inicio inmediato de la operación, ignorando la condición de entrada."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.force_start_operation()
-
-def force_stop_operation(close_positions: bool = False) -> Tuple[bool, str]:
-    """Fuerza la finalización de la operación activa."""
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.force_stop_operation(close_positions=close_positions)
-
-# --- FIN: Nuevas Funciones ---
+# --- (ELIMINADO) Funciones de gestión de Operación ---
+# Estas funciones ahora pertenecen y son gestionadas por el OperationManager (om_api)
+# def get_operation() -> Optional['Operacion']: ...
+# def create_or_update_operation(params: Dict[str, Any]) -> Tuple[bool, str]: ...
+# def force_start_operation() -> Tuple[bool, str]: ...
+# def force_stop_operation(close_positions: bool = False) -> Tuple[bool, str]: ...
 
 # --- Funciones de Ayuda y Sistema ---
 def force_balance_update():
@@ -96,33 +97,9 @@ def force_balance_update():
         _pm_instance.force_balance_update()
 
 def get_current_market_price() -> Optional[float]:
-    """Obtiene el precio de mercado más reciente conocido por el ticker."""
-    if not _pm_instance: return None
-    return _pm_instance.get_current_market_price()
-
-# --- (COMENTADO) Funciones de Gestión de Hitos Obsoletas ---
-# def get_all_milestones() -> List['Hito']:
-#     return _pm_instance.get_all_milestones() if _pm_instance else []
-#
-# def add_milestone(tipo_hito: str, condicion: Any, accion: Any, parent_id: Optional[str] = None) -> Tuple[bool, str]:
-#     if not _pm_instance: return False, "PM no instanciado"
-#     return _pm_instance.add_milestone(tipo_hito, condicion, accion, parent_id)
-#
-# def remove_milestone(milestone_id: str) -> Tuple[bool, str]:
-#     if not _pm_instance: return False, "PM no instanciado"
-#     return _pm_instance.remove_milestone(milestone_id)
-#
-# def update_milestone(milestone_id: str, nueva_condicion: Any, nueva_accion: Any) -> Tuple[bool, str]:
-#     if not _pm_instance: return False, "PM no instanciado"
-#     if hasattr(_pm_instance, 'update_milestone'):
-#         return _pm_instance.update_milestone(milestone_id, nueva_condicion, nueva_accion)
-#     return False, "Función 'update_milestone' no implementada en el manager."
-#
-# def force_trigger_milestone_with_pos_management(...) -> Tuple[bool, str]:
-#     if not _pm_instance: return False, "PM no instanciado"
-#     ...
-#
-# def force_end_operation(close_positions: bool = False) -> Tuple[bool, str]:
-#     """(Obsoleto) Reemplazado por force_stop_operation para unificar nombres."""
-#     if not _pm_instance: return False, "PM no instanciado"
-#     return _pm_instance.force_end_operation(close_positions=close_positions)
+    """
+    Obtiene el precio de mercado más reciente conocido por la sesión.
+    Delega la llamada a la API del SessionManager, que es el propietario del Ticker.
+    """
+    # La llamada ya no va al _pm_instance
+    return sm_api.get_session_summary().get('current_market_price')
