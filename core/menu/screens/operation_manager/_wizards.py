@@ -56,11 +56,11 @@ def _operation_setup_wizard(om_api: Any, current_op: Operacion, is_modification:
                 print("  -> Condición seleccionada: Activación Inmediata")
             elif cond_choice == 1:
                 new_cond_type = 'PRICE_ABOVE'
-                new_cond_value = get_input("Activar si precio SUPERA", float, default=current_op.valor_cond_entrada)
+                new_cond_value = get_input("Activar si precio SUPERA", float, default=current_op.valor_cond_entrada, is_optional=False)
                 print(f"  -> Condición seleccionada: Precio > {new_cond_value}")
             elif cond_choice == 2:
                 new_cond_type = 'PRICE_BELOW'
-                new_cond_value = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada)
+                new_cond_value = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada, is_optional=False)
                 print(f"  -> Condición seleccionada: Precio < {new_cond_value}")
             else: return
             params_to_update['tipo_cond_entrada'] = new_cond_type
@@ -95,40 +95,40 @@ def _operation_setup_wizard(om_api: Any, current_op: Operacion, is_modification:
         section_num_trading = 3 if not is_modification else 1
         
         print(f"\n--- {section_num_trading}. Parámetros de Trading (Obligatorios) ---")
-        base_size = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01)
+        base_size = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01, is_optional=False)
         print(f"  -> Tamaño Base establecido en: {base_size:.2f} USDT")
         params_to_update['tamaño_posicion_base_usdt'] = base_size
-        max_pos = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1)
+        max_pos = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1, is_optional=False)
         print(f"  -> Máx. Posiciones establecido en: {max_pos}")
         params_to_update['max_posiciones_logicas'] = max_pos
-        leverage = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
+        leverage = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0, is_optional=False)
         print(f"  -> Apalancamiento establecido en: {leverage:.1f}x")
         params_to_update['apalancamiento'] = leverage
 
         section_num_risk = section_num_trading + 1
         print(f"\n--- {section_num_risk}. Riesgo por Posición (Opcional) ---")
-        tsl_act = get_input("Activación TSL (%)", float, default=default_tsl_act, disable_value=None)
+        tsl_act = get_input("Activación TSL (%)", float, default=default_tsl_act, is_optional=True)
         print(f"  -> Activación TSL: {'DESACTIVADO' if tsl_act is None else f'{tsl_act}%'}")
         params_to_update['tsl_activacion_pct'] = tsl_act
-        tsl_dist = get_input("Distancia TSL (%)", float, default=default_tsl_dist, disable_value=None)
+        tsl_dist = get_input("Distancia TSL (%)", float, default=default_tsl_dist, is_optional=True)
         print(f"  -> Distancia TSL: {'DESACTIVADO' if tsl_dist is None else f'{tsl_dist}%'}")
         params_to_update['tsl_distancia_pct'] = tsl_dist
-        sl_ind = get_input("SL individual (%)", float, default=default_sl_ind, disable_value=None)
+        sl_ind = get_input("SL individual (%)", float, default=default_sl_ind, is_optional=True)
         print(f"  -> SL Individual: {'DESACTIVADO' if sl_ind is None else f'{sl_ind}%'}")
         params_to_update['sl_posicion_individual_pct'] = sl_ind
         
         section_num_limits = section_num_risk + 1
         print(f"\n--- {section_num_limits}. Condiciones de Salida por Límites (Opcional) ---")
-        tp_roi = get_input("TP por ROI (%)", float, default=default_tp_roi, disable_value=None)
+        tp_roi = get_input("TP por ROI (%)", float, default=default_tp_roi, is_optional=True)
         print(f"  -> TP por ROI: {'DESACTIVADO' if tp_roi is None else f'{tp_roi}%'}")
         params_to_update['tp_roi_pct'] = tp_roi
-        sl_roi = get_input("SL por ROI (%)", float, default=default_sl_roi, disable_value=None)
+        sl_roi = get_input("SL por ROI (%)", float, default=default_sl_roi, is_optional=True)
         print(f"  -> SL por ROI: {'DESACTIVADO' if sl_roi is None else f'{sl_roi}%'}")
         params_to_update['sl_roi_pct'] = sl_roi
-        max_trades = get_input("Máx. trades", int, default=default_max_trades, min_val=1, disable_value=None)
+        max_trades = get_input("Máx. trades", int, default=default_max_trades, min_val=1, is_optional=True)
         print(f"  -> Máx. Trades: {'DESACTIVADO' if max_trades is None else max_trades}")
         params_to_update['max_comercios'] = max_trades
-        max_duracion = get_input("Duración máx. (min)", int, default=default_max_duracion, min_val=1, disable_value=None)
+        max_duracion = get_input("Duración máx. (min)", int, default=default_max_duracion, min_val=1, is_optional=True)
         print(f"  -> Duración Máx.: {'DESACTIVADA' if max_duracion is None else f'{max_duracion} min'}")
         params_to_update['tiempo_maximo_min'] = max_duracion
 
@@ -140,12 +140,12 @@ def _operation_setup_wizard(om_api: Any, current_op: Operacion, is_modification:
             print("  -> Condición de Salida por Precio: DESACTIVADA")
         elif exit_cond_choice == 1:
             params_to_update['tipo_cond_salida'] = 'PRICE_ABOVE'
-            val = get_input("Salir si precio SUPERA", float, default=default_exit_val)
+            val = get_input("Salir si precio SUPERA", float, default=default_exit_val, is_optional=False)
             params_to_update['valor_cond_salida'] = val
             print(f"  -> Condición de Salida por Precio: > {val}")
         elif exit_cond_choice == 2:
             params_to_update['tipo_cond_salida'] = 'PRICE_BELOW'
-            val = get_input("Salir si precio BAJA DE", float, default=default_exit_val)
+            val = get_input("Salir si precio BAJA DE", float, default=default_exit_val, is_optional=False)
             params_to_update['valor_cond_salida'] = val
             print(f"  -> Condición de Salida por Precio: < {val}")
             
