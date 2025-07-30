@@ -102,6 +102,7 @@ SESSION_TIME_LIMIT_ACTION = "NEUTRAL" # "NEUTRAL" o "STOP"
 
 SESSION_ROI_SL_ENABLED = True
 SESSION_ROI_TP_ENABLED = True
+TUI_LOG_VIEWER_MAX_LINES = 1000
 
 # --- Printing / Logging Configuration ---
 POSITION_LOG_CLOSED_POSITIONS = True
@@ -128,8 +129,6 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # --- UID Management ---
 LOADED_UIDS = {}
-
-# EN: ./config.py
 
 def _load_and_validate_uids():
     """

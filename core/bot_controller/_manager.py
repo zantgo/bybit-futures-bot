@@ -70,51 +70,45 @@ class BotController:
         """Indica si las conexiones API han sido inicializadas con éxito."""
         return self._connections_initialized
 
-    # =================== INICIO DE LA MODIFICACIÓN ===================
-    # Esta función ahora es más verbosa para mostrar el progreso una por una.
+    # --- INICIO DE LA MODIFICACIÓN ---
     def initialize_connections(self) -> Tuple[bool, str]:
         """
-        Orquesta la inicialización y validación de todas las cuentas API,
-        mostrando el progreso en la consola.
+        Orquesta la inicialización y validación de las cuentas API.
+        La impresión detallada se delega al connection_manager.
         """
         if self._connections_initialized:
             return True, "Las conexiones ya han sido validadas previamente."
 
         memory_logger.log("BotController: Iniciando validación de conexiones...", "INFO")
         
-        # Aunque llamamos a una función que inicializa todo, mostraremos el resultado
-        # individualmente para una mejor UX.
         try:
+            # 1. El connection_manager realiza la conexión y la impresión detallada.
+            # Esta función es ahora la única fuente de impresión de estado de conexión.
             self._connection_manager.initialize_all_clients()
             
-            accounts_to_check = getattr(self._config, 'ACCOUNTS_TO_INITIALIZE', [])
             successful_accounts = self._connection_manager.get_initialized_accounts()
+            
+            # 2. Rellenar el diccionario de clientes activos SIN imprimir nada,
+            #    ya que la validación detallada se imprimió en el paso anterior.
+            for account_name in successful_accounts:
+                self._active_clients[account_name] = self._connection_manager.get_client(account_name)
 
-            if not accounts_to_check:
-                return False, "No hay cuentas configuradas para inicializar."
-
-            print("-" * 80)
-            for account_name in accounts_to_check:
-                if account_name in successful_accounts:
-                    print(f"  ✓ Conexión para '{account_name}': ÉXITO")
-                    self._active_clients[account_name] = self._connection_manager.get_client(account_name)
-                else:
-                    print(f"  ✗ Conexión para '{account_name}': FALLO")
-            print("-" * 80)
-
+            # 3. Verificar si hubo algún fallo (aunque initialize_all_clients ya detendría el bot).
             if not successful_accounts:
                 self._connections_initialized = False
                 error_msg = "Error: No se pudo establecer conexión con NINGUNA cuenta."
                 memory_logger.log(error_msg, "ERROR")
                 return False, error_msg
 
+            # 4. Continuar con el resto de la lógica.
             self._connections_initialized = True
-            msg = "Validación completada. Al menos una conexión fue exitosa."
-            time.sleep(3)
+            msg = "Validación completada. Todas las conexiones requeridas fueron exitosas."
+            time.sleep(1) # Reducido el tiempo de espera para una experiencia más fluida
             memory_logger.log(f"BotController: {msg}", "INFO")
             return True, msg
 
         except SystemExit as e:
+            # Captura la salida forzada por el connection_manager si algo falla.
             self._connections_initialized = False
             error_msg = f"Error fatal de conexión: {e}"
             memory_logger.log(error_msg, "ERROR")
@@ -125,7 +119,7 @@ class BotController:
             memory_logger.log(error_msg, "ERROR")
             traceback.print_exc()
             return False, error_msg
-    # ==================== FIN DE LA MODIFICACIÓN =====================
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_balances(self) -> Optional[Dict[str, Dict[str, Any]]]:
         """Obtiene y devuelve los balances de todas las cuentas configuradas."""
@@ -244,7 +238,7 @@ class BotController:
         return { 
             'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
             'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
-            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False) # <--- LÍNEA AÑADIDA
+            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False)
         }
 
     def update_general_config(self, params: Dict[str, Any]) -> bool:

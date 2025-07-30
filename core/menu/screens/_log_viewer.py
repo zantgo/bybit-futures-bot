@@ -31,10 +31,12 @@ try:
         print_tui_header,
         MENU_STYLE
     )
+    import config # <-- AÑADIDO SEGÚN TUS INSTRUCCIONES
 except ImportError as e:
     print(f"ERROR [TUI Log Viewer]: Falló importación de dependencias: {e}")
     memory_logger = None
     MENU_STYLE = {}
+    config = None
     def clear_screen(): pass
     def print_tui_header(title): print(f"--- {title} ---")
 
@@ -48,8 +50,8 @@ def show_log_viewer():
     Muestra una pantalla con los últimos logs capturados en memoria.
     Esta función tiene su propio bucle para permitir refrescar la vista.
     """
-    if not TerminalMenu or not memory_logger:
-        print("\nError: Dependencias de menú no disponibles (TerminalMenu o MemoryLogger).")
+    if not TerminalMenu or not memory_logger or not config:
+        print("\nError: Dependencias de menú o configuración no disponibles.")
         import time
         time.sleep(2)
         return
@@ -61,21 +63,22 @@ def show_log_viewer():
         clear_screen()
         print_tui_header("Visor de Logs en Tiempo Real")
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se obtiene el historial completo de logs. El límite de 1000 ya está
-        # gestionado por el propio `memory_logger`.
-        logs = memory_logger.get_logs()
-        # --- FIN DE LA MODIFICACIÓN ---
+        all_logs = memory_logger.get_logs()
         
-        if not logs:
+        if not all_logs:
             print("\n  (No hay logs para mostrar)")
         else:
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se elimina la lógica de slicing para mostrar todos los logs disponibles.
-            # logs_to_show = logs[-max_lines_to_show:]
-            logs_to_show = logs
+            # --- INICIO DE LA MODIFICACIÓN SEGÚN INSTRUCCIONES ---
+            # Leer el límite desde el archivo de configuración centralizado.
+            max_lines_to_show = getattr(config, 'TUI_LOG_VIEWER_MAX_LINES', 100)
+            
+            # Aplicar el slicing para obtener solo las últimas N líneas.
+            logs_to_show = all_logs[-max_lines_to_show:]
+            
+            # Mensaje actualizado para reflejar el número total de logs y los que se muestran.
+            print(f"\n  --- Mostrando las últimas {len(logs_to_show)} de {len(all_logs)} entradas ---")
             # --- FIN DE LA MODIFICACIÓN ---
-            print(f"\n  --- Mostrando las últimas {len(logs_to_show)} entradas (más recientes al final) ---")
+            
             for timestamp, level, message in logs_to_show:
                 color_code = ""
                 if level == "ERROR": color_code = "\x1b[91m"  # Rojo brillante
@@ -84,7 +87,6 @@ def show_log_viewer():
                 reset_code = "\x1b[0m"
                 
                 # Truncar mensajes largos para que no rompan el formato visual en una sola línea.
-                # El usuario puede hacer scroll horizontal si la terminal lo permite.
                 print(f"  {timestamp} [{color_code}{level:<5}{reset_code}] {message[:200]}")
 
         menu_items = ["[r] Refrescar", "[b] Volver al Menú Principal"]
