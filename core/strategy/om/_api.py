@@ -37,36 +37,35 @@ def is_initialized() -> bool:
     """Verifica si el Operation Manager ha sido inicializado."""
     return _om_instance.is_initialized() if _om_instance else False
 
-def get_operation() -> Optional['Operacion']:
-    """Obtiene el objeto de la operación estratégica actual."""
+def get_operation_by_side(side: str) -> Optional['Operacion']:
+    """Obtiene el objeto de la operación estratégica para un lado específico ('long' o 'short')."""
     if not _om_instance:
         return None
-    return _om_instance.get_operation()
+    return _om_instance.get_operation_by_side(side)
 
 # --- Funciones de Acciones y Control ---
 
-def create_or_update_operation(params: Dict[str, Any]) -> Tuple[bool, str]:
+def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
     """
-    Delega la llamada para crear una nueva operación (si no hay ninguna) o
-    actualizar la existente.
+    Delega la llamada para crear o actualizar la operación existente para un lado específico.
     """
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.create_or_update_operation(params)
+    return _om_instance.create_or_update_operation(side, params)
 
-def force_start_operation() -> Tuple[bool, str]:
+def force_start_operation(side: str) -> Tuple[bool, str]:
     """
-    Delega la llamada para forzar el inicio inmediato de la operación,
+    Delega la llamada para forzar el inicio inmediato de la operación para un lado específico,
     ignorando la condición de entrada.
     """
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.force_start_operation()
+    return _om_instance.force_start_operation(side)
 
-def force_stop_operation() -> Tuple[bool, str]:
+def force_stop_operation(side: str) -> Tuple[bool, str]:
     """
-    Delega la llamada para forzar la finalización de la operación activa.
+    Delega la llamada para forzar la finalización de la operación activa para un lado específico.
     """
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.force_stop_operation()
+    return _om_instance.force_stop_operation(side)

@@ -1,14 +1,13 @@
 """
 Orquestador Principal del Procesamiento de Eventos.
 
-v4.0 (Arquitectura de Controladores):
-- Este módulo ha absorbido toda la lógica del antiguo paquete 'workflow'.
-- Ahora contiene de forma cohesiva todo el flujo de procesamiento de un tick:
-  1. Comprobación de triggers de la operación.
-  2. Procesamiento de datos y generación de señal de bajo nivel.
-  3. Interacción con el Position Manager.
-  4. Comprobación de los límites globales de la sesión (disyuntores).
-- Se elimina la dependencia con el paquete 'workflow', que queda obsoleto.
+v7.2 (Corrección de Imports y ROI):
+- Se corrige la importación de `om_api` y `pm_api` para que apunten a los
+  módulos de API (`.api`) en lugar de a los paquetes, solucionando el
+  AttributeError en `is_initialized`.
+- Se refactoriza la lógica de salida en `_check_operation_triggers` para
+  calcular el ROI de cada operación (side) de forma independiente, asegurando
+  que los límites de TP/SL por operación funcionen correctamente.
 """
 import sys
 import os
@@ -35,8 +34,9 @@ try:
     import config
     from core import utils
     from core.logging import memory_logger, signal_logger
-    from core.strategy import pm as pm_api
-    from core.strategy import om as om_api
+    # --- IMPORTACIÓN CORREGIDA ---
+    from core.strategy.pm import api as pm_api
+    from core.strategy.om import api as om_api
     from core.strategy import ta, signal
 except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación: {e}")
@@ -50,7 +50,6 @@ except ImportError as e:
 # --- ESTADO Y LÓGICA ABSORBIDOS DE WORKFLOW ---
 # ==============================================================================
 
-# --- Lógica de _limit_checks ---
 class GlobalStopLossException(Exception):
     """Excepción para ser lanzada cuando se activa el Global Stop Loss."""
     pass
@@ -64,7 +63,6 @@ def initialize_limit_checks():
 def has_global_stop_loss_triggered() -> bool:
     return _global_stop_loss_triggered
 
-# --- Lógica de _data_processing ---
 _previous_raw_event_price = np.nan
 _is_first_event = True
 
@@ -103,7 +101,6 @@ def initialize(
     _global_stop_loss_event = global_stop_loss_event
     _pm_instance = pm_instance
     
-    # Inicializar estados internos absorbidos de 'workflow'
     initialize_data_processing()
     initialize_limit_checks()
     ta.initialize()
@@ -129,10 +126,10 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         return
 
     try:
-        # 1. Comprobar Triggers de la Operación (lógica de _triggers)
-        check_conditional_triggers(current_price, current_timestamp)
+        # 1. Comprobar Triggers de la Operación (lógica de activación/desactivación automática)
+        _check_operation_triggers(current_price)
 
-        # 2. Procesar datos y generar señal de bajo nivel (lógica de _data_processing)
+        # 2. Procesar datos y generar señal de bajo nivel
         signal_data = _process_tick_and_generate_signal(current_timestamp, current_price)
         
         # 3. Interacción con el Position Manager
@@ -143,7 +140,7 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
             timestamp=current_timestamp
         )
 
-        # 4. Comprobar Límites de Sesión (Disyuntores Globales) (lógica de _limit_checks)
+        # 4. Comprobar Límites de Sesión (Disyuntores Globales)
         _check_session_limits(current_price, current_timestamp, _operation_mode, _global_stop_loss_event)
         
         # 5. Imprimir estado en consola
@@ -160,60 +157,98 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
 # --- LÓGICA DE WORKFLOW AHORA INTEGRADA LOCALMENTE ---
 # ==============================================================================
 
-# --- Funciones de _triggers.py ---
-def check_conditional_triggers(current_price: float, timestamp: datetime.datetime):
-    if not (pm_api and pm_api.api.is_initialized() and om_api and om_api.api.is_initialized()):
+def _check_operation_triggers(current_price: float):
+    """
+    Evalúa las condiciones de entrada y salida para las operaciones LONG y SHORT
+    en cada tick y modifica su estado si se cumplen las condiciones.
+    """
+    if not (om_api and om_api.is_initialized() and pm_api and pm_api.is_initialized()):
         return
 
     try:
-        operacion = om_api.api.get_operation()
-        if not operacion: return
+        # Iterar sobre ambos lados para no repetir código
+        for side in ['long', 'short']:
+            operacion = om_api.get_operation_by_side(side)
+            if not operacion:
+                continue
 
-        if operacion.estado == 'EN_ESPERA':
-            condition_met, reason = _evaluate_entry_condition(operacion, current_price)
-            if condition_met:
-                memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA: {reason}", "INFO")
-                om_api.api.force_start_operation()
+            # --- LÓGICA DE ENTRADA (si la operación está esperando) ---
+            if operacion.estado == 'EN_ESPERA' and operacion.tendencia != 'NEUTRAL':
+                cond_type = operacion.tipo_cond_entrada
+                cond_value = operacion.valor_cond_entrada
+                
+                entry_condition_met = False
+                reason = ""
 
-        elif operacion.estado == 'ACTIVA':
-            condition_met, reason = _evaluate_exit_conditions(operacion, current_price)
-            if condition_met:
-                memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA: {reason}", "INFO")
-                om_api.api.force_stop_operation()
+                if cond_type == 'MARKET':
+                    entry_condition_met = True
+                    reason = "Activación inmediata (Market)"
+                elif cond_value is not None:
+                    if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
+                        entry_condition_met = True
+                        reason = f"Precio ({current_price:.4f}) > ({cond_value:.4f})"
+                    elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
+                        entry_condition_met = True
+                        reason = f"Precio ({current_price:.4f}) < ({cond_value:.4f})"
+                
+                if entry_condition_met:
+                    memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA ({side.upper()}): {reason}", "WARN")
+                    om_api.force_start_operation(side)
+
+            # --- LÓGICA DE SALIDA (si la operación está activa) ---
+            elif operacion.estado == 'ACTIVA':
+                exit_condition_met = False
+                reason = ""
+                
+                # 1. Comprobar condiciones de límites de la operación (ROI, trades, tiempo)
+                summary = pm_api.get_position_summary()
+                if summary and 'error' not in summary:
+                    # --- CÁLCULO DE ROI CORREGIDO ---
+                    unrealized_pnl_side = 0.0
+                    open_positions_side = summary.get(f'open_{side}_positions', [])
+                    for pos in open_positions_side:
+                        entry = pos.get('entry_price', 0.0)
+                        size = pos.get('size_contracts', 0.0)
+                        if side == 'long': unrealized_pnl_side += (current_price - entry) * size
+                        else: unrealized_pnl_side += (entry - current_price) * size
+                    
+                    realized_pnl_side = operacion.pnl_realizado_usdt
+                    total_pnl_side = realized_pnl_side + unrealized_pnl_side
+                    initial_capital_side = operacion.capital_inicial_usdt
+                    
+                    roi = (total_pnl_side / initial_capital_side) * 100 if initial_capital_side > 0 else 0.0
+                    
+                    if operacion.tp_roi_pct is not None and roi >= operacion.tp_roi_pct:
+                        exit_condition_met, reason = True, f"TP-ROI alcanzado ({roi:.2f}%)"
+                    elif operacion.sl_roi_pct is not None and roi <= -abs(operacion.sl_roi_pct):
+                        exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}%)"
+
+                if not exit_condition_met and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
+                    exit_condition_met, reason = True, f"Límite de {operacion.max_comercios} trades"
+                
+                start_time = operacion.tiempo_inicio_ejecucion
+                if not exit_condition_met and operacion.tiempo_maximo_min is not None and start_time:
+                    elapsed_min = (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() / 60.0
+                    if elapsed_min >= operacion.tiempo_maximo_min:
+                        exit_condition_met, reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min)"
+
+                # 2. Comprobar condición de salida por precio
+                exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
+                if not exit_condition_met and exit_type and exit_value is not None:
+                    if exit_type == 'PRICE_ABOVE' and current_price > exit_value:
+                        exit_condition_met, reason = True, f"Precio de salida ({current_price:.4f}) > ({exit_value:.4f})"
+                    elif exit_type == 'PRICE_BELOW' and current_price < exit_value:
+                        exit_condition_met, reason = True, f"Precio de salida ({current_price:.4f}) < ({exit_value:.4f})"
+
+                if exit_condition_met:
+                    memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {reason}", "WARN")
+                    om_api.force_stop_operation(side)
+
     except Exception as e:
         memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
 
-def _evaluate_entry_condition(operacion: 'Operacion', current_price: float) -> Tuple[bool, str]:
-    cond_type, cond_value = operacion.tipo_cond_entrada, operacion.valor_cond_entrada
-    if cond_type == 'MARKET': return True, "Activación inmediata (Market)"
-    if cond_value is None: return False, ""
-    if cond_type == 'PRICE_ABOVE' and current_price > cond_value: return True, f"Precio ({current_price:.4f}) > ({cond_value:.4f})"
-    if cond_type == 'PRICE_BELOW' and current_price < cond_value: return True, f"Precio ({current_price:.4f}) < ({cond_value:.4f})"
-    return False, ""
 
-def _evaluate_exit_conditions(operacion: 'Operacion', current_price: float) -> Tuple[bool, str]:
-    summary = pm_api.api.get_position_summary()
-    if summary and 'error' not in summary:
-        roi = summary.get('operation_roi', 0.0)
-        if operacion.tp_roi_pct is not None and roi >= operacion.tp_roi_pct: return True, f"TP-ROI alcanzado ({roi:.2f}%)"
-        if operacion.sl_roi_pct is not None and roi <= operacion.sl_roi_pct: return True, f"SL-ROI alcanzado ({roi:.2f}%)"
-    
-    if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios: return True, f"Límite de {operacion.max_comercios} trades"
-    
-    start_time = operacion.tiempo_inicio_ejecucion
-    if operacion.tiempo_maximo_min is not None and start_time:
-        elapsed_min = (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() / 60.0
-        if elapsed_min >= operacion.tiempo_maximo_min: return True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min)"
-            
-    exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
-    if exit_type and exit_value is not None:
-        if exit_type == 'PRICE_ABOVE' and current_price > exit_value: return True, f"Precio de salida ({current_price:.4f}) > ({exit_value:.4f})"
-        if exit_type == 'PRICE_BELOW' and current_price < exit_value: return True, f"Precio de salida ({current_price:.4f}) < ({exit_value:.4f})"
-    
-    return False, ""
-
-# --- Funciones de _data_processing.py ---
 def _process_tick_and_generate_signal(timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
     global _previous_raw_event_price, _is_first_event
     increment, decrement = 0, 0
@@ -233,15 +268,14 @@ def _process_tick_and_generate_signal(timestamp: datetime.datetime, price: float
     _previous_raw_event_price = price
     return signal_data
 
-# --- Funciones de _limit_checks.py ---
+
 def _check_session_limits(current_price: float, timestamp: datetime.datetime, op_mode: str, stop_event: Optional[threading.Event]):
     global _global_stop_loss_triggered
-    if not (pm_api and pm_api.api.is_initialized()) or _global_stop_loss_triggered: return
+    if not (pm_api and pm_api.is_initialized()) or _global_stop_loss_triggered: return
 
-    # Lógica de límite de tiempo de sesión
-    time_limit_cfg = pm_api.api.get_session_time_limit()
+    time_limit_cfg = pm_api.get_session_time_limit()
     max_minutes, action = time_limit_cfg.get("duration", 0), time_limit_cfg.get("action", "NEUTRAL").upper()
-    start_time = pm_api.api.get_session_start_time()
+    start_time = pm_api.get_session_start_time()
     if start_time and max_minutes > 0:
         elapsed_minutes = (timestamp - start_time).total_seconds() / 60.0
         if elapsed_minutes >= max_minutes:
@@ -249,42 +283,38 @@ def _check_session_limits(current_price: float, timestamp: datetime.datetime, op
                 _global_stop_loss_triggered = True
                 msg = f"LÍMITE DE TIEMPO DE SESIÓN (STOP) ALCANZADO ({elapsed_minutes:.2f} >= {max_minutes} min)"
                 memory_logger.log(msg, "ERROR")
-                pm_api.api.close_all_logical_positions('long', "TIME_LIMIT_STOP")
-                pm_api.api.close_all_logical_positions('short', "TIME_LIMIT_STOP")
+                pm_api.close_all_logical_positions('long', "TIME_LIMIT_STOP")
+                pm_api.close_all_logical_positions('short', "TIME_LIMIT_STOP")
                 if stop_event: stop_event.set()
                 raise GlobalStopLossException(msg)
-            elif not pm_api.api.is_session_tp_hit():
+            elif not pm_api.is_session_tp_hit():
                 memory_logger.log(f"LÍMITE DE TIEMPO DE SESIÓN (NEUTRAL) ALCANZADO", "INFO")
-                # El PM ahora es responsable de cambiar su estado interno a "neutral"
-                # pm_api.api.set_session_tp_hit(True)
 
-    # Lógica de límites de ROI de sesión
-    summary = pm_api.api.get_position_summary()
+    summary = pm_api.get_position_summary()
     initial_capital = summary.get('initial_total_capital', 0.0)
     if initial_capital < 1e-9: return
 
-    unrealized_pnl = pm_api.api.get_unrealized_pnl(current_price)
+    unrealized_pnl = pm_api.get_unrealized_pnl(current_price)
     realized_pnl = summary.get('total_realized_pnl_session', 0.0)
     current_roi = utils.safe_division(realized_pnl + unrealized_pnl, initial_capital) * 100.0
 
-    if getattr(config, 'SESSION_ROI_TP_ENABLED', False) and not pm_api.api.is_session_tp_hit():
-        tp_pct = pm_api.api.get_global_tp_pct()
+    if getattr(config, 'SESSION_ROI_TP_ENABLED', False) and not pm_api.is_session_tp_hit():
+        tp_pct = pm_api.get_global_tp_pct()
         if tp_pct and tp_pct > 0 and current_roi >= tp_pct:
             memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
-            # pm_api.api.set_session_tp_hit(True)
 
     if getattr(config, 'SESSION_ROI_SL_ENABLED', False):
-        sl_pct = pm_api.api.get_global_sl_pct()
+        sl_pct = pm_api.get_global_sl_pct()
         if sl_pct and sl_pct > 0 and current_roi <= -abs(sl_pct):
             _global_stop_loss_triggered = True
             msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ALCANZADO ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
             memory_logger.log(msg, "ERROR")
-            pm_api.api.close_all_logical_positions('long', "GLOBAL_SL_ROI")
-            pm_api.api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
+            pm_api.close_all_logical_positions('long', "GLOBAL_SL_ROI")
+            pm_api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
             if stop_event: stop_event.set()
             raise GlobalStopLossException(msg)
 
-# --- Función de Ayuda para Impresión en Consola ---
+
 def _print_tick_status_to_console(signal_data: Dict, timestamp: datetime.datetime, price: float):
     if _operation_mode.startswith(('live')) and getattr(config, 'PRINT_TICK_LIVE_STATUS', False):
         try:
@@ -292,17 +322,24 @@ def _print_tick_status_to_console(signal_data: Dict, timestamp: datetime.datetim
             price_prec = getattr(config, 'PRICE_PRECISION', 4)
             price_str = f"{price:.{price_prec}f}"
             
-            summary = pm_api.api.get_position_summary()
-            op_status = summary.get('operation_status', {})
-            op_tendencia = op_status.get('tendencia', 'NEUTRAL')
-            max_pos = op_status.get('max_posiciones_logicas', 'N/A')
+            summary = pm_api.get_position_summary()
             
-            hdr = f" TICK @ {ts_str} | Precio: {price_str} | Op: {op_tendencia} "
+            op_long = om_api.get_operation_by_side('long')
+            op_short = om_api.get_operation_by_side('short')
+            
+            if not op_long or not op_short: return # Safety check
+
+            status_long = f"L: {op_long.tendencia if op_long.estado == 'ACTIVA' else 'OFF'}"
+            status_short = f"S: {op_short.tendencia if op_short.estado == 'ACTIVA' else 'OFF'}"
+
+            hdr = f" TICK @ {ts_str} | Precio: {price_str} | Ops: {status_long}, {status_short} "
             print("\n" + f"{hdr:=^80}")
             print(f"  TA:  EMA={signal_data.get('ema', 'N/A'):<15} W.Inc={signal_data.get('weighted_increment', 'N/A'):<8} W.Dec={signal_data.get('weighted_decrement', 'N/A'):<8}")
             print(f"  SIG: {signal_data.get('signal', 'N/A'):<15} | Razón: {signal_data.get('signal_reason', 'N/A')}")
             if summary and 'error' not in summary:
-                print(f"  POS: Longs={summary.get('open_long_positions_count', 0)}/{max_pos} | Shorts={summary.get('open_short_positions_count', 0)}/{max_pos} | PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
+                max_pos_l = op_long.max_posiciones_logicas
+                max_pos_s = op_short.max_posiciones_logicas
+                print(f"  POS: Longs={summary.get('open_long_positions_count', 0)}/{max_pos_l} | Shorts={summary.get('open_short_positions_count', 0)}/{max_pos_s} | PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
             else:
                 print(f"  POS: Error obteniendo resumen del PM: {summary.get('error', 'N/A')}")
             print("=" * 80)

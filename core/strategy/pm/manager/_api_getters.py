@@ -1,11 +1,11 @@
 """
 Módulo del Position Manager: API de Getters.
 
-v6.1 (Consolidación de Entidades):
-- Se actualiza `get_position_summary` para que `operation_mode` refleje
-  la tendencia de la `operacion_activa` directamente.
-- Se mejora `get_operation_state` para ser más robusto y añadir el
-  cálculo del tiempo de ejecución.
+v7.3 (Corrección Final de Getters):
+- Se corrige la función `get_unrealized_pnl` para que obtenga las operaciones
+  LONG y SHORT de forma independiente usando `get_operation_by_side`.
+- Esta corrección elimina la última llamada a la función obsoleta `get_operation`
+  dentro del PM, solucionando el `AttributeError` persistente.
 """
 import datetime
 import copy
@@ -27,56 +27,64 @@ class _ApiGetters:
 
     def get_position_summary(self) -> dict:
         """
-        Obtiene un resumen completo y FRESCO del estado del PM.
-        Esta función es la fuente única de datos para el dashboard.
+        Obtiene un resumen completo y FRESCO del estado del PM, adaptado para la
+        arquitectura de operaciones duales (LONG y SHORT).
         """
-        if not self._initialized: return {"error": "PM no instanciado"}
+        if not self._initialized:
+            return {"error": "PM no instanciado"}
         
-        operacion = self._om_api.get_operation()
-        if not operacion:
-            return {"error": "Operación no disponible"}
+        long_op = self._om_api.get_operation_by_side('long')
+        short_op = self._om_api.get_operation_by_side('short')
+
+        if not long_op or not short_op:
+            return {"error": "Operaciones Long/Short no disponibles en el OM"}
 
         ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
 
-        open_longs = operacion.posiciones_activas['long']
-        open_shorts = operacion.posiciones_activas['short']
+        open_longs = long_op.posiciones_activas.get('long', [])
+        open_shorts = short_op.posiciones_activas.get('short', [])
         
-        # (COMENTADO) La referencia a _milestones es obsoleta.
-        # milestones_as_dicts = [asdict(m) for m in self._milestones]
+        unrealized_pnl_long = sum((current_market_price - pos.entry_price) * pos.size_contracts for pos in open_longs)
+        unrealized_pnl_short = sum((pos.entry_price - current_market_price) * pos.size_contracts for pos in open_shorts)
+        total_unrealized_pnl = unrealized_pnl_long + unrealized_pnl_short
         
-        operation_unrealized_pnl = 0.0
-        for side in ['long', 'short']:
-            for pos in operacion.posiciones_activas[side]:
-                entry = pos.entry_price
-                size = pos.size_contracts
-                if side == 'long': operation_unrealized_pnl += (current_market_price - entry) * size
-                else: operation_unrealized_pnl += (entry - current_market_price) * size
+        total_realized_pnl_ops = long_op.pnl_realizado_usdt + short_op.pnl_realizado_usdt
+        total_pnl_ops = total_realized_pnl_ops + total_unrealized_pnl
         
-        operation_total_pnl = operacion.pnl_realizado_usdt + operation_unrealized_pnl
-        initial_capital_op = operacion.capital_inicial_usdt
-        operation_roi = self._utils.safe_division(operation_total_pnl, initial_capital_op) * 100 if initial_capital_op > 0 else 0.0
+        initial_capital_ops = long_op.capital_inicial_usdt + short_op.capital_inicial_usdt
+        operation_roi = self._utils.safe_division(total_pnl_ops, initial_capital_ops) * 100 if initial_capital_ops > 0 else 0.0
 
-        # Lógica replicada de get_operation_state para mantener la estructura del summary
-        op_dict = asdict(operacion)
-        if operacion.tiempo_inicio_ejecucion:
-            duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
-            total_seconds = int(duration.total_seconds())
-            hours, remainder = divmod(total_seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            op_dict['tiempo_ejecucion_str'] = f"{hours:02}:{minutes:02}:{seconds:02}"
-        else:
-            op_dict['tiempo_ejecucion_str'] = "00:00:00"
+        operation_long_pnl = long_op.pnl_realizado_usdt + unrealized_pnl_long
+        operation_short_pnl = short_op.pnl_realizado_usdt + unrealized_pnl_short
+        operation_long_roi = self._utils.safe_division(operation_long_pnl, long_op.capital_inicial_usdt) * 100 if long_op.capital_inicial_usdt > 0 else 0.0
+        operation_short_roi = self._utils.safe_division(operation_short_pnl, short_op.capital_inicial_usdt) * 100 if short_op.capital_inicial_usdt > 0 else 0.0
+
+        active_tendencies = []
+        if long_op.estado == 'ACTIVA': active_tendencies.append(long_op.tendencia)
+        if short_op.estado == 'ACTIVA': active_tendencies.append(short_op.tendencia)
+        display_tendencia = ' & '.join(active_tendencies) if active_tendencies else 'NEUTRAL'
+
+        reference_op = long_op if long_op.estado == 'ACTIVA' else short_op
+        
+        op_status_summary = {
+            'tendencia': display_tendencia,
+            'apalancamiento': reference_op.apalancamiento,
+            'tamaño_posicion_base_usdt': reference_op.tamaño_posicion_base_usdt,
+            'max_posiciones_logicas': f"L:{long_op.max_posiciones_logicas}/S:{short_op.max_posiciones_logicas}",
+            'tiempo_ejecucion_str': "N/A"
+        }
 
         summary_data = {
             "initialized": True,
-            # (MODIFICADO) Se usa la tendencia de la operacion para ser más preciso.
-            "operation_mode": operacion.tendencia,
-            # (COMENTADO) Código anterior
-            # "operation_mode": self._operation_mode,
-            "operation_status": op_dict,
-            "operation_pnl": operation_total_pnl,
+            "operation_mode": display_tendencia,
+            "operation_status": op_status_summary,
+            "operation_pnl": total_pnl_ops,
             "operation_roi": operation_roi,
+            "operation_long_pnl": operation_long_pnl,
+            "operation_short_pnl": operation_short_pnl,
+            "operation_long_roi": operation_long_roi,
+            "operation_short_roi": operation_short_roi,
             "bm_balances": self._balance_manager.get_balances_summary(),
             "open_long_positions_count": len(open_longs),
             "open_short_positions_count": len(open_shorts),
@@ -86,8 +94,6 @@ class _ApiGetters:
             "initial_total_capital": self._balance_manager.get_initial_total_capital(),
             "real_account_balances": self._balance_manager.get_real_balances_cache(),
             "session_limits": { "time_limit": self.get_session_time_limit() },
-            # (COMENTADO) La clave "all_milestones" ya no se necesita en el resumen.
-            # "all_milestones": milestones_as_dicts,
             "current_market_price": current_market_price,
         }
         return summary_data
@@ -95,21 +101,19 @@ class _ApiGetters:
     def get_unrealized_pnl(self, current_price: float) -> float:
         """Calcula el PNL no realizado total de todas las posiciones abiertas en la sesión."""
         total_pnl = 0.0
-        operacion = self._om_api.get_operation()
-        if not operacion:
-            return 0.0
-            
-        for side in ['long', 'short']:
-            for pos in operacion.posiciones_activas[side]:
-                entry = pos.entry_price
-                size = pos.size_contracts
-                if side == 'long': total_pnl += (current_price - entry) * size
-                else: total_pnl += (entry - current_price) * size
+        
+        long_op = self._om_api.get_operation_by_side('long')
+        short_op = self._om_api.get_operation_by_side('short')
+        
+        if long_op:
+            for pos in long_op.posiciones_activas.get('long', []):
+                total_pnl += (current_price - pos.entry_price) * pos.size_contracts
+        if short_op:
+            for pos in short_op.posiciones_activas.get('short', []):
+                total_pnl += (pos.entry_price - current_price) * pos.size_contracts
+                
         return total_pnl
     
-    # (COMENTADO) get_trend_state es obsoleto y reemplazado por get_operation_state ---
-    # def get_trend_state(self) -> Dict[str, Any]: ...
-
     def get_session_start_time(self) -> Optional[datetime.datetime]: 
         """Obtiene la hora de inicio de la sesión."""
         return self._session_start_time
@@ -125,13 +129,6 @@ class _ApiGetters:
     def get_global_sl_pct(self) -> Optional[float]: 
         """Obtiene el umbral de Stop Loss Global por ROI de la sesión."""
         return self._global_stop_loss_roi_pct
-        
-    # (COMENTADO) get_all_milestones es obsoleto en la nueva arquitectura.
-    # def get_all_milestones(self) -> List[Any]: 
-    #     """Obtiene todos los hitos (triggers) como objetos Hito."""
-    #     if hasattr(self, '_milestones'):
-    #         return copy.deepcopy(self._milestones)
-    #     return []
         
     def get_session_time_limit(self) -> Dict[str, Any]:
         """Obtiene la configuración del límite de tiempo de la sesión."""

@@ -1,9 +1,10 @@
 """
 Módulo del Position Manager: API de Acciones.
 
-v6.1 (Corrección de Estado):
-- Se elimina la llamada al método obsoleto `save_state()` dentro de
-  `create_or_update_operation`, que causaba un `AttributeError`.
+v8.0 (Operaciones Duales):
+- Se corrige `close_all_logical_positions` para que obtenga la operación
+  específica del lado a cerrar (`long` o `short`) usando la nueva
+  om_api, solucionando el `AttributeError` final.
 """
 import datetime
 from typing import Optional, Dict, Any, Tuple
@@ -37,7 +38,7 @@ class _ApiActions:
         self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
         return True, msg
 
-    # --- Métodos para la Operación Estratégica Única ---
+    # --- Métodos de Gestión de Posiciones ---
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         """Cierra una posición lógica específica por su índice."""
@@ -53,12 +54,25 @@ class _ApiActions:
             self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR")
             return False
         
-        operacion = self._om_api.get_operation()
-        if not operacion: return False
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se obtiene la operación específica del lado que se está cerrando.
+        operacion = self._om_api.get_operation_by_side(side)
+        # --- FIN DE LA CORRECCIÓN ---
         
-        count = len(operacion.posiciones_activas[side])
-        if count == 0: return True
+        if not operacion:
+            self._memory_logger.log(f"CIERRE TOTAL FALLIDO: No se encontró la operación para el lado {side.upper()}.", level="ERROR")
+            return False
         
+        # El resto de la lógica no cambia, ya que opera sobre el 'side' correcto.
+        # Se accede a .get() para evitar un KeyError si no hay posiciones de ese lado en el diccionario.
+        count = len(operacion.posiciones_activas.get(side, []))
+        if count == 0:
+            return True
+        
+        self._memory_logger.log(f"Iniciando cierre de {count} posiciones del lado {side.upper()}...", "INFO")
+        
+        # Iterar en orden inverso para evitar problemas de índice al eliminar elementos.
         for i in range(count - 1, -1, -1):
             self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
+        
         return True
