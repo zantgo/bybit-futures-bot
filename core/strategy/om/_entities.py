@@ -46,7 +46,10 @@ class Operacion:
     tsl_distancia_pct: float = 0.1
 
     # --- Condiciones de Salida (Límites) ---
-    tp_roi_pct: Optional[float] = None
+    # MODIFICADO: Se elimina tp_roi_pct y se añaden los campos para el TSL por ROI
+    tsl_roi_activacion_pct: Optional[float] = None # NUEVO
+    tsl_roi_distancia_pct: Optional[float] = None  # NUEVO
+    
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
@@ -60,3 +63,7 @@ class Operacion:
     comercios_cerrados_contador: int = 0
     tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
     posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})
+
+    # NUEVO: Campos para el estado dinámico del TSL por ROI
+    tsl_roi_activo: bool = False
+    tsl_roi_peak_pct: float = 0.0

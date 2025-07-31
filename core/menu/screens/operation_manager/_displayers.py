@@ -121,7 +121,6 @@ def _display_operation_conditions(operacion: Operacion):
     """Muestra la sección de condiciones de entrada y salida de la operación."""
     print("\n--- Condiciones de la Operación " + "-"*54)
     
-    # MODIFICADO: Añadimos los nuevos estados y colores
     status_color_map = {
         'ACTIVA': "\033[92m",    # Verde
         'PAUSADA': "\033[93m",   # Amarillo
@@ -147,8 +146,19 @@ def _display_operation_conditions(operacion: Operacion):
     if operacion.tipo_cond_salida and operacion.valor_cond_salida is not None:
         op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
         exit_conditions.append(f"Precio {op} {operacion.valor_cond_salida:.4f}")
-    if operacion.tp_roi_pct is not None: 
-        exit_conditions.append(f"TP-ROI >= {operacion.tp_roi_pct}%")
+    
+    # --- INICIO DE LA MODIFICACIÓN: Mostrar TSL por ROI ---
+    if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
+        tsl_config_str = (f"TSL-ROI: Activa a {operacion.tsl_roi_activacion_pct}%, "
+                          f"Distancia {operacion.tsl_roi_distancia_pct}%")
+        
+        # Añadir estado dinámico si ya está activo
+        if operacion.tsl_roi_activo:
+            tsl_config_str += f" (ACTIVO | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
+        
+        exit_conditions.append(tsl_config_str)
+    # --- FIN DE LA MODIFICACIÓN ---
+
     if operacion.sl_roi_pct is not None: 
         exit_conditions.append(f"SL-ROI <= {operacion.sl_roi_pct}%")
     if operacion.tiempo_maximo_min is not None: 

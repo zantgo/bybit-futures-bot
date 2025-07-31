@@ -188,7 +188,6 @@ def _check_operation_triggers(current_price: float):
                         entry_condition_met = True
                 
                 if entry_condition_met:
-                    # MODIFICADO: Llamamos al método específico del OM para activar
                     om_api.activar_por_condicion(side)
 
             # --- LÓGICA DE SALIDA (si la operación está activa) ---
@@ -196,7 +195,6 @@ def _check_operation_triggers(current_price: float):
                 exit_condition_met = False
                 reason = ""
                 
-                # 1. Comprobar condiciones de límites de la operación (ROI, trades, tiempo)
                 summary = pm_api.get_position_summary()
                 if summary and 'error' not in summary:
                     unrealized_pnl_side = 0.0
@@ -212,10 +210,27 @@ def _check_operation_triggers(current_price: float):
                     initial_capital_side = operacion.capital_inicial_usdt
                     
                     roi = (total_pnl_side / initial_capital_side) * 100 if initial_capital_side > 0 else 0.0
-                    
-                    if operacion.tp_roi_pct is not None and roi >= operacion.tp_roi_pct:
-                        exit_condition_met, reason = True, f"TP-ROI alcanzado ({roi:.2f}%)"
-                    elif operacion.sl_roi_pct is not None and roi <= -abs(operacion.sl_roi_pct):
+
+                    # --- INICIO DE LA MODIFICACIÓN: Lógica de TSL por ROI ---
+                    if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
+                        if not operacion.tsl_roi_activo and roi >= operacion.tsl_roi_activacion_pct:
+                            operacion.tsl_roi_activo = True
+                            operacion.tsl_roi_peak_pct = roi
+                            memory_logger.log(
+                                f"TSL-ROI para Operación {side.upper()} ACTIVADO. ROI actual: {roi:.2f}%, "
+                                f"Pico inicial: {operacion.tsl_roi_peak_pct:.2f}%", "INFO"
+                            )
+                        if operacion.tsl_roi_activo:
+                            if roi > operacion.tsl_roi_peak_pct:
+                                operacion.tsl_roi_peak_pct = roi
+                            
+                            umbral_disparo = operacion.tsl_roi_peak_pct - operacion.tsl_roi_distancia_pct
+                            if roi <= umbral_disparo:
+                                exit_condition_met = True
+                                reason = f"TSL-ROI disparado (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
+                    # --- FIN DE LA MODIFICACIÓN ---
+
+                    if not exit_condition_met and operacion.sl_roi_pct is not None and roi <= -abs(operacion.sl_roi_pct):
                         exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}%)"
 
                 if not exit_condition_met and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
@@ -227,7 +242,6 @@ def _check_operation_triggers(current_price: float):
                     if elapsed_min >= operacion.tiempo_maximo_min:
                         exit_condition_met, reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min)"
 
-                # 2. Comprobar condición de salida por precio
                 exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
                 if not exit_condition_met and exit_type and exit_value is not None:
                     if exit_type == 'PRICE_ABOVE' and current_price > exit_value:
@@ -236,15 +250,12 @@ def _check_operation_triggers(current_price: float):
                         exit_condition_met, reason = True, f"Precio de salida ({current_price:.4f}) < ({exit_value:.4f})"
 
                 if exit_condition_met:
-                    # MODIFICADO: Nueva lógica de acción al finalizar
                     accion_final = operacion.accion_al_finalizar
-                    
                     log_msg = (
                         f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {reason}. "
                         f"Acción configurada: {accion_final.upper()}"
                     )
                     memory_logger.log(log_msg, "WARN")
-
                     if accion_final == 'PAUSAR':
                         om_api.pausar_operacion(side)
                     elif accion_final == 'DETENER':
@@ -338,10 +349,9 @@ def _print_tick_status_to_console(signal_data: Dict, timestamp: datetime.datetim
             
             if not op_long or not op_short: return # Safety check
 
-            # MODIFICADO: Adaptar el display al nuevo ciclo de vida
             def get_op_display(op):
                 if op.estado == 'ACTIVA': return f"{op.tendencia}"
-                return op.estado.upper() # Muestra PAUSADA o DETENIDA
+                return op.estado.upper()
 
             status_long = f"L: {get_op_display(op_long)}"
             status_short = f"S: {get_op_display(op_short)}"

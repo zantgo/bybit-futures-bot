@@ -81,10 +81,10 @@ class OperationManager:
 
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        Crea o actualiza una operación. Gestiona las transiciones de estado,
-        incluyendo DETENIDA -> EN_ESPERA/ACTIVA y ACTIVA -> EN_ESPERA.
+        Crea o actualiza una operación. Gestiona las transiciones de estado y el ajuste
+        dinámico del capital para operaciones activas.
         """
-        from core.strategy.pm import api as pm_api # Para obtener el precio actual
+        from core.strategy.pm import api as pm_api
 
         target_operation = self.get_operation_by_side(side)
         if not target_operation:
@@ -93,7 +93,11 @@ class OperationManager:
         estado_original = target_operation.estado
         changes_log = []
 
-        # Aplicar cambios de parámetros
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Capital Dinámico ---
+        # Capturar valores originales ANTES de cualquier cambio
+        capital_calculado_anterior = target_operation.tamaño_posicion_base_usdt * target_operation.max_posiciones_logicas
+        
+        # --- Aplicar cambios de parámetros ---
         for key, value in params.items():
             if hasattr(target_operation, key):
                 old_value = getattr(target_operation, key)
@@ -101,15 +105,14 @@ class OperationManager:
                     setattr(target_operation, key, value)
                     changes_log.append(f"'{key}': {old_value} -> {value}")
         
-        # Lógica de transición de estado
+        # --- Lógica de transición de estado y ajuste de capital ---
         if estado_original == 'DETENIDA' and params: # Configurando una nueva operación
-            # Capital inicial se establece solo al configurar una nueva operación
             summary = pm_api.get_position_summary()
             if summary and not summary.get('error'):
                 balances = summary.get('bm_balances', {})
                 capital_key = 'operational_long_margin' if side == 'long' else 'operational_short_margin'
                 target_operation.capital_inicial_usdt = balances.get(capital_key, 0.0)
-                changes_log.append(f"'capital_inicial': {target_operation.capital_inicial_usdt:.2f}$")
+                changes_log.append(f"'capital_inicial_usdt': {target_operation.capital_inicial_usdt:.2f}$ (asignado)")
 
             if target_operation.tipo_cond_entrada == 'MARKET':
                 target_operation.estado = 'ACTIVA'
@@ -119,23 +122,40 @@ class OperationManager:
             
             changes_log.append(f"'estado': DETENIDA -> {target_operation.estado}")
 
-        elif estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params: # Modificando una op activa
-            current_price = pm_api.get_current_market_price() or 0.0
-            cond_type = target_operation.tipo_cond_entrada
-            cond_value = target_operation.valor_cond_entrada
+        elif estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA']: # Modificando una operación en curso
+            
+            # 1. Ajuste de capital dinámico
+            if 'tamaño_posicion_base_usdt' in params or 'max_posiciones_logicas' in params:
+                capital_calculado_nuevo = target_operation.tamaño_posicion_base_usdt * target_operation.max_posiciones_logicas
+                diferencia_capital = capital_calculado_nuevo - capital_calculado_anterior
 
-            condicion_cumplida_ahora = False
-            if cond_type == 'MARKET':
-                condicion_cumplida_ahora = True
-            elif cond_value is not None and current_price > 0:
-                if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
-                    condicion_cumplida_ahora = True
-                elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
-                    condicion_cumplida_ahora = True
+                if diferencia_capital > 0:
+                    target_operation.capital_inicial_usdt += diferencia_capital
+                    changes_log.append(f"'capital_inicial_usdt': +{diferencia_capital:.2f}$ (ajustado)")
+                    self._memory_logger.log(f"CAPITAL AJUSTADO para Operación {side.upper()}: +{diferencia_capital:.2f}$. "
+                                            f"Nuevo capital base: {target_operation.capital_inicial_usdt:.2f}$", "WARN")
+                elif diferencia_capital < 0:
+                    self._memory_logger.log(f"WARN: Se intentó reducir el capital de una operación activa. "
+                                            f"Esta acción no está soportada y el capital inicial no será modificado.", "WARN")
 
-            if not condicion_cumplida_ahora:
-                target_operation.estado = 'EN_ESPERA'
-                changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
+            # 2. Transición ACTIVA -> EN_ESPERA (si aplica)
+            if estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
+                current_price = pm_api.get_current_market_price() or 0.0
+                cond_type = target_operation.tipo_cond_entrada
+                cond_value = target_operation.valor_cond_entrada
+
+                condicion_cumplida_ahora = False
+                if cond_type == 'MARKET' or cond_value is None:
+                    condicion_cumplida_ahora = True
+                elif current_price > 0:
+                    if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
+                        condicion_cumplida_ahora = True
+                    elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
+                        condicion_cumplida_ahora = True
+
+                if not condicion_cumplida_ahora:
+                    target_operation.estado = 'EN_ESPERA'
+                    changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -161,13 +181,9 @@ class OperationManager:
         if not target_operation or target_operation.estado != 'PAUSADA':
             return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
 
-        # Decide a qué estado volver. Si tiene condición de entrada no MARKET, vuelve a EN_ESPERA.
-        # En la práctica, al reanudar manualmente, lo lógico es que vuelva a ACTIVA.
-        # Si queremos una lógica más compleja, se puede guardar el estado previo a la pausa.
         # Por simplicidad y control del usuario, la reanudamos a ACTIVA.
         target_operation.estado = 'ACTIVA'
         
-        # Si no tenía tiempo de inicio (porque se pausó desde EN_ESPERA), se lo asignamos ahora.
         if not target_operation.tiempo_inicio_ejecucion:
             target_operation.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
         

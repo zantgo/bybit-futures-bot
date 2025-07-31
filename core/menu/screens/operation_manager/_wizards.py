@@ -81,59 +81,73 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
             params_to_update['tendencia'] = tendencia
             print(f"  -> Tendencia establecida automáticamente a: {tendencia}")
         else:
-            print(f"\nModificando Operación ACTIVA (Tendencia: {current_op.tendencia}). Los parámetros de trading y límites se pueden ajustar.")
-        
+            # Al modificar, también se puede cambiar la condición de entrada
+            print("\n--- 1. Condición de Entrada ---")
+            cond_menu_items = ["[1] Activación Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
+            cond_choice = TerminalMenu(cond_menu_items, title="Elige la condición para que la operación se active:").show()
+            if cond_choice == 0: 
+                params_to_update['tipo_cond_entrada'] = 'MARKET'
+                params_to_update['valor_cond_entrada'] = 0.0
+            elif cond_choice == 1:
+                params_to_update['tipo_cond_entrada'] = 'PRICE_ABOVE'
+                params_to_update['valor_cond_entrada'] = get_input("Activar si precio SUPERA", float, default=current_op.valor_cond_entrada, is_optional=False)
+            elif cond_choice == 2:
+                params_to_update['tipo_cond_entrada'] = 'PRICE_BELOW'
+                params_to_update['valor_cond_entrada'] = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada, is_optional=False)
+
         # --- SECCIÓN 2: PARÁMETROS DE TRADING ---
         use_config_defaults = not is_modification
         default_base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 1.0) if use_config_defaults else current_op.tamaño_posicion_base_usdt
         default_max_pos = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5) if use_config_defaults else current_op.max_posiciones_logicas
         default_leverage = getattr(config_module, 'POSITION_LEVERAGE', 10.0) if use_config_defaults else current_op.apalancamiento
-        default_sl_ind = current_op.sl_posicion_individual_pct
-        default_tsl_act = current_op.tsl_activacion_pct
-        default_tsl_dist = current_op.tsl_distancia_pct
         
-        print(f"\n--- {'2.' if not is_modification else '1.'} Parámetros de Trading (Obligatorios) ---")
-        base_size = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01, is_optional=False)
-        params_to_update['tamaño_posicion_base_usdt'] = base_size
-        max_pos = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1, is_optional=False)
-        params_to_update['max_posiciones_logicas'] = max_pos
-        leverage = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0, is_optional=False)
-        params_to_update['apalancamiento'] = leverage
+        print(f"\n--- 2. Parámetros de Trading (Obligatorios) ---")
+        params_to_update['tamaño_posicion_base_usdt'] = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01)
+        params_to_update['max_posiciones_logicas'] = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1)
+        params_to_update['apalancamiento'] = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
 
-        print(f"\n--- {'3.' if not is_modification else '2.'} Riesgo por Posición (Opcional, Enter para desactivar) ---")
-        sl_ind = get_input("SL individual (%)", float, default=default_sl_ind, min_val=0.0, is_optional=True)
-        params_to_update['sl_posicion_individual_pct'] = sl_ind if sl_ind is not None else 0.0
-        tsl_act = get_input("Activación TSL (%)", float, default=default_tsl_act, min_val=0.0, is_optional=True)
-        params_to_update['tsl_activacion_pct'] = tsl_act if tsl_act is not None else 0.0
-        tsl_dist = get_input("Distancia TSL (%)", float, default=default_tsl_dist, min_val=0.0, is_optional=True)
-        params_to_update['tsl_distancia_pct'] = tsl_dist if tsl_dist is not None else 0.0
+        print(f"\n--- 3. Riesgo por Posición (Opcional, Enter para desactivar) ---")
+        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=current_op.sl_posicion_individual_pct, min_val=0.0, is_optional=True) or 0.0
+        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=current_op.tsl_activacion_pct, min_val=0.0, is_optional=True) or 0.0
+        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=current_op.tsl_distancia_pct, min_val=0.0, is_optional=True) or 0.0
 
         # --- SECCIÓN 3: CONDICIONES DE SALIDA ---
-        print(f"\n--- {'4.' if not is_modification else '3.'} Condiciones de Salida de la Operación (Opcional) ---")
+        print(f"\n--- 4. Condiciones de Salida de la Operación (Opcional) ---")
         
-        exit_cond_choice = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si Precio SUPERIOR a", "[3] Salir si Precio INFERIOR a"], title="Añadir/Modificar condición de salida por precio:").show()
-        if exit_cond_choice == 0:
-            params_to_update['tipo_cond_salida'], params_to_update['valor_cond_salida'] = None, None
-        elif exit_cond_choice == 1:
-            params_to_update['tipo_cond_salida'] = 'PRICE_ABOVE'
-            val = get_input("Salir si precio SUPERA", float, default=current_op.valor_cond_salida, is_optional=False)
-            params_to_update['valor_cond_salida'] = val
-        elif exit_cond_choice == 2:
-            params_to_update['tipo_cond_salida'] = 'PRICE_BELOW'
-            val = get_input("Salir si precio BAJA DE", float, default=current_op.valor_cond_salida, is_optional=False)
-            params_to_update['valor_cond_salida'] = val
+        # --- INICIO DE LA MODIFICACIÓN: Configuración del TSL por ROI ---
+        # Reemplazamos el TP por ROI estático por el TSL por ROI dinámico.
+        tsl_roi_act = get_input(
+            "Activación TSL por ROI (%)", 
+            float, 
+            default=current_op.tsl_roi_activacion_pct, 
+            min_val=0.0, 
+            is_optional=True
+        )
+        params_to_update['tsl_roi_activacion_pct'] = tsl_roi_act
+
+        # Solo preguntamos por la distancia si se ha definido una activación.
+        if tsl_roi_act is not None and tsl_roi_act > 0:
+            tsl_roi_dist = get_input(
+                "Distancia TSL por ROI (%)", 
+                float, 
+                default=current_op.tsl_roi_distancia_pct, 
+                min_val=0.1, # La distancia debe ser mayor que cero
+                is_optional=False # Es obligatoria si hay activación
+            )
+            params_to_update['tsl_roi_distancia_pct'] = tsl_roi_dist
+        else:
+            # Si el usuario desactiva la activación, la distancia también se desactiva.
+            params_to_update['tsl_roi_distancia_pct'] = None
+        # --- FIN DE LA MODIFICACIÓN ---
             
-        tp_roi = get_input("TP por ROI (%)", float, default=current_op.tp_roi_pct, min_val=0.0, is_optional=True)
-        params_to_update['tp_roi_pct'] = tp_roi
-        sl_roi = get_input("SL por ROI (%) (valor positivo)", float, default=abs(current_op.sl_roi_pct) if current_op.sl_roi_pct else None, min_val=0.0, is_optional=True)
+        sl_roi_val = abs(current_op.sl_roi_pct) if current_op.sl_roi_pct else None
+        sl_roi = get_input("SL por ROI (%) (valor positivo)", float, default=sl_roi_val, min_val=0.0, is_optional=True)
         params_to_update['sl_roi_pct'] = -abs(sl_roi) if sl_roi is not None else None
         max_trades = get_input("Máx. trades", int, default=current_op.max_comercios, min_val=1, is_optional=True)
         params_to_update['max_comercios'] = max_trades
         max_duracion = get_input("Duración máx. (min)", int, default=current_op.tiempo_maximo_min, min_val=1, is_optional=True)
         params_to_update['tiempo_maximo_min'] = max_duracion
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # NUEVO: Configuración de la acción al finalizar
         print("\n--- Acción al Finalizar (Cuando se cumple un límite de la operación) ---")
         accion_final_menu = TerminalMenu(
             ["[1] Pausar operación (permite reanudar)", "[2] Detener y resetear operación"],
@@ -142,12 +156,10 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         )
         accion_choice = accion_final_menu.show()
         
-        # Guardamos la elección. Si el usuario presiona ESC, no se actualiza y se mantiene el default.
         if accion_choice == 0:
             params_to_update['accion_al_finalizar'] = 'PAUSAR'
         elif accion_choice == 1:
             params_to_update['accion_al_finalizar'] = 'DETENER'
-        # --- FIN DE LA MODIFICACIÓN ---
             
     except UserInputCancelled:
         print("\n\nAsistente de configuración cancelado.")
@@ -169,7 +181,6 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
 def _force_stop_wizard(om_api: Any, pm_api: Any, side: str):
     """
     Asistente para forzar la finalización de la operación para un lado específico.
-    Ahora solo afecta a las posiciones del 'side' correspondiente.
     """
     title = f"¿Cómo deseas finalizar la operación {side.upper()}?"
     end_menu_items = [
@@ -181,16 +192,7 @@ def _force_stop_wizard(om_api: Any, pm_api: Any, side: str):
     choice = TerminalMenu(end_menu_items, title=title, **MENU_STYLE).show()
 
     if choice in [0, 1]:
-        success, msg = om_api.force_stop_operation(side)
-
-        if success and choice == 1:
-            # CORRECCIÓN: Asignar a una sola variable
-            closed_ok = pm_api.close_all_logical_positions(side, reason="OPERATION_FORCE_STOPPED")
-            if closed_ok:
-                msg += f" Todas las posiciones {side.upper()} han sido enviadas a cerrar."
-            else:
-                msg += f" ¡Atención! Fallo al enviar órdenes de cierre para {side.upper()}."
-
+        success, msg = om_api.detener_operacion(side, forzar_cierre_posiciones=(choice == 1))
         print(f"\n{msg}")
         time.sleep(2.5)
 
@@ -213,7 +215,6 @@ def _force_close_all_wizard(pm_api: Any, side: str):
     confirm_menu = TerminalMenu(confirm_menu_items, title=title, **MENU_STYLE)
     if confirm_menu.show() == 0:
         print(f"\nEnviando órdenes de cierre para posiciones {side.upper()}, por favor espera...")
-        # CORRECCIÓN: Asignar a una sola variable
         closed_successfully = pm_api.close_all_logical_positions(side, reason="PANIC_CLOSE_ALL")
         
         if closed_successfully:
