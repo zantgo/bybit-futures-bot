@@ -53,19 +53,42 @@ def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool,
         return False, "OM no instanciado"
     return _om_instance.create_or_update_operation(side, params)
 
-def force_start_operation(side: str) -> Tuple[bool, str]:
-    """
-    Delega la llamada para forzar el inicio inmediato de la operación para un lado específico,
-    ignorando la condición de entrada.
-    """
-    if not _om_instance:
-        return False, "OM no instanciado"
-    return _om_instance.force_start_operation(side)
+# --- INICIO DE LA SOLUCIÓN ---
+# AÑADIR ESTE BLOQUE COMPLETO AL FINAL DEL ARCHIVO
 
-def force_stop_operation(side: str) -> Tuple[bool, str]:
-    """
-    Delega la llamada para forzar la finalización de la operación activa para un lado específico.
-    """
+def pausar_operacion(side: str) -> Tuple[bool, str]:
+    """Delega la llamada para pausar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.force_stop_operation(side)
+    return _om_instance.pausar_operacion(side)
+
+def reanudar_operacion(side: str) -> Tuple[bool, str]:
+    """Delega la llamada para reanudar la operación."""
+    if not _om_instance:
+        return False, "OM no instanciado"
+    return _om_instance.reanudar_operacion(side)
+
+def forzar_activacion_manual(side: str) -> Tuple[bool, str]:
+    """Delega la llamada para forzar la activación manual de la operación."""
+    if not _om_instance:
+        return False, "OM no instanciado"
+    return _om_instance.forzar_activacion_manual(side)
+
+def activar_por_condicion(side: str) -> Tuple[bool, str]:
+    """Delega la llamada para activar la operación cuando se cumple una condición."""
+    if not _om_instance:
+        return False, "OM no instanciado"
+    # Este método podría no necesitar ser público, pero lo añadimos por completitud.
+    # Si solo lo llama el EventProcessor, podría ser un método privado.
+    return _om_instance.activar_por_condicion(side)
+
+def detener_operacion(side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
+    """Delega la llamada para detener completamente la operación."""
+    if not _om_instance:
+        return False, "OM no instanciado"
+    return _om_instance.detener_operacion(side, forzar_cierre_posiciones)
+
+def revisar_y_transicionar_a_detenida(side: str):
+    """Delega la llamada para revisar si una operación pausada debe detenerse."""
+    if _om_instance:
+        _om_instance.revisar_y_transicionar_a_detenida(side)

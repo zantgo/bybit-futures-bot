@@ -25,18 +25,19 @@ except ImportError:
 class Operacion:
     """
     Representa una única Operación Estratégica configurable. Contiene toda la
-    lógica de estado, condiciones y parámetros de trading.
+    lógica de estado, condiciones y parámetros de trading. Sigue un ciclo de vida
+    ACTIVA <-> PAUSADA -> DETENIDA.
     """
-    # Identificación y Estado
+    # --- Identificación y Estado ---
     id: str
-    estado: str = 'EN_ESPERA'
+    estado: str = 'DETENIDA'  # Valores: 'DETENIDA', 'EN_ESPERA', 'ACTIVA', 'PAUSADA'
 
-    # Condición de Entrada
+    # --- Condición de Entrada ---
     tipo_cond_entrada: Optional[str] = 'MARKET'
     valor_cond_entrada: Optional[float] = 0.0
-
-    # Parámetros de Trading
-    tendencia: str = 'NEUTRAL'
+    
+    # --- Parámetros de Trading ---
+    tendencia: Optional[str] = None # Valores: 'LONG_ONLY' o 'SHORT_ONLY'
     tamaño_posicion_base_usdt: float = 1.0
     max_posiciones_logicas: int = 5
     apalancamiento: float = 10.0
@@ -44,17 +45,16 @@ class Operacion:
     tsl_activacion_pct: float = 0.4
     tsl_distancia_pct: float = 0.1
 
-    # Condiciones de Salida (Límites)
+    # --- Condiciones de Salida (Límites) ---
     tp_roi_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
-    
-    # Nueva Condición de Salida por Precio
-    tipo_cond_salida: Optional[str] = None # 'PRICE_ABOVE', 'PRICE_BELOW'
+    tipo_cond_salida: Optional[str] = None
     valor_cond_salida: Optional[float] = None
-    
-    # Estado Dinámico
+    accion_al_finalizar: str = 'PAUSAR'  # Valores: 'PAUSAR', 'DETENER'
+
+    # --- Estado Dinámico ---
     capital_inicial_usdt: float = 0.0
     pnl_realizado_usdt: float = 0.0
     comercios_cerrados_contador: int = 0

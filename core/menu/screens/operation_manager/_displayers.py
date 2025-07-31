@@ -27,12 +27,12 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     """Muestra la sección de parámetros de la operación para un lado específico."""
     print(f"\n--- Parámetros de la Operación {side.upper()} " + "-"*48)
     
-    if not operacion:
-        print(f"  (No se pudo cargar la información de la operación {side.upper()})")
+    if not operacion or operacion.estado == 'DETENIDA':
+        print(f"  (La operación {side.upper()} está DETENIDA y no tiene parámetros activos)")
         return
 
     tendencia = operacion.tendencia
-    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m", 'NEUTRAL': "\033[90m"}
+    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
     color, reset = color_map.get(tendencia, ""), "\033[0m"
     
     pos_abiertas = summary.get(f'open_{side}_positions_count', 0)
@@ -48,7 +48,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         "TSL Activación": f"{operacion.tsl_activacion_pct}%",
         "TSL Distancia": f"{operacion.tsl_distancia_pct}%",
         "SL Individual": f"{operacion.sl_posicion_individual_pct}%",
-        " ": " "
+        "Acción Final": operacion.accion_al_finalizar
     }
     max_key_len1 = max(len(k) for k in col1.keys())
     max_key_len2 = max(len(k) for k in col2.keys())
@@ -61,8 +61,8 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     """Muestra la sección de estadísticas de capital para un lado específico."""
     print(f"\n--- Capital y Rendimiento ({side.upper()}) " + "-"*52)
     
-    if not operacion:
-        print(f"  (No se pudo cargar la información de capital para {side.upper()})")
+    if not operacion or operacion.estado == 'DETENIDA':
+        print(f"  (La operación {side.upper()} está DETENIDA y no tiene capital asignado)")
         return
 
     # Calcular PNL y ROI específicos para esta operación
@@ -121,12 +121,18 @@ def _display_operation_conditions(operacion: Operacion):
     """Muestra la sección de condiciones de entrada y salida de la operación."""
     print("\n--- Condiciones de la Operación " + "-"*54)
     
-    status_color_map = {'EN_ESPERA': "\033[93m", 'ACTIVA': "\033[92m"}
+    # MODIFICADO: Añadimos los nuevos estados y colores
+    status_color_map = {
+        'ACTIVA': "\033[92m",    # Verde
+        'PAUSADA': "\033[93m",   # Amarillo
+        'DETENIDA': "\033[90m",  # Gris
+        'EN_ESPERA': "\033[96m"  # Cian
+    }
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
     cond_in_str = "No definida (Operación Inactiva)"
-    if operacion.tendencia != 'NEUTRAL':
+    if operacion.estado != 'DETENIDA':
         if operacion.tipo_cond_entrada == 'MARKET': 
             cond_in_str = "Inmediata (Precio de Mercado)"
         elif operacion.tipo_cond_entrada and operacion.valor_cond_entrada is not None:

@@ -158,5 +158,10 @@ class _PrivateLogic:
             if _transfer_executor and transfer_amount >= getattr(self._config, 'POSITION_MIN_TRANSFER_AMOUNT_USDT', 0.1):
                 transferred = _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config, balance_manager=self._balance_manager)
                 if transferred > 0: self._balance_manager.record_real_profit_transfer(transferred)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # NUEVO: Notificar al OM que se cerró una posición.
+            self._om_api.revisar_y_transicionar_a_detenida(side)
+            # --- FIN DE LA MODIFICACIÓN ---
         
         return result.get('success', False)

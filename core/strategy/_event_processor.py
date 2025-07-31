@@ -133,12 +133,13 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
         signal_data = _process_tick_and_generate_signal(current_timestamp, current_price)
         
         # 3. Interacción con el Position Manager
-        _pm_instance.check_and_close_positions(current_price, current_timestamp)
-        _pm_instance.handle_low_level_signal(
-            signal=signal_data.get("signal", "HOLD"),
-            entry_price=current_price,
-            timestamp=current_timestamp
-        )
+        if _pm_instance:
+            _pm_instance.check_and_close_positions(current_price, current_timestamp)
+            _pm_instance.handle_low_level_signal(
+                signal=signal_data.get("signal", "HOLD"),
+                entry_price=current_price,
+                timestamp=current_timestamp
+            )
 
         # 4. Comprobar Límites de Sesión (Disyuntores Globales)
         _check_session_limits(current_price, current_timestamp, _operation_mode, _global_stop_loss_event)
@@ -159,41 +160,36 @@ def process_event(intermediate_ticks_info: list, final_price_info: dict):
 
 def _check_operation_triggers(current_price: float):
     """
-    Evalúa las condiciones de entrada y salida para las operaciones LONG y SHORT
-    en cada tick y modifica su estado si se cumplen las condiciones.
+    Evalúa las condiciones de entrada y salida para las operaciones en cada tick
+    y llama a los métodos del OM para transicionar el estado.
     """
     if not (om_api and om_api.is_initialized() and pm_api and pm_api.is_initialized()):
         return
 
     try:
-        # Iterar sobre ambos lados para no repetir código
         for side in ['long', 'short']:
             operacion = om_api.get_operation_by_side(side)
             if not operacion:
                 continue
 
             # --- LÓGICA DE ENTRADA (si la operación está esperando) ---
-            if operacion.estado == 'EN_ESPERA' and operacion.tendencia != 'NEUTRAL':
+            if operacion.estado == 'EN_ESPERA':
                 cond_type = operacion.tipo_cond_entrada
                 cond_value = operacion.valor_cond_entrada
                 
                 entry_condition_met = False
-                reason = ""
-
+                
                 if cond_type == 'MARKET':
                     entry_condition_met = True
-                    reason = "Activación inmediata (Market)"
                 elif cond_value is not None:
                     if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
                         entry_condition_met = True
-                        reason = f"Precio ({current_price:.4f}) > ({cond_value:.4f})"
                     elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
                         entry_condition_met = True
-                        reason = f"Precio ({current_price:.4f}) < ({cond_value:.4f})"
                 
                 if entry_condition_met:
-                    memory_logger.log(f"CONDICIÓN DE ENTRADA CUMPLIDA ({side.upper()}): {reason}", "WARN")
-                    om_api.force_start_operation(side)
+                    # MODIFICADO: Llamamos al método específico del OM para activar
+                    om_api.activar_por_condicion(side)
 
             # --- LÓGICA DE SALIDA (si la operación está activa) ---
             elif operacion.estado == 'ACTIVA':
@@ -203,7 +199,6 @@ def _check_operation_triggers(current_price: float):
                 # 1. Comprobar condiciones de límites de la operación (ROI, trades, tiempo)
                 summary = pm_api.get_position_summary()
                 if summary and 'error' not in summary:
-                    # --- CÁLCULO DE ROI CORREGIDO ---
                     unrealized_pnl_side = 0.0
                     open_positions_side = summary.get(f'open_{side}_positions', [])
                     for pos in open_positions_side:
@@ -241,8 +236,22 @@ def _check_operation_triggers(current_price: float):
                         exit_condition_met, reason = True, f"Precio de salida ({current_price:.4f}) < ({exit_value:.4f})"
 
                 if exit_condition_met:
-                    memory_logger.log(f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {reason}", "WARN")
-                    om_api.force_stop_operation(side)
+                    # MODIFICADO: Nueva lógica de acción al finalizar
+                    accion_final = operacion.accion_al_finalizar
+                    
+                    log_msg = (
+                        f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {reason}. "
+                        f"Acción configurada: {accion_final.upper()}"
+                    )
+                    memory_logger.log(log_msg, "WARN")
+
+                    if accion_final == 'PAUSAR':
+                        om_api.pausar_operacion(side)
+                    elif accion_final == 'DETENER':
+                        om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                    else:
+                        memory_logger.log(f"WARN: Acción al finalizar '{accion_final}' desconocida. Se PAUSARÁ por seguridad.", "WARN")
+                        om_api.pausar_operacion(side)
 
     except Exception as e:
         memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
@@ -329,16 +338,21 @@ def _print_tick_status_to_console(signal_data: Dict, timestamp: datetime.datetim
             
             if not op_long or not op_short: return # Safety check
 
-            status_long = f"L: {op_long.tendencia if op_long.estado == 'ACTIVA' else 'OFF'}"
-            status_short = f"S: {op_short.tendencia if op_short.estado == 'ACTIVA' else 'OFF'}"
+            # MODIFICADO: Adaptar el display al nuevo ciclo de vida
+            def get_op_display(op):
+                if op.estado == 'ACTIVA': return f"{op.tendencia}"
+                return op.estado.upper() # Muestra PAUSADA o DETENIDA
+
+            status_long = f"L: {get_op_display(op_long)}"
+            status_short = f"S: {get_op_display(op_short)}"
 
             hdr = f" TICK @ {ts_str} | Precio: {price_str} | Ops: {status_long}, {status_short} "
             print("\n" + f"{hdr:=^80}")
             print(f"  TA:  EMA={signal_data.get('ema', 'N/A'):<15} W.Inc={signal_data.get('weighted_increment', 'N/A'):<8} W.Dec={signal_data.get('weighted_decrement', 'N/A'):<8}")
             print(f"  SIG: {signal_data.get('signal', 'N/A'):<15} | Razón: {signal_data.get('signal_reason', 'N/A')}")
             if summary and 'error' not in summary:
-                max_pos_l = op_long.max_posiciones_logicas
-                max_pos_s = op_short.max_posiciones_logicas
+                max_pos_l = op_long.max_posiciones_logicas if op_long.estado != 'DETENIDA' else 'N/A'
+                max_pos_s = op_short.max_posiciones_logicas if op_short.estado != 'DETENIDA' else 'N/A'
                 print(f"  POS: Longs={summary.get('open_long_positions_count', 0)}/{max_pos_l} | Shorts={summary.get('open_short_positions_count', 0)}/{max_pos_s} | PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
             else:
                 print(f"  POS: Error obteniendo resumen del PM: {summary.get('error', 'N/A')}")

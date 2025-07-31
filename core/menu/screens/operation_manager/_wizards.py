@@ -25,7 +25,7 @@ from ..._helpers import (
 )
 
 try:
-    from core.strategy.pm._entities import Operacion
+    from core.strategy.om._entities import Operacion
     import config as config_module
 except ImportError:
     class Operacion: pass
@@ -131,6 +131,23 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         params_to_update['max_comercios'] = max_trades
         max_duracion = get_input("Duración máx. (min)", int, default=current_op.tiempo_maximo_min, min_val=1, is_optional=True)
         params_to_update['tiempo_maximo_min'] = max_duracion
+
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # NUEVO: Configuración de la acción al finalizar
+        print("\n--- Acción al Finalizar (Cuando se cumple un límite de la operación) ---")
+        accion_final_menu = TerminalMenu(
+            ["[1] Pausar operación (permite reanudar)", "[2] Detener y resetear operación"],
+            title="Selecciona la acción a tomar:",
+            **MENU_STYLE
+        )
+        accion_choice = accion_final_menu.show()
+        
+        # Guardamos la elección. Si el usuario presiona ESC, no se actualiza y se mantiene el default.
+        if accion_choice == 0:
+            params_to_update['accion_al_finalizar'] = 'PAUSAR'
+        elif accion_choice == 1:
+            params_to_update['accion_al_finalizar'] = 'DETENER'
+        # --- FIN DE LA MODIFICACIÓN ---
             
     except UserInputCancelled:
         print("\n\nAsistente de configuración cancelado.")

@@ -70,9 +70,10 @@ def show_operation_manager_screen():
                  continue
 
             def get_op_status_str(op: Operacion) -> str:
-                tendencia = op.tendencia if op.tendencia != 'NEUTRAL' else 'INACTIVA'
-                estado = op.estado
-                return f"Tendencia: {tendencia} (Estado: {estado})"
+                # Actualizado para el nuevo ciclo de vida
+                if op.estado == 'DETENIDA':
+                    return "Estado: DETENIDA"
+                return f"Tendencia: {op.tendencia} (Estado: {op.estado})"
 
             menu_items = [
                 f"[1] Gestionar Operación LONG  | {get_op_status_str(long_op)}",
@@ -130,65 +131,94 @@ def _show_single_operation_view(side: str):
                 if choice == 0: continue
                 else: break
 
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Se corrige el orden de los argumentos para que coincida con las definiciones
-            # en el módulo _displayers.py.
             _displayers._display_operation_details(summary, operacion, side)
             _displayers._display_capital_stats(summary, operacion, side, current_price)
             _displayers._display_positions_tables(summary, current_price, side) 
             _displayers._display_operation_conditions(operacion)
-            # --- FIN DE LA CORRECCIÓN ---
 
-            # --- Construcción de Menú Contextual Mejorada ---
+            # --- INICIO DE LA MODIFICACIÓN: Menú de acciones 100% dinámico ---
             menu_items, action_map = [], {}
-            is_trading_active = operacion.tendencia != 'NEUTRAL'
+            current_state = operacion.estado
 
-            # Acción principal: Iniciar, Modificar o Detener
-            if is_trading_active:
-                menu_items.append(f"[1] Modificar Operación {side.upper()} en Curso")
-                menu_items.append(f"[2] Detener Operación {side.upper()}")
-                action_map = {0: "modify", 1: "stop"}
-            else: # Operación Inactiva
-                menu_items.append(f"[1] Iniciar Nueva Operación {side.upper()}")
+            # 1. Construir menú basado en el estado
+            if current_state == 'DETENIDA':
+                menu_items.append("[1] Configurar e Iniciar Nueva Operación")
                 action_map = {0: "start_new"}
+            
+            elif current_state == 'PAUSADA':
+                menu_items.append("[1] Reanudar Operación")
+                menu_items.append("[2] Modificar Parámetros")
+                menu_items.append("[3] Detener Operación (Cierre Forzoso)")
+                action_map = {0: "resume", 1: "modify", 2: "stop"}
 
-            # Acción secundaria: Cierre de pánico (si hay posiciones)
+            elif current_state == 'EN_ESPERA':
+                menu_items.append("[1] Pausar Operación")
+                menu_items.append("[2] Forzar Inicio (Activar Manualmente)")
+                menu_items.append("[3] Modificar Parámetros")
+                menu_items.append("[4] Detener Operación (Cierre Forzoso)")
+                action_map = {0: "pause", 1: "force_start", 2: "modify", 3: "stop"}
+
+            elif current_state == 'ACTIVA':
+                menu_items.append("[1] Pausar Operación")
+                menu_items.append("[2] Modificar Parámetros")
+                menu_items.append("[3] Detener Operación (Cierre Forzoso)")
+                action_map = {0: "pause", 1: "modify", 2: "stop"}
+
+            # 2. Añadir acción de pánico condicionalmente
             open_positions_count = summary.get(f'open_{side}_positions_count', 0)
-            if open_positions_count > 0:
+            if open_positions_count > 0 and current_state != 'DETENIDA':
                 next_idx = len(menu_items)
-                menu_items.append(f"[{next_idx + 1}] Forzar Cierre de {open_positions_count} Posiciones {side.upper()}")
+                menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
                 action_map[next_idx] = "panic_close"
 
-            # Acciones comunes
-            next_action_index = len(menu_items)
-            menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver al Selector"])
-            action_map.update({
-                next_action_index + 1: "refresh",
-                next_action_index + 2: "help",
-                next_action_index + 3: "back"
-            })
+            # 3. Añadir acciones comunes
+            menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
+            common_actions_keys = ["refresh", "help", "back"]
+            offset = len(action_map)
+            if any(action in action_map.values() for action in ["panic_close"]):
+                 offset = len(action_map)
 
+            # Calcular el índice inicial correcto para las acciones comunes
+            current_index = len(menu_items) - len(common_actions_keys)
+            for key in common_actions_keys:
+                action_map[current_index] = key
+                current_index += 1
+
+
+            # 4. Mostrar menú y procesar acción
             menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
             main_menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
             choice = main_menu.show()
             
             action = action_map.get(choice)
             
-            # Llamadas a los wizards ahora siempre son contextuales
             if action == "start_new": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=True)
-            elif action == "stop": 
-                _wizards._force_stop_wizard(om_api, pm_api, side)
+            elif action == "pause":
+                om_api.pausar_operacion(side)
+                time.sleep(1.5)
+            elif action == "resume":
+                om_api.reanudar_operacion(side)
+                time.sleep(1.5)
+            elif action == "force_start":
+                confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show()
+                if confirm_menu == 0:
+                    om_api.forzar_activacion_manual(side)
+            elif action == "stop":
+                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title="¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación.").show()
+                if confirm_menu == 0:
+                    om_api.detener_operacion(side, forzar_cierre_posiciones=True)
             elif action == "panic_close": 
                 _wizards._force_close_all_wizard(pm_api, side)
             elif action == "refresh": 
                 continue
             elif action == "help": 
                 show_help_popup("auto_mode")
-            else: # "back" o None (ESC)
+            elif action == "back" or choice is None:
                 break
+            # --- FIN DE LA MODIFICACIÓN ---
         
         except Exception as e:
             clear_screen(); print_tui_header(f"Panel de Operación {side.upper()}")
