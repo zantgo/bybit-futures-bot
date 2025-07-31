@@ -47,6 +47,13 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
     clear_screen()
     print_tui_header(title)
     
+    # --- INICIO DE LA MODIFICACIÓN: Estilo de Menú sin borrado de pantalla ---
+    # Creamos una copia del estilo global y desactivamos el borrado de pantalla.
+    # Esto preservará la información que el usuario ha introducido.
+    WIZARD_MENU_STYLE = MENU_STYLE.copy()
+    WIZARD_MENU_STYLE['clear_screen'] = False
+    # --- FIN DE LA MODIFICACIÓN ---
+
     current_op = om_api.get_operation_by_side(side)
     if not current_op:
         print(f"\nError: No se encontró la operación para el lado {side.upper()}.")
@@ -61,7 +68,13 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         if not is_modification:
             print("\n--- 1. Condición de Entrada ---")
             cond_menu_items = ["[1] Activación Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
-            cond_choice = TerminalMenu(cond_menu_items, title="Elige la condición para que la operación se active:").show()
+            cond_menu = TerminalMenu(
+                cond_menu_items,
+                title="Elige la condición para que la operación se active:",
+                **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
+            )
+            cond_choice = cond_menu.show()
+
             if cond_choice == 0: 
                 new_cond_type, new_cond_value = 'MARKET', 0.0
                 print("  -> Condición seleccionada: Activación Inmediata")
@@ -84,7 +97,13 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
             # Al modificar, también se puede cambiar la condición de entrada
             print("\n--- 1. Condición de Entrada ---")
             cond_menu_items = ["[1] Activación Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
-            cond_choice = TerminalMenu(cond_menu_items, title="Elige la condición para que la operación se active:").show()
+            cond_menu = TerminalMenu(
+                cond_menu_items,
+                title="Elige la condición para que la operación se active:",
+                **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
+            )
+            cond_choice = cond_menu.show()
+            
             if cond_choice == 0: 
                 params_to_update['tipo_cond_entrada'] = 'MARKET'
                 params_to_update['valor_cond_entrada'] = 0.0
@@ -152,7 +171,7 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         accion_final_menu = TerminalMenu(
             ["[1] Pausar operación (permite reanudar)", "[2] Detener y resetear operación"],
             title="Selecciona la acción a tomar:",
-            **MENU_STYLE
+            **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
         )
         accion_choice = accion_final_menu.show()
         
@@ -171,9 +190,12 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         print("\nNo se realizaron cambios."); time.sleep(1.5)
         return
 
-    confirm_menu_style = MENU_STYLE.copy()
-    confirm_menu_style['clear_screen'] = False
-    if TerminalMenu(["[1] Confirmar y Guardar", "[2] Cancelar"], title="\n¿Guardar estos cambios?", **confirm_menu_style).show() == 0:
+    confirm_menu = TerminalMenu(
+        ["[1] Confirmar y Guardar", "[2] Cancelar"],
+        title="\n¿Guardar estos cambios?",
+        **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
+    )
+    if confirm_menu.show() == 0:
         success, msg = om_api.create_or_update_operation(side, params_to_update)
         print(f"\n{msg}"); time.sleep(2)
 
@@ -182,6 +204,11 @@ def _force_stop_wizard(om_api: Any, pm_api: Any, side: str):
     """
     Asistente para forzar la finalización de la operación para un lado específico.
     """
+    # --- INICIO DE LA MODIFICACIÓN: Estilo de Menú sin borrado de pantalla ---
+    WIZARD_MENU_STYLE = MENU_STYLE.copy()
+    WIZARD_MENU_STYLE['clear_screen'] = False
+    # --- FIN DE LA MODIFICACIÓN ---
+
     title = f"¿Cómo deseas finalizar la operación {side.upper()}?"
     end_menu_items = [
         "[1] Mantener posiciones abiertas y finalizar operación", 
@@ -189,7 +216,13 @@ def _force_stop_wizard(om_api: Any, pm_api: Any, side: str):
         None, 
         "[c] Cancelar"
     ]
-    choice = TerminalMenu(end_menu_items, title=title, **MENU_STYLE).show()
+    
+    choice_menu = TerminalMenu(
+        end_menu_items,
+        title=title,
+        **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
+    )
+    choice = choice_menu.show()
 
     if choice in [0, 1]:
         success, msg = om_api.detener_operacion(side, forzar_cierre_posiciones=(choice == 1))
@@ -209,10 +242,19 @@ def _force_close_all_wizard(pm_api: Any, side: str):
         time.sleep(2)
         return
 
+    # --- INICIO DE LA MODIFICACIÓN: Estilo de Menú sin borrado de pantalla ---
+    WIZARD_MENU_STYLE = MENU_STYLE.copy()
+    WIZARD_MENU_STYLE['clear_screen'] = False
+    # --- FIN DE LA MODIFICACIÓN ---
+
     title = f"Esta acción cerrará permanentemente las {position_count} posiciones {side.upper()}.\n¿Estás seguro?"
     confirm_menu_items = [f"[s] Sí, cerrar todas las posiciones {side.upper()}", "[n] No, cancelar"]
     
-    confirm_menu = TerminalMenu(confirm_menu_items, title=title, **MENU_STYLE)
+    confirm_menu = TerminalMenu(
+        confirm_menu_items,
+        title=title,
+        **WIZARD_MENU_STYLE  # <--- Usar el nuevo estilo
+    )
     if confirm_menu.show() == 0:
         print(f"\nEnviando órdenes de cierre para posiciones {side.upper()}, por favor espera...")
         closed_successfully = pm_api.close_all_logical_positions(side, reason="PANIC_CLOSE_ALL")

@@ -1,16 +1,16 @@
 """
 Módulo Gestor de Sesión (SessionManager).
 
-Define la clase `SessionManager`, que actúa como el orquestador para una única
-sesión de trading. Su responsabilidad es contener y gestionar todos los
-componentes y parámetros que definen una sesión, desde su inicio hasta su fin.
+v2.2 (Corrección Final de Dependencias):
+- Se corrigen las claves para obtener 'om_api' y 'pm_api' del diccionario de
+  dependencias, asegurando que coincidan con las definidas en el inicializador.
+  Esto soluciona el AttributeError final en la inicialización de la sesión.
 
-Responsabilidades Clave:
-- Contener las instancias de OM y PM para la sesión.
-- Gestionar el ciclo de vida del Ticker de precios (iniciar/detener).
-- Centralizar y gestionar los parámetros de la sesión (Ticker, Estrategia, Capital).
-- Comprobar y actuar sobre los límites globales de la sesión (disyuntores).
-- Acumular y calcular el PNL y ROI total de la sesión.
+v2.1 (Corrección de Dependencias):
+- Se corrige la clave para obtener 'connection_ticker'.
+
+v2.0 (Refactor EventProcessor):
+- Se actualiza el __init__ para instanciar la clase `EventProcessor`.
 """
 import datetime
 from datetime import timezone
@@ -20,7 +20,8 @@ from typing import Dict, Any, Optional
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
     from core.logging import memory_logger
-    from core.strategy.workflow._limit_checks import GlobalStopLossException
+    # La excepción ahora vive dentro del módulo EventProcessor.
+    from core.strategy._event_processor import GlobalStopLossException
 except ImportError:
     # Fallbacks para análisis estático y resiliencia
     memory_logger = type('obj', (object,), {'log': print})()
@@ -40,13 +41,26 @@ class SessionManager:
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
         self._exchange_adapter = dependencies.get('exchange_adapter')
-        self._connection_ticker = dependencies.get('connection_ticker')
-        self._event_processor = dependencies.get('event_processor')
+        self._connection_ticker = dependencies.get('connection_ticker_module')
         self._om = dependencies.get('operation_manager')
         self._pm = dependencies.get('position_manager')
-        self._om_api = dependencies.get('om_api')
-        self._pm_api = dependencies.get('pm_api')
         self._trading_api = dependencies.get('trading_api')
+
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se comentan las líneas originales que usaban las claves incorrectas.
+        # self._om_api = dependencies.get('om_api')
+        # self._pm_api = dependencies.get('pm_api')
+        # Usar las claves completas y correctas definidas en el inicializador.
+        self._om_api = dependencies.get('operation_manager_api_module')
+        self._pm_api = dependencies.get('position_manager_api_module')
+        # --- FIN DE LA CORRECCIÓN ---
+
+        # --- Instanciación del EventProcessor ---
+        EventProcessor_class = dependencies.get('EventProcessor')
+        if not EventProcessor_class:
+            raise ValueError("La clase EventProcessor no fue encontrada en las dependencias.")
+        # Creamos una INSTANCIA del EventProcessor para esta sesión.
+        self._event_processor = EventProcessor_class(dependencies)
 
         # --- Estado Interno ---
         self._initialized = False
@@ -62,30 +76,21 @@ class SessionManager:
 
         # 1. Obtener parámetros de sesión desde la configuración
         symbol = getattr(self._config, 'TICKER_SYMBOL')
-        base_size = getattr(self._config, 'POSITION_BASE_SIZE_USDT')
-        initial_slots = getattr(self._config, 'POSITION_MAX_LOGICAL_POSITIONS')
-        leverage = getattr(self._config, 'POSITION_LEVERAGE')
         operation_mode = "live_interactive" # Modo por defecto para la nueva arquitectura
 
         # 2. Inicializar el adaptador de exchange con el símbolo de la sesión
         if not self._exchange_adapter.initialize(symbol):
             raise RuntimeError(f"SessionManager: Fallo al inicializar el adaptador de Exchange para el símbolo '{symbol}'.")
 
-        # 3. Inicializar el Position Manager con los parámetros de la sesión
+        # 3. Inicializar el Position Manager
         self._pm.initialize(operation_mode=operation_mode)
         
-        # El BalanceManager se inicializa aquí, ya que depende de los parámetros de la sesión.
-        # Nota: En una futura refactorización, la inicialización del balance podría ser
-        # parte de la creación de la operación en el OM.
-        self._pm._balance_manager.initialize(
-            base_position_size_usdt=base_size,
-            initial_max_logical_positions=initial_slots
-        )
-        
-        # 4. Establecer apalancamiento inicial
-        self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(leverage), sell_leverage=str(leverage))
+        # 4. Establecer apalancamiento si está definido en la configuración
+        leverage = getattr(self._config, 'POSITION_LEVERAGE', None)
+        if leverage:
+            self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(leverage), sell_leverage=str(leverage))
 
-        # 5. Inicializar el procesador de eventos
+        # 5. Inicializar el procesador de eventos.
         self._event_processor.initialize(
             operation_mode=operation_mode,
             pm_instance=self._pm,
@@ -105,6 +110,8 @@ class SessionManager:
             return
 
         memory_logger.log("SessionManager: Iniciando Ticker de precios...", "INFO")
+        
+        # El callback ahora es el método 'process_event' de nuestra instancia de EventProcessor.
         self._connection_ticker.start_ticker_thread(
             exchange_adapter=self._exchange_adapter,
             raw_event_callback=self._event_processor.process_event
@@ -127,20 +134,13 @@ class SessionManager:
     def get_session_summary(self) -> Dict[str, Any]:
         """
         Construye y devuelve un resumen completo del estado de la sesión actual.
-        Este es el "modelo de datos" para la vista del dashboard.
         """
-        # El Position Manager ya genera un resumen muy completo.
-        # En el futuro, podemos enriquecerlo aquí con datos exclusivos de la sesión si es necesario.
+        # Esta llamada ahora funcionará porque self._pm_api ya no será None
         if not self._pm_api.is_initialized():
             return {"error": "El Position Manager de la sesión no está inicializado."}
 
         try:
             summary = self._pm_api.get_position_summary()
-            
-            # Aquí podríamos añadir o modificar datos del resumen. Por ahora, es un proxy.
-            # Por ejemplo, podríamos añadir un PNL/ROI global de la sesión si fuera
-            # diferente del PNL de la operación actual.
-            
             return summary
         except Exception as e:
             error_msg = f"Error generando el resumen de la sesión: {e}"
@@ -163,16 +163,12 @@ class SessionManager:
                     setattr(self._config, attr, new_value)
                     
                     # Notificar a los componentes que dependen de estos parámetros
-                    if attr == 'SESSION_STOP_LOSS_ROI_PCT':
-                        if getattr(self._config, 'SESSION_ROI_SL_ENABLED', False):
-                            self._pm_api.set_global_stop_loss_pct(new_value)
-                    elif attr == 'SESSION_TAKE_PROFIT_ROI_PCT':
-                        if getattr(self._config, 'SESSION_ROI_TP_ENABLED', False):
-                            self._pm_api.set_global_take_profit_pct(new_value)
-                    elif attr == 'SESSION_ROI_SL_ENABLED':
-                        self._pm_api.set_global_stop_loss_pct(getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT') if new_value else 0)
-                    elif attr == 'SESSION_ROI_TP_ENABLED':
-                        self._pm_api.set_global_take_profit_pct(getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT') if new_value else 0)
+                    if attr in ['SESSION_STOP_LOSS_ROI_PCT', 'SESSION_ROI_SL_ENABLED']:
+                        sl_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT') if getattr(self._config, 'SESSION_ROI_SL_ENABLED', False) else 0
+                        self._pm_api.set_global_stop_loss_pct(sl_pct)
+                    elif attr in ['SESSION_TAKE_PROFIT_ROI_PCT', 'SESSION_ROI_TP_ENABLED']:
+                        tp_pct = getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT') if getattr(self._config, 'SESSION_ROI_TP_ENABLED', False) else 0
+                        self._pm_api.set_global_take_profit_pct(tp_pct)
 
         if not changes_found:
             memory_logger.log("SessionManager: No se detectaron cambios en la configuración.", "INFO")

@@ -1,6 +1,12 @@
 """
 Gestiona el hilo que obtiene los precios del mercado en tiempo real.
 
+v2.2 (Refactor EventProcessor):
+- Se actualiza la llamada al callback en `_handle_new_price` para que pase
+  los argumentos con nombre (`intermediate_ticks_info`, `final_price_info`),
+  coincidiendo con la nueva firma del método `process_event` de la clase
+  EventProcessor.
+
 v2.1 (Error Handling):
 - Añadido un bloque try-except robusto en el bucle de obtención de precios
   para manejar errores de red (Timeouts, ConnectionErrors) sin detener el hilo,
@@ -14,13 +20,11 @@ import sys
 import os
 from typing import Optional, Dict, Any, Callable
 
-# --- INICIO DE LA MODIFICACIÓN ---
 # Importación segura para manejar excepciones de red
 try:
     import requests
 except ImportError:
     requests = None
-# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Importaciones Adaptadas ---
 try:
@@ -51,7 +55,7 @@ _raw_event_callback: Optional[Callable] = None
 _intermediate_ticks_buffer: list = []
 _exchange_adapter: Optional[AbstractExchange] = None
 
-# --- Interfaz Pública (Sin cambios) ---
+# --- Interfaz Pública ---
 
 def get_latest_price() -> dict:
     """Devuelve una copia de la información del último precio almacenado en caché."""
@@ -138,36 +142,29 @@ def _fetch_price_loop():
                 with threading.Lock():
                     _latest_price_info = {"price": None, "timestamp": None, "symbol": symbol}
 
-            # --- INICIO DE LA MODIFICACIÓN: Bloque try-except para la llamada de red ---
-            
             standard_ticker = None # Reiniciar en cada iteración
             try:
                 # 2. Obtener el ticker estandarizado desde el adaptador
                 standard_ticker = _exchange_adapter.get_ticker(symbol)
             
-            # Capturar errores específicos de red si `requests` está disponible
+            # Capturar errores de red si `requests` está disponible
             except requests.exceptions.RequestException as e:
                 memory_logger.log(f"Ticker WARN: Error de red al obtener el precio: {type(e).__name__}. Reintentando...", level="WARN")
-                # Esperar un poco antes de reintentar para no sobrecargar la API
                 time.sleep(2) 
             
             # Capturar cualquier otra excepción para evitar que el hilo muera
             except Exception as e:
                 memory_logger.log(f"Ticker ERROR: Excepción inesperada en get_ticker: {e}", level="ERROR")
                 memory_logger.log(traceback.format_exc(), level="ERROR")
-                time.sleep(5) # Esperar más tiempo en caso de un error desconocido
+                time.sleep(5) 
 
             # 3. Procesar el precio solo si la llamada fue exitosa
             if standard_ticker and isinstance(standard_ticker, StandardTicker):
                 _handle_new_price(standard_ticker)
-            
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except Exception as e_outer:
-            # Captura de seguridad para cualquier error imprevisto en la lógica del bucle
             memory_logger.log(f"Ticker FATAL: Error crítico en el bucle principal del Ticker: {e_outer}", level="ERROR")
             memory_logger.log(traceback.format_exc(), level="ERROR")
-            # Esperar antes de continuar para evitar un bucle de error rápido
             time.sleep(10)
 
         elapsed = time.monotonic() - start_time
@@ -176,7 +173,6 @@ def _fetch_price_loop():
 
     memory_logger.log("Ticker: Bucle de obtención de precios detenido.", level="INFO")
 
-# --- Función _handle_new_price (sin cambios) ---
 def _handle_new_price(ticker_data: StandardTicker):
     """Actualiza el estado interno con el nuevo precio y dispara el callback si corresponde."""
     global _tick_counter, _intermediate_ticks_buffer, _latest_price_info
@@ -197,7 +193,14 @@ def _handle_new_price(ticker_data: StandardTicker):
             try:
                 final_info = {"price": price, "timestamp": timestamp, "symbol": symbol}
                 if callable(_raw_event_callback):
-                    _raw_event_callback(_intermediate_ticks_buffer.copy(), final_info)
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Se llama al callback pasando los argumentos por nombre para coincidir
+                    # con la firma del método process_event de la clase EventProcessor.
+                    _raw_event_callback(
+                        intermediate_ticks_info=_intermediate_ticks_buffer.copy(),
+                        final_price_info=final_info
+                    )
+                    # --- FIN DE LA MODIFICACIÓN ---
             except Exception as e:
                 memory_logger.log(f"Ticker: ERROR CRÍTICO ejecutando callback: {e}", level="ERROR")
                 memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")

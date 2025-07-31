@@ -1,6 +1,11 @@
 """
 Módulo Ensamblador de Dependencias.
 
+v4.1 (Refactor EventProcessor):
+- Se actualiza la importación de `event_processor` para registrar la
+  clase `EventProcessor` en el diccionario de dependencias, en lugar
+  del módulo, para permitir su instanciación por parte del SessionManager.
+
 v4.0 (Arquitectura de Controladores):
 - Este módulo ya no es responsable de la inicialización de los componentes.
 - Su única responsabilidad ahora es importar todas las clases y módulos del
@@ -53,11 +58,16 @@ def assemble_dependencies() -> Dict[str, Any]:
         from core.exchange._bybit_adapter import BybitAdapter
         dependencies["BybitAdapter"] = BybitAdapter
 
-        # --- Componentes de Estrategia (TA, Señal, Procesador) ---
-        from core.strategy import ta, signal, event_processor
+        # --- INICIO DE LA CORRECCIÓN: Componentes de Estrategia ---
+        from core.strategy import ta, signal
+        # Se importa la CLASE EventProcessor directamente desde su archivo.
+        from core.strategy._event_processor import EventProcessor 
+        
         dependencies["ta_manager_module"] = ta
         dependencies["signal_generator_module"] = signal
-        dependencies["event_processor_module"] = event_processor
+        # Se registra la CLASE bajo la clave "EventProcessor" que el SessionManager espera.
+        dependencies["EventProcessor"] = EventProcessor
+        # --- FIN DE LA CORRECCIÓN ---
 
         # --- NUEVOS CONTROLADORES Y SUS APIs ---
         # BotController

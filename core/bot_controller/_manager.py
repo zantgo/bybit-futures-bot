@@ -1,6 +1,11 @@
 """
 Módulo Gestor del Bot (BotController).
-... (docstring) ...
+
+v4.1 (Corrección de Inyección de Dependencias):
+- Se corrige el método `create_session` para que pase el diccionario completo de
+  dependencias al SessionManager, en lugar de uno nuevo e incompleto.
+- Esto soluciona el `ValueError` que impedía encontrar la clase `EventProcessor`.
+- Se elimina el atributo obsoleto `self._event_processor` del constructor.
 """
 import sys
 import time
@@ -48,7 +53,10 @@ class BotController:
         self._logging_package = dependencies.get('logging_package')
         self._connection_manager = dependencies.get('connection_manager_module')
         self._connection_ticker = dependencies.get('connection_ticker_module')
-        self._event_processor = dependencies.get('event_processor_module')
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se elimina el atributo obsoleto, ya que el BotController no necesita conocer al EventProcessor.
+        # self._event_processor = dependencies.get('event_processor_module')
+        # --- FIN DE LA CORRECCIÓN ---
         self._pm_helpers = dependencies.get('pm_helpers_module')
         self._pm_calculations = dependencies.get('pm_calculations_module')
         self._om_api = dependencies.get('operation_manager_api_module')
@@ -70,11 +78,9 @@ class BotController:
         """Indica si las conexiones API han sido inicializadas con éxito."""
         return self._connections_initialized
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def initialize_connections(self) -> Tuple[bool, str]:
         """
         Orquesta la inicialización y validación de las cuentas API.
-        La impresión detallada se delega al connection_manager.
         """
         if self._connections_initialized:
             return True, "Las conexiones ya han sido validadas previamente."
@@ -82,33 +88,25 @@ class BotController:
         memory_logger.log("BotController: Iniciando validación de conexiones...", "INFO")
         
         try:
-            # 1. El connection_manager realiza la conexión y la impresión detallada.
-            # Esta función es ahora la única fuente de impresión de estado de conexión.
             self._connection_manager.initialize_all_clients()
-            
             successful_accounts = self._connection_manager.get_initialized_accounts()
             
-            # 2. Rellenar el diccionario de clientes activos SIN imprimir nada,
-            #    ya que la validación detallada se imprimió en el paso anterior.
             for account_name in successful_accounts:
                 self._active_clients[account_name] = self._connection_manager.get_client(account_name)
 
-            # 3. Verificar si hubo algún fallo (aunque initialize_all_clients ya detendría el bot).
             if not successful_accounts:
                 self._connections_initialized = False
                 error_msg = "Error: No se pudo establecer conexión con NINGUNA cuenta."
                 memory_logger.log(error_msg, "ERROR")
                 return False, error_msg
 
-            # 4. Continuar con el resto de la lógica.
             self._connections_initialized = True
             msg = "Validación completada. Todas las conexiones requeridas fueron exitosas."
-            time.sleep(1) # Reducido el tiempo de espera para una experiencia más fluida
+            time.sleep(1)
             memory_logger.log(f"BotController: {msg}", "INFO")
             return True, msg
 
         except SystemExit as e:
-            # Captura la salida forzada por el connection_manager si algo falla.
             self._connections_initialized = False
             error_msg = f"Error fatal de conexión: {e}"
             memory_logger.log(error_msg, "ERROR")
@@ -119,7 +117,6 @@ class BotController:
             memory_logger.log(error_msg, "ERROR")
             traceback.print_exc()
             return False, error_msg
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_balances(self) -> Optional[Dict[str, Dict[str, Any]]]:
         """Obtiene y devuelve los balances de todas las cuentas configuradas."""
@@ -129,7 +126,6 @@ class BotController:
         from core import api as core_api
 
         balances = {}
-        # Usamos las cuentas que se inicializaron con éxito.
         for account_name in self._active_clients.keys():
             balance_info = core_api.get_unified_account_balance_info(account_name)
             balances[account_name] = balance_info
@@ -206,6 +202,7 @@ class BotController:
 
         memory_logger.log("BotController: Creando nueva sesión de trading...", "INFO")
         try:
+            # Crear instancias específicas para la sesión
             exchange_adapter = self._BybitAdapter()
             om_instance = self._OperationManager(config=self._config, memory_logger_instance=memory_logger)
             self._om_api.init_om_api(om_instance)
@@ -217,13 +214,17 @@ class BotController:
             self._pm_helpers.set_dependencies(self._config, self._utils)
             self._pm_api.init_pm_api(pm_instance)
             
-            session_deps = {
-                'config_module': self._config, 'utils_module': self._utils, 'memory_logger_module': memory_logger,
-                'exchange_adapter': exchange_adapter, 'connection_ticker': self._connection_ticker,
-                'event_processor': self._event_processor, 'operation_manager': om_instance,
-                'position_manager': pm_instance, 'om_api': self._om_api, 'pm_api': self._pm_api,
-                'trading_api': self._trading_api
-            }
+            # --- INICIO DE LA CORRECCIÓN ---
+            # 1. Copiamos el diccionario de dependencias global.
+            session_deps = self._dependencies.copy()
+            
+            # 2. Añadimos o sobreescribimos las instancias específicas de esta sesión.
+            session_deps['exchange_adapter'] = exchange_adapter
+            session_deps['operation_manager'] = om_instance
+            session_deps['position_manager'] = pm_instance
+            # Las APIs y otros módulos ya están en el diccionario y son válidos.
+            # --- FIN DE LA CORRECCIÓN ---
+
             session_manager_instance = self._SessionManager(session_deps)
             session_manager_instance.initialize()
             return session_manager_instance
