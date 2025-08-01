@@ -1,10 +1,11 @@
 """
 Módulo Principal del Panel de Control de Operación.
 
-v8.5 (Corrección de Argumentos):
-- Se corrige el orden de los argumentos en las llamadas a las funciones
-  de `_displayers` para que coincidan con sus definiciones, solucionando
-  errores de `TypeError` y `AttributeError` al renderizar la pantalla.
+v9.0 (Acceso Directo a Operación):
+- `show_operation_manager_screen` ahora acepta un parámetro `side_filter` ('long' o 'short').
+- Si se proporciona `side_filter`, la pantalla salta el menú de selección y muestra
+  directamente la vista de detalles para la operación especificada. Esto permite que
+  el nuevo dashboard tenga enlaces directos a cada gestor de operación.
 """
 import time
 from typing import Any, Dict, Optional
@@ -44,10 +45,13 @@ def init(dependencies: Dict[str, Any]):
 
 # --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
-def show_operation_manager_screen():
+# --- INICIO DE LA MODIFICACIÓN ---
+# La función ahora acepta un `side_filter` opcional.
+def show_operation_manager_screen(side_filter: Optional[str] = None):
     """
     Función principal que muestra el Panel de Control de Operación.
-    Presenta un selector para gestionar las operaciones LONG y SHORT de forma independiente.
+    Si se proporciona `side_filter`, muestra directamente la vista para ese lado.
+    De lo contrario, presenta un selector para elegir entre LONG y SHORT.
     """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
@@ -56,6 +60,13 @@ def show_operation_manager_screen():
     if not om_api:
         print("ERROR CRÍTICO: OM API no inyectada."); time.sleep(3); return
 
+    # Si se especifica un lado, saltamos el selector y vamos directo a la vista.
+    if side_filter in ['long', 'short']:
+        _show_single_operation_view(side_filter)
+        return # Termina la ejecución al volver de la vista única.
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    # El siguiente bucle solo se ejecuta si no se proporcionó `side_filter`.
     while True:
         clear_screen()
         print_tui_header("Panel de Control de Operaciones")
@@ -70,7 +81,6 @@ def show_operation_manager_screen():
                  continue
 
             def get_op_status_str(op: Operacion) -> str:
-                # Actualizado para el nuevo ciclo de vida
                 if op.estado == 'DETENIDA':
                     return "Estado: DETENIDA"
                 return f"Tendencia: {op.tendencia} (Estado: {op.estado})"
@@ -89,7 +99,7 @@ def show_operation_manager_screen():
                 _show_single_operation_view('long')
             elif choice == 1:
                 _show_single_operation_view('short')
-            else: # Si el usuario presiona ESC o selecciona Volver
+            else:
                 break
         
         except Exception as e:
@@ -100,6 +110,7 @@ def show_operation_manager_screen():
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
+    (El contenido de esta función no necesita cambios en este paso).
     """
     pm_api = _deps.get("position_manager_api_module")
     om_api = _deps.get("operation_manager_api_module")
@@ -125,7 +136,7 @@ def _show_single_operation_view(side: str):
             if not summary or summary.get('error'):
                 error_msg = summary.get('error', 'No se pudo obtener el estado de la operación.')
                 print(f"\n\033[91mADVERTENCIA: {error_msg}\033[0m")
-                menu_items = ["[r] Reintentar", "[b] Volver al Selector"]
+                menu_items = ["[r] Reintentar", "[b] Volver al Selector/Dashboard"]
                 menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
                 choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
                 if choice == 0: continue
@@ -136,11 +147,9 @@ def _show_single_operation_view(side: str):
             _displayers._display_positions_tables(summary, current_price, side) 
             _displayers._display_operation_conditions(operacion)
 
-            # --- INICIO DE LA MODIFICACIÓN: Menú de acciones 100% dinámico ---
             menu_items, action_map = [], {}
             current_state = operacion.estado
 
-            # 1. Construir menú basado en el estado
             if current_state == 'DETENIDA':
                 menu_items.append("[1] Configurar e Iniciar Nueva Operación")
                 action_map = {0: "start_new"}
@@ -164,28 +173,21 @@ def _show_single_operation_view(side: str):
                 menu_items.append("[3] Detener Operación (Cierre Forzoso)")
                 action_map = {0: "pause", 1: "modify", 2: "stop"}
 
-            # 2. Añadir acción de pánico condicionalmente
             open_positions_count = summary.get(f'open_{side}_positions_count', 0)
             if open_positions_count > 0 and current_state != 'DETENIDA':
                 next_idx = len(menu_items)
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
                 action_map[next_idx] = "panic_close"
 
-            # 3. Añadir acciones comunes
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
             common_actions_keys = ["refresh", "help", "back"]
-            offset = len(action_map)
-            if any(action in action_map.values() for action in ["panic_close"]):
-                 offset = len(action_map)
-
-            # Calcular el índice inicial correcto para las acciones comunes
+            
+            # Re-calcular el índice inicial para acciones comunes de forma más robusta
             current_index = len(menu_items) - len(common_actions_keys)
             for key in common_actions_keys:
                 action_map[current_index] = key
                 current_index += 1
 
-
-            # 4. Mostrar menú y procesar acción
             menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
             main_menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
             choice = main_menu.show()
@@ -218,14 +220,13 @@ def _show_single_operation_view(side: str):
                 show_help_popup("auto_mode")
             elif action == "back" or choice is None:
                 break
-            # --- FIN DE LA MODIFICACIÓN ---
         
         except Exception as e:
             clear_screen(); print_tui_header(f"Panel de Operación {side.upper()}")
             print(f"\n\033[91mERROR CRÍTICO: {e}\033[0m\nOcurrió un error inesperado al renderizar la pantalla.")
             import traceback
-            traceback.print_exc() # Añadido para obtener más detalles del error
-            menu_items = ["[r] Reintentar", "[b] Volver al Selector"]
+            traceback.print_exc()
+            menu_items = ["[r] Reintentar", "[b] Volver al Selector/Dashboard"]
             menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
             choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
             if choice == 0: continue

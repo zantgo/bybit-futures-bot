@@ -1,18 +1,13 @@
-# core/menu/screens/_dashboard.py
-
 """
 Módulo para la Pantalla del Dashboard de Sesión.
 
-v7.1 (Dashboard Enriquecido):
-- La pantalla ahora muestra el estado de las operaciones LONG/SHORT, la última
-  señal de bajo nivel, y la fecha/hora de inicio de la sesión.
-- Se ha simplificado la vista eliminando parámetros de configuración estáticos.
-- Al finalizar, se muestra un resumen completo de la sesión.
-
-v7.0 (Arquitectura de Controladores):
-- Esta pantalla ha sido reescrita para actuar como la "Vista" del SessionManager.
-- Recibe una instancia del SessionManager y obtiene todos los datos a través de él.
-- Controla el ciclo de vida de una única sesión de trading.
+v8.0 (Capital Lógico y Nuevo UI):
+- La pantalla ha sido rediseñada completamente para mostrar el estado de la sesión
+  y los balances lógicos de las operaciones LONG y SHORT de forma separada y clara.
+- El menú de acciones ahora permite el acceso directo a la gestión de la operación
+  LONG o SHORT, eliminando menús intermedios.
+- Se añade una opción para refrescar la vista del dashboard en tiempo real.
+- La opción "Ver/Gestionar Posiciones" se elimina del dashboard.
 """
 import time
 import datetime
@@ -27,17 +22,23 @@ except ImportError:
 from .._helpers import (
     clear_screen,
     print_tui_header,
-    press_enter_to_continue # <-- AÑADIDO
+    press_enter_to_continue
 )
 from .. import _helpers as helpers_module
-from . import _log_viewer, operation_manager, _position_viewer
+from . import _log_viewer, operation_manager
+# --- INICIO DE LA MODIFICACIÓN ---
+# Se comenta la importación de _position_viewer ya que no se usará desde aquí.
+# from . import _position_viewer
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 try:
-    from core.exchange._models import StandardBalance
+    # from core.exchange._models import StandardBalance # No se usa directamente aquí
     from core.strategy.sm import api as sm_api
-    from core.strategy.pm import api as pm_api # Aún necesario para el visor de posiciones
+    from core.strategy.pm import api as pm_api # Aún necesario para algunos datos como el start time
 except ImportError:
-    StandardBalance = sm_api = pm_api = None
+    # StandardBalance = None # Comentado
+    sm_api = pm_api = None
 
 
 # --- Inyección de Dependencias ---
@@ -48,7 +49,7 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- INICIO DE LA MODIFICACIÓN: Función para el resumen final ---
+
 def _display_final_summary(summary: Dict[str, Any]):
     """Muestra una pantalla de resumen clara al finalizar la sesión."""
     clear_screen()
@@ -59,9 +60,11 @@ def _display_final_summary(summary: Dict[str, Any]):
         press_enter_to_continue()
         return
 
-    # Extraer datos clave
-    realized_pnl = summary.get('total_realized_pnl_session', 0.0)
-    initial_capital = summary.get('initial_total_capital', 0.0)
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Usar los nuevos datos agregados por el SessionManager
+    realized_pnl = summary.get('total_session_pnl', 0.0)
+    initial_capital = summary.get('total_session_initial_capital', 0.0)
+    # --- FIN DE LA MODIFICACIÓN ---
     final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
     start_time = pm_api.get_session_start_time()
     duration_str = "N/A"
@@ -69,13 +72,11 @@ def _display_final_summary(summary: Dict[str, Any]):
         duration = datetime.datetime.now(timezone.utc) - start_time
         duration_str = str(datetime.timedelta(seconds=int(duration.total_seconds())))
 
-    # Imprimir resumen
     print("\n--- Rendimiento General ---")
     print(f"  PNL Realizado Total: {realized_pnl:+.4f} USDT")
     print(f"  ROI Final (Realizado): {final_roi:+.2f}%")
     print(f"  Duración Total: {duration_str}")
 
-    # Mostrar posiciones que quedaron abiertas
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
     
@@ -93,28 +94,90 @@ def _display_final_summary(summary: Dict[str, Any]):
         print("\n--- No quedaron posiciones abiertas ---")
 
     press_enter_to_continue()
+
+# --- INICIO DE LA MODIFICACIÓN ---
+# Nueva función para renderizar el cuerpo del dashboard
+def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
+    """Función dedicada a imprimir el layout completo del dashboard."""
+    # --- 1. Extraer datos del resumen ---
+    current_price = summary.get('current_market_price', 0.0)
+    
+    # Datos de sesión
+    total_pnl = summary.get('total_session_pnl', 0.0)
+    total_roi = summary.get('total_session_roi', 0.0)
+    session_start_time = pm_api.get_session_start_time()
+    
+    start_time_str = "N/A"
+    duration_str = "00:00:00"
+    if session_start_time:
+        start_time_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S (UTC)')
+        duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds()
+        duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
+
+    # Datos de operaciones
+    op_infos = summary.get('operations_info', {})
+    long_op_info = op_infos.get('long', {})
+    short_op_info = op_infos.get('short', {})
+    long_op_status = f"LONG: {long_op_info.get('estado', 'N/A')}"
+    short_op_status = f"SHORT: {short_op_info.get('estado', 'N/A')}"
+
+    # Datos de señal
+    latest_signal_info = summary.get('latest_signal', {})
+    signal_str = latest_signal_info.get('signal', 'N/A')
+    signal_reason = latest_signal_info.get('signal_reason', '')
+
+    # Datos de posiciones
+    longs_count = summary.get('open_long_positions_count', 0)
+    shorts_count = summary.get('open_short_positions_count', 0)
+    
+    # Datos de balances lógicos
+    logical_balances = summary.get('logical_balances', {})
+    long_balance = logical_balances.get('long', {})
+    short_balance = logical_balances.get('short', {})
+    long_pnl = summary.get('operation_long_pnl', 0.0)
+    short_pnl = summary.get('operation_short_pnl', 0.0)
+
+    # --- 2. Renderizar la pantalla ---
+    ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+    header_title = f"Dashboard Sesión: {ticker_symbol} @ {current_price:.4f} USDT"
+    print_tui_header(header_title)
+    
+    print("\n--- Estado de la Sesión en Tiempo Real " + "-"*40)
+    print(f"  Inicio Sesión: {start_time_str}  |  Duración: {duration_str}")
+    pnl_color = "\033[92m" if total_pnl >= 0 else "\033[91m"
+    print(f"  PNL Total: {pnl_color}{total_pnl:+.4f} USDT\033[0m  |  ROI Sesión: {pnl_color}{total_roi:+.2f}%\033[0m")
+    
+    print(f"\n  Operaciones: [{long_op_status}] | [{short_op_status}]")
+    print(f"  Última Señal: {signal_str} ({signal_reason})")
+    print(f"  Posiciones Abiertas: LONGs: {longs_count} | SHORTs: {shorts_count}")
+
+    print("\n--- Balances de Operaciones Lógicas " + "-"*45)
+    header = f"  {'Operación':<15} | {'Capital Lógico':>15} | {'Usado':>15} | {'Disponible':>15} | {'PNL Op.':>15}"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    
+    pnl_long_color = "\033[92m" if long_pnl >= 0 else "\033[91m"
+    print(f"  {'LONG':<15} | {long_balance.get('operational_margin', 0.0):15.2f} | {long_balance.get('used_margin', 0.0):15.2f} | {long_balance.get('available_margin', 0.0):15.2f} | {pnl_long_color}{long_pnl:15.4f}\033[0m")
+    
+    pnl_short_color = "\033[92m" if short_pnl >= 0 else "\033[91m"
+    print(f"  {'SHORT':<15} | {short_balance.get('operational_margin', 0.0):15.2f} | {short_balance.get('used_margin', 0.0):15.2f} | {short_balance.get('available_margin', 0.0):15.2f} | {pnl_short_color}{short_pnl:15.4f}\033[0m")
+
+    # print("\n--- Balances de Cuentas Reales " + "-"*50)
+    # print("  (La visualización de balances reales se ha omitido por simplicidad)")
 # --- FIN DE LA MODIFICACIÓN ---
+
 
 # --- Lógica Principal de la Pantalla ---
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
 
-    """
-    Muestra el dashboard y gestiona el ciclo de vida de la sesión de trading.
-
-    Args:
-        session_manager: La instancia activa del SessionManager para esta sesión.
-    """
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module or not sm_api or not session_manager:
         print("ERROR CRÍTICO: Dependencias del Dashboard no disponibles.")
         time.sleep(3)
         return
 
-    # Inyectar la instancia de la sesión en la API para que sea accesible globalmente
     sm_api.init_sm_api(session_manager)
-
-    # --- INICIO DE LA SESIÓN ---
     session_manager.start()
 
     clear_screen()
@@ -122,15 +185,12 @@ def show_dashboard_screen(session_manager: Any):
     
     wait_animation = ['|', '/', '-', '\\']
     i = 0
-    # Esperar a que el ticker (iniciado por la sesión) proporcione el primer precio
     while True:
-        # El PM API todavía puede darnos el precio actual rápidamente
         current_price = pm_api.get_current_market_price()
         if current_price and current_price > 0:
             print("\n¡Precio recibido! Cargando dashboard...")
             time.sleep(1.5)
             break
-        
         print(f"\rEsperando... {wait_animation[i % len(wait_animation)]}", end="")
         i += 1
         time.sleep(0.2)
@@ -140,94 +200,36 @@ def show_dashboard_screen(session_manager: Any):
         error_message = None
         summary = {}
         try:
-            # La única fuente de verdad para el dashboard ahora es el SessionManager
             summary = sm_api.get_session_summary()
-            
             if not summary or summary.get('error'):
                 error_message = f"ADVERTENCIA: No se pudo obtener el estado de la sesión: {summary.get('error', 'Reintentando...')}"
-            
-            # Extraer datos del resumen para la visualización
-            current_price = summary.get('current_market_price', 0.0)
-            realized_pnl = summary.get('total_realized_pnl_session', 0.0)
-            unrealized_pnl = pm_api.get_unrealized_pnl(current_price) # El cálculo de PNL no realizado sigue siendo útil
-            total_pnl = realized_pnl + unrealized_pnl
-            initial_capital = summary.get('initial_total_capital', 0.0)
-            current_roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
-            
-            session_start_time = pm_api.get_session_start_time() # PM aún gestiona el inicio de su parte
-            # --- INICIO DE LA MODIFICACIÓN: Formato de fecha/hora de inicio y duración ---
-            start_time_str = "N/A"
-            duration_str = "00:00:00"
-            if session_start_time:
-                start_time_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S (UTC)')
-                duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds()
-                duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
-            # --- FIN DE LA MODIFICACIÓN ---
-            
-            ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-            
-            # --- INICIO DE LA MODIFICACIÓN: Extraer nuevos datos del resumen ---
-            op_infos = summary.get('operations_info', {})
-            long_op_info = op_infos.get('long', {})
-            short_op_info = op_infos.get('short', {})
-            long_op_status = f"LONG: {long_op_info.get('estado', 'N/A')}"
-            short_op_status = f"SHORT: {short_op_info.get('estado', 'N/A')}"
-            
-            latest_signal_info = summary.get('latest_signal', {})
-            signal_str = latest_signal_info.get('signal', 'N/A')
-            signal_reason = latest_signal_info.get('signal_reason', '')
-            # --- FIN DE LA MODIFICACIÓN ---
-
-            real_balances = summary.get('real_account_balances', {})
-
         except Exception as e:
             error_message = f"ERROR CRÍTICO: Excepción inesperada en el dashboard: {e}"
-            current_price = 0.0 # Asegurar que las variables existan
         
         clear_screen()
-        
         if error_message:
             print(f"\033[91m{error_message}\033[0m")
         
-        # --- INICIO DE LA MODIFICACIÓN: Cabecera simplificada ---
-        header_title = f"Dashboard Sesión: {ticker_symbol} @ {current_price:.4f} USDT"
-        print_tui_header(header_title)
-        
-        # --- RENDERIZADO DE LA PANTALLA ---
-        print("\n--- Estado de la Sesión en Tiempo Real " + "-"*40)
-        
-        # Panel de Rendimiento
-        print(f"  Inicio Sesión: {start_time_str}  |  Duración: {duration_str}")
-        print(f"  PNL Total: {total_pnl:+.4f} USDT  |  ROI Sesión: {current_roi:+.2f}%")
-        
-        # Panel de Operaciones y Señal
-        print(f"\n  Operaciones: [{long_op_status}] | [{short_op_status}]")
-        print(f"  Última Señal: {signal_str} ({signal_reason})")
-
-        # Panel de Posiciones
-        longs_count = summary.get('open_long_positions_count', 0)
-        shorts_count = summary.get('open_short_positions_count', 0)
-        print(f"  Posiciones Abiertas: LONGs: {longs_count} | SHORTs: {shorts_count}")
+        # --- INICIO DE LA MODIFICACIÓN: Llamada a la nueva función de renderizado ---
+        if summary and not summary.get('error'):
+            _render_dashboard_view(summary, config_module)
         # --- FIN DE LA MODIFICACIÓN ---
         
-        print("\n--- Balances de Cuentas Reales " + "-"*50)
-        if not real_balances: print("  (No hay datos de balance disponibles)")
-        else:
-            for acc_name, balance_info in real_balances.items():
-                if isinstance(balance_info, StandardBalance): print(f"  {acc_name.upper():<15}: Equity: {balance_info.total_equity_usd:9.2f}$")
-                else: print(f"  {acc_name.upper():<15}: ({str(balance_info)})")
-        
-        # --- MENÚ DE ACCIONES ---
+        # --- INICIO DE LA MODIFICACIÓN: Nuevo menú de acciones ---
         menu_items = [
-            "[1] Gestionar Operación Activa", 
-            "[2] Ver/Gestionar Posiciones",
+            "[1] Gestionar Operación LONG", 
+            "[2] Gestionar Operación SHORT",
             "[3] Editar Configuración de Sesión", 
             "[4] Ver Logs en Tiempo Real",
             None,
+            "[r] Refrescar",
             "[h] Ayuda", 
             "[q] Finalizar Sesión y Volver al Menú Principal"
         ]
-        action_map = {0: 'manage_operation', 1: 'manage_positions', 2: 'edit_config', 3: 'view_logs', 5: 'help', 6: 'exit_session'}
+        action_map = {
+            0: 'manage_long', 1: 'manage_short', 2: 'edit_config', 3: 'view_logs',
+            5: 'refresh', 6: 'help', 7: 'exit_session'
+        }
         
         menu_options = helpers_module.MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -237,42 +239,41 @@ def show_dashboard_screen(session_manager: Any):
         choice = menu.show()
         action = action_map.get(choice)
         
-        if action == 'manage_operation': 
-            operation_manager.show_operation_manager_screen()
-        elif action == 'manage_positions':
-            _position_viewer.show_position_viewer_screen(pm_api)
+        if action == 'manage_long':
+            # Asumimos que operation_manager tendrá una función para mostrar la vista de un solo lado.
+            # Esto se implementará en el archivo `operation_manager/_main.py`.
+            operation_manager.show_operation_manager_screen(side_filter='long')
+        elif action == 'manage_short':
+            operation_manager.show_operation_manager_screen(side_filter='short')
         elif action == 'edit_config':
-            # La variable debe llamarse como la función importada para poder llamarla
             changes_saved = show_session_config_editor_screen(config_module)
             if changes_saved:
-                # Si se guardaron cambios, los notificamos al SessionManager para que los aplique
-                # Esta es una simplificación; idealmente, el editor devolvería los cambios.
-                sm_api.update_session_parameters({}) # Dispara una re-evaluación
+                # Al guardar, notificamos al SessionManager para que aplique los cambios "en caliente".
+                # Pasamos un diccionario vacío como placeholder, la lógica de `update` leerá desde `config`.
+                sm_api.update_session_parameters({}) 
         elif action == 'view_logs': 
             _log_viewer.show_log_viewer()
+        elif action == 'refresh':
+            time.sleep(0.1) # Pequeña pausa para feedback visual
+            continue # Vuelve al inicio del bucle para refrescar la pantalla
         elif action == 'help': 
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **helpers_module.MENU_STYLE)
             if confirm_menu.show() == 0: 
-                break # Rompe el bucle del dashboard, devolviendo el control a la pantalla de bienvenida
+                break
+        # --- FIN DE LA MODIFICACIÓN ---
     
-    # --- INICIO DE LA MODIFICACIÓN: Lógica de final de sesión ---
-    # Al salir del bucle, obtenemos el resumen final y lo mostramos.
     final_summary_data = sm_api.get_session_summary()
     _display_final_summary(final_summary_data)
     
-    # Detener el ticker después de mostrar el resumen
-    # (Ya estaba siendo detenido por el shutdown_session_backend, pero es más explícito aquí)
     if session_manager.is_running():
         session_manager.stop()
     
-    # Informar a la lógica de backend para que haga su propia limpieza
     from runner import shutdown_session_backend
     shutdown_session_backend(
         session_manager=session_manager,
-        final_summary=final_summary_data, # Pasamos el resumen para logging
+        final_summary=final_summary_data,
         config_module=_deps.get("config_module"),
         open_snapshot_logger_module=_deps.get("open_snapshot_logger_module")
     )
-    # --- FIN DE LA MODIFICACIÓN ---

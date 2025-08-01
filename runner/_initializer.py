@@ -1,16 +1,13 @@
 """
 Módulo Ensamblador de Dependencias.
 
+v6.0 (Capital Lógico por Operación):
+- Se elimina la importación y el registro de la dependencia `BalanceManager`,
+  ya que la clase ha sido eliminada del sistema.
+
 v5.0 (Refactor Connection a OOP):
 - Se actualizan las importaciones del paquete 'connection' para registrar las
-  clases 'ConnectionManager' y 'Ticker' en lugar de los módulos,
-  completando la refactorización a un enfoque orientado a objetos.
-
-v4.x (Refactors Anteriores):
-- Actualizaciones para registrar las clases TAManager, SignalGenerator y
-  EventProcessor.
-- Arquitectura de Controladores: responsabilidad única de ensamblar
-  dependencias.
+  clases 'ConnectionManager' y 'Ticker'.
 """
 from typing import Dict, Any
 
@@ -42,14 +39,10 @@ def assemble_dependencies() -> Dict[str, Any]:
         dependencies["closed_position_logger_module"] = closed_position_logger
         dependencies["signal_logger_module"] = signal_logger
 
-        # --- INICIO DE LA MODIFICACIÓN: Paquete de Conexión a Clases ---
-        # Se importan las CLASES en lugar de los módulos.
+        # --- Paquete de Conexión ---
         from connection import ConnectionManager, Ticker
-        
-        # Se registran las CLASES para que puedan ser instanciadas por los controladores.
         dependencies["ConnectionManager"] = ConnectionManager
         dependencies["Ticker"] = Ticker
-        # --- FIN DE LA MODIFICACIÓN ---
         
         # --- Paquete de API de Exchange (bajo nivel) ---
         from core.api import trading as trading_api
@@ -68,7 +61,7 @@ def assemble_dependencies() -> Dict[str, Any]:
         dependencies["SignalGenerator"] = SignalGenerator
         dependencies["EventProcessor"] = EventProcessor
 
-        # --- NUEVOS CONTROLADORES Y SUS APIs ---
+        # --- Controladores y sus APIs ---
         # BotController
         from core.bot_controller import api as bc_api
         from core.bot_controller._manager import BotController
@@ -88,18 +81,22 @@ def assemble_dependencies() -> Dict[str, Any]:
         dependencies["operation_manager_api_module"] = om_api
         dependencies["OperationManager"] = OperationManager
         
+        # --- INICIO DE LA MODIFICACIÓN ---
         # PositionManager (PM) y sus componentes
+        # Se elimina `BalanceManager` de la importación y del diccionario de dependencias.
         from core.strategy.pm import api as pm_api
-        from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
+        # from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
+        from core.strategy.pm import PositionManager, PositionState, PositionExecutor
         from core.strategy.pm import _helpers as pm_helpers
         from core.strategy.pm import _calculations as pm_calculations
         dependencies["position_manager_api_module"] = pm_api
         dependencies["PositionManager"] = PositionManager
-        dependencies["BalanceManager"] = BalanceManager
+        # dependencies["BalanceManager"] = BalanceManager # Comentado/Eliminado
         dependencies["PositionState"] = PositionState
         dependencies["PositionExecutor"] = PositionExecutor
         dependencies["pm_helpers_module"] = pm_helpers
         dependencies["pm_calculations_module"] = pm_calculations
+        # --- FIN DE LA MODIFICACIÓN ---
 
         print("Diccionario de dependencias ensamblado con éxito.")
         return dependencies
@@ -110,4 +107,4 @@ def assemble_dependencies() -> Dict[str, Any]:
         import traceback
         traceback.print_exc()
         # Devolvemos un diccionario vacío para que el lanzador principal falle limpiamente.
-        return {} 
+        return {}

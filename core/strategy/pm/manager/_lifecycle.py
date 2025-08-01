@@ -1,21 +1,21 @@
 """
 Módulo del Position Manager: Ciclo de Vida.
 
-v7.0 (Desacoplamiento Final):
-- Se actualiza la firma del método `initialize` para eliminar los parámetros
-  `base_size` y `max_pos`, completando el desacoplamiento de la lógica de la
-  Operación y solucionando el `TypeError` de inicialización.
-- El PM ahora se inicializa con el `operation_mode` y recibe la API del OM
-  como una dependencia a través del constructor.
+v8.0 (Capital Lógico por Operación):
+- Se elimina la dependencia del `balance_manager` en el constructor.
+- El método `initialize` se simplifica, ya que la lógica de capital ahora
+  reside en las entidades `Operacion`.
 """
-# (COMENTARIO) Docstring de la versión anterior (v6.0) para referencia:
+# (COMENTARIO) Docstring de la versión anterior (v7.0) para referencia:
 # """
 # Módulo del Position Manager: Ciclo de Vida.
 # 
-# v6.0 (Modelo de Operación Única):
-# - El ciclo de vida ahora se centra en la inicialización de una única
-#   `Operacion` estratégica en estado NEUTRAL y EN_ESPERA.
-# - Se elimina por completo la gestión de la lista de Hitos.
+# v7.0 (Desacoplamiento Final):
+# - Se actualiza la firma del método `initialize` para eliminar los parámetros
+#   `base_size` y `max_pos`, completando el desacoplamiento de la lógica de la
+#   Operación y solucionando el `TypeError` de inicialización.
+# - El PM ahora se inicializa con el `operation_mode` y recibe la API del OM
+#   como una dependencia a través del constructor.
 # """
 import datetime
 import time
@@ -36,7 +36,10 @@ except ImportError:
 class _LifecycleManager:
     """Clase base que gestiona el ciclo de vida del PositionManager."""
     def __init__(self,
-                 balance_manager: Any,
+                 # --- INICIO DE LA MODIFICACIÓN ---
+                 # Se elimina el parámetro `balance_manager` del constructor.
+                 # balance_manager: Any,
+                 # --- FIN DE LA MODIFICACIÓN ---
                  position_state: Any,
                  exchange_adapter: AbstractExchange,
                  config: Any,
@@ -46,7 +49,10 @@ class _LifecycleManager:
                  operation_manager_api: Any
                  ):
         # --- Inyección de Dependencias ---
-        self._balance_manager = balance_manager
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se comenta la asignación del balance_manager.
+        # self._balance_manager = balance_manager
+        # --- FIN DE LA MODIFICACIÓN ---
         self._position_state = position_state
         self._executor: Optional[Any] = None
         self._exchange = exchange_adapter
@@ -76,11 +82,8 @@ class _LifecycleManager:
     def initialize(self, operation_mode: str):
         """
         Inicializa el estado del PositionManager para una nueva sesión.
-        Ya no es responsable de crear la operación inicial.
+        Ya no es responsable de gestionar el capital.
         """
-        # (COMENTARIO) Firma anterior para referencia histórica.
-        # def initialize(self, operation_mode: str, base_size: float, max_pos: int):
-        
         self._reset_all_states()
         self._operation_mode = operation_mode
     
@@ -89,7 +92,10 @@ class _LifecycleManager:
         self._global_stop_loss_roi_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT', 0.0)
         self._global_take_profit_roi_pct = getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT', 0.0)
 
-        self._balance_manager.set_state_manager(self)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la configuración del state manager en el balance_manager, ya que no existe.
+        # self._balance_manager.set_state_manager(self)
+        # --- FIN DE LA MODIFICACIÓN ---
         self._position_state.initialize(is_live_mode=True)
         
         self._initialized = True

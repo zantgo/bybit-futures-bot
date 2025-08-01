@@ -1,15 +1,9 @@
-# core/bot_controller/_manager.py
-
 """
 Módulo Gestor del Bot (BotController).
 
-v5.1 (Fix AttributeError):
-- Se corrige el constructor para asignar correctamente la dependencia
-  del memory_logger al atributo self._memory_logger.
-
-v5.0 (Refactor Connection Layer):
-- Se adapta para usar la clase ConnectionManager en lugar del módulo.
-- El BotController ahora crea y posee la instancia de ConnectionManager.
+v6.0 (Capital Lógico por Operación):
+- Se elimina la dependencia e instanciación de la clase `BalanceManager`, ya que
+  la gestión de capital ahora reside en cada objeto `Operacion`.
 """
 import sys
 import time
@@ -22,7 +16,10 @@ try:
     from core.strategy.sm._manager import SessionManager
     from core.strategy.om._manager import OperationManager
     from core.strategy.pm.manager import PositionManager
-    from core.strategy.pm._balance import BalanceManager
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se elimina la importación de BalanceManager
+    # from core.strategy.pm._balance import BalanceManager
+    # --- FIN DE LA MODIFICACIÓN ---
     from core.strategy.pm._position_state import PositionState
     from core.strategy.pm._executor import PositionExecutor
     from core.exchange._bybit_adapter import BybitAdapter
@@ -32,12 +29,11 @@ try:
     from core.api import trading as trading_api
     from core.menu._helpers import get_input, UserInputCancelled
 
-    # MODIFICADO: Importar la CLASE, no el módulo
     from connection import ConnectionManager
 
 except ImportError:
     # Fallbacks para análisis estático y resiliencia
-    SessionManager = OperationManager = PositionManager = BalanceManager = None
+    SessionManager = OperationManager = PositionManager = None # BalanceManager quitado
     PositionState = PositionExecutor = BybitAdapter = ConnectionManager = None
     memory_logger_module = type('obj', (object,), {'log': print})()
     trading_api = None
@@ -57,16 +53,13 @@ class BotController:
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
         self._logging_package = dependencies.get('logging_package')
-        self._memory_logger = dependencies.get('memory_logger_module') # <-- CORRECCIÓN: Añadir esta línea
+        self._memory_logger = dependencies.get('memory_logger_module')
 
-        # --- INICIO DE LA MODIFICACIÓN: Instanciar ConnectionManager ---
         ConnectionManager_class = dependencies.get('ConnectionManager')
         if not ConnectionManager_class:
             raise ValueError("La clase ConnectionManager no fue encontrada en las dependencias.")
         
-        # El BotController ahora crea y es dueño de la instancia única de ConnectionManager.
         self._connection_manager = ConnectionManager_class(dependencies)
-        # --- FIN DE LA MODIFICACIÓN ---
         
         self._pm_helpers = dependencies.get('pm_helpers_module')
         self._pm_calculations = dependencies.get('pm_calculations_module')
@@ -77,13 +70,14 @@ class BotController:
         self._SessionManager = dependencies.get('SessionManager')
         self._OperationManager = dependencies.get('OperationManager')
         self._PositionManager = dependencies.get('PositionManager')
-        self._BalanceManager = dependencies.get('BalanceManager')
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la dependencia de la clase BalanceManager.
+        # self._BalanceManager = dependencies.get('BalanceManager')
+        # --- FIN DE LA MODIFICACIÓN ---
         self._PositionState = dependencies.get('PositionState')
         self._PositionExecutor = dependencies.get('PositionExecutor')
         self._BybitAdapter = dependencies.get('BybitAdapter')
         
-        # El estado de los clientes (`_active_clients`) es ahora manejado internamente
-        # por el ConnectionManager y se elimina de aquí.
         self._connections_initialized: bool = False
 
     def are_connections_initialized(self) -> bool:
@@ -100,11 +94,7 @@ class BotController:
         self._memory_logger.log("BotController: Iniciando validación de conexiones...", "INFO")
         
         try:
-            # MODIFICADO: Llamada al método de la instancia.
             self._connection_manager.initialize_all_clients()
-            
-            # El BotController ya no necesita mantener su propia lista de clientes.
-            # El ConnectionManager es la única fuente de verdad.
             
             self._connections_initialized = True
             msg = "Validación completada. Todas las conexiones requeridas fueron exitosas."
@@ -132,12 +122,10 @@ class BotController:
         
         from core import api as core_api
         
-        # MODIFICADO: Obtenemos la lista de cuentas desde el ConnectionManager.
         initialized_accounts = self._connection_manager.get_initialized_accounts()
 
         balances = {}
         for account_name in initialized_accounts:
-            # La API de bajo nivel ahora dependerá de la instancia de ConnectionManager.
             balance_info = core_api.get_unified_account_balance_info(account_name)
             balances[account_name] = balance_info
         return balances
@@ -146,7 +134,6 @@ class BotController:
         """Ejecuta la prueba de transferencias entre cuentas."""
         if not self._connections_initialized:
             return False, "Las conexiones API deben ser inicializadas primero."
-        # MODIFICADO: Llamada al método de la instancia.
         return self._connection_manager.test_subaccount_transfers()
 
     def run_position_test(self) -> Tuple[bool, str]:
@@ -167,7 +154,6 @@ class BotController:
             return False, "Prueba cancelada por el usuario."
         
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
-        # MODIFICADO: Inyectar la instancia de ConnectionManager en el adaptador
         adapter = self._BybitAdapter(self._connection_manager)
         adapter.initialize(symbol=ticker)
         ticker_info = adapter.get_ticker(ticker)
@@ -216,23 +202,51 @@ class BotController:
 
         self._memory_logger.log("BotController: Creando nueva sesión de trading...", "INFO")
         try:
-            # Crear instancias específicas para la sesión
-            # MODIFICADO: Inyectar la instancia de ConnectionManager en el adaptador
             exchange_adapter = self._BybitAdapter(self._connection_manager)
             
             om_instance = self._OperationManager(config=self._config, memory_logger_instance=self._memory_logger)
             self._om_api.init_om_api(om_instance)
-            balance_manager = self._BalanceManager(config=self._config, utils=self._utils, exchange_adapter=exchange_adapter)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina toda la creación y configuración del BalanceManager.
+            # balance_manager = self._BalanceManager(...)
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             position_state = self._PositionState(config=self._config, utils=self._utils, exchange_adapter=exchange_adapter)
-            pm_instance = self._PositionManager(balance_manager=balance_manager, position_state=position_state, exchange_adapter=exchange_adapter, config=self._config, utils=self._utils, memory_logger=self._memory_logger, helpers=self._pm_helpers, operation_manager_api=self._om_api)
-            executor = self._PositionExecutor(config=self._config, utils=self._utils, balance_manager=balance_manager, position_state=position_state, exchange_adapter=exchange_adapter, calculations=self._pm_calculations, helpers=self._pm_helpers, closed_position_logger=self._logging_package.closed_position_logger, state_manager=pm_instance)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # El PositionManager ya no necesita `balance_manager` en su constructor.
+            pm_instance = self._PositionManager(
+                # balance_manager=balance_manager, # <-- COMENTADO/ELIMINADO
+                position_state=position_state, 
+                exchange_adapter=exchange_adapter, 
+                config=self._config, 
+                utils=self._utils, 
+                memory_logger=self._memory_logger, 
+                helpers=self._pm_helpers, 
+                operation_manager_api=self._om_api
+            )
+            
+            # El PositionExecutor tampoco necesita ya `balance_manager`.
+            executor = self._PositionExecutor(
+                config=self._config, 
+                utils=self._utils, 
+                # balance_manager=balance_manager, # <-- COMENTADO/ELIMINADO
+                position_state=position_state, 
+                exchange_adapter=exchange_adapter, 
+                calculations=self._pm_calculations, 
+                helpers=self._pm_helpers, 
+                closed_position_logger=self._logging_package.closed_position_logger, 
+                state_manager=pm_instance
+            )
+            # --- FIN DE LA MODIFICACIÓN ---
+
             pm_instance.set_executor(executor)
             self._pm_helpers.set_dependencies(self._config, self._utils)
             self._pm_api.init_pm_api(pm_instance)
             
             session_deps = self._dependencies.copy()
             
-            # MODIFICADO: Inyectar las instancias específicas de la sesión
             session_deps['connection_manager'] = self._connection_manager 
             session_deps['exchange_adapter'] = exchange_adapter
             session_deps['operation_manager'] = om_instance

@@ -1,10 +1,10 @@
 """
 Módulo Gestor de la Operación Estratégica (Operation Manager).
 
-Define la clase `OperationManager`, que es el componente central de la lógica
-de negocio para las operaciones estratégicas. Es responsable de mantener,
-modificar y gestionar el ciclo de vida de los objetos `Operacion` de forma
-independiente para los lados LONG y SHORT.
+v8.0 (Capital Lógico por Operación):
+- `create_or_update_operation` ahora gestiona la asignación y el ajuste dinámico
+  del capital lógico de cada operación a través del objeto `LogicalBalances`.
+- `detener_operacion` ahora resetea el balance lógico de la operación.
 """
 import datetime
 import uuid
@@ -12,14 +12,19 @@ from typing import Optional, Dict, Any, Tuple
 
 # --- Dependencias del Proyecto ---
 try:
-    # La entidad principal que este manager gestiona
-    from ._entities import Operacion
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # La entidad principal que este manager gestiona, ahora con su balance.
+    from ._entities import Operacion, LogicalBalances
+    # --- FIN DE LA MODIFICACIÓN ---
     # Dependencias inyectadas para logging y configuración
     from core.logging import memory_logger
     import config as config_module
 except ImportError:
     # Fallbacks para análisis estático y resiliencia
     class Operacion: pass
+    # --- INICIO DE LA MODIFICACIÓN ---
+    class LogicalBalances: pass
+    # --- FIN DE LA MODIFICACIÓN ---
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
@@ -82,8 +87,9 @@ class OperationManager:
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         """
         Crea o actualiza una operación. Gestiona las transiciones de estado y el ajuste
-        dinámico del capital para operaciones activas.
+        dinámico del capital lógico para operaciones activas.
         """
+        # Comentario: La dependencia de pm_api se mantiene por si se necesita para alguna lógica futura.
         from core.strategy.pm import api as pm_api
 
         target_operation = self.get_operation_by_side(side)
@@ -93,9 +99,9 @@ class OperationManager:
         estado_original = target_operation.estado
         changes_log = []
 
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de Capital Dinámico ---
-        # Capturar valores originales ANTES de cualquier cambio
-        capital_calculado_anterior = target_operation.tamaño_posicion_base_usdt * target_operation.max_posiciones_logicas
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Capital Lógico ---
+        # Capturar el capital lógico operativo ANTES de cualquier cambio para detectar ajustes.
+        capital_logico_anterior = target_operation.balances.operational_margin
         
         # --- Aplicar cambios de parámetros ---
         for key, value in params.items():
@@ -105,45 +111,44 @@ class OperationManager:
                     setattr(target_operation, key, value)
                     changes_log.append(f"'{key}': {old_value} -> {value}")
         
-        # --- Lógica de transición de estado y ajuste de capital ---
-        if estado_original == 'DETENIDA' and params: # Configurando una nueva operación
-            summary = pm_api.get_position_summary()
-            if summary and not summary.get('error'):
-                balances = summary.get('bm_balances', {})
-                capital_key = 'operational_long_margin' if side == 'long' else 'operational_short_margin'
-                target_operation.capital_inicial_usdt = balances.get(capital_key, 0.0)
-                changes_log.append(f"'capital_inicial_usdt': {target_operation.capital_inicial_usdt:.2f}$ (asignado)")
+        # --- Lógica de transición de estado y asignación/ajuste de capital ---
+        if estado_original == 'DETENIDA' and params: # Configurando una NUEVA operación
+            # Se asigna el capital lógico proporcionado por el usuario (desde el wizard).
+            # El wizard debe pasar un parámetro 'operational_margin'.
+            new_operational_margin = params.get('operational_margin')
+            if new_operational_margin is not None:
+                target_operation.balances.operational_margin = float(new_operational_margin)
+                # El capital inicial histórico se fija en este momento.
+                target_operation.capital_inicial_usdt = float(new_operational_margin)
+                changes_log.append(f"'capital_logico': {target_operation.capital_inicial_usdt:.2f}$ (asignado)")
 
+            # Lógica de transición de estado (sin cambios)
             if target_operation.tipo_cond_entrada == 'MARKET':
                 target_operation.estado = 'ACTIVA'
                 target_operation.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
             else:
                 target_operation.estado = 'EN_ESPERA'
-            
             changes_log.append(f"'estado': DETENIDA -> {target_operation.estado}")
 
-        elif estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA']: # Modificando una operación en curso
+        elif estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA']: # MODIFICANDO una operación en curso
             
-            # 1. Ajuste de capital dinámico
-            if 'tamaño_posicion_base_usdt' in params or 'max_posiciones_logicas' in params:
-                capital_calculado_nuevo = target_operation.tamaño_posicion_base_usdt * target_operation.max_posiciones_logicas
-                diferencia_capital = capital_calculado_nuevo - capital_calculado_anterior
+            # 1. Ajuste dinámico del capital lógico
+            capital_logico_nuevo = target_operation.balances.operational_margin
+            diferencia_capital = capital_logico_nuevo - capital_logico_anterior
 
-                if diferencia_capital > 0:
-                    target_operation.capital_inicial_usdt += diferencia_capital
-                    changes_log.append(f"'capital_inicial_usdt': +{diferencia_capital:.2f}$ (ajustado)")
-                    self._memory_logger.log(f"CAPITAL AJUSTADO para Operación {side.upper()}: +{diferencia_capital:.2f}$. "
-                                            f"Nuevo capital base: {target_operation.capital_inicial_usdt:.2f}$", "WARN")
-                elif diferencia_capital < 0:
-                    self._memory_logger.log(f"WARN: Se intentó reducir el capital de una operación activa. "
-                                            f"Esta acción no está soportada y el capital inicial no será modificado.", "WARN")
+            if abs(diferencia_capital) > 1e-9: # Si hubo un cambio
+                # El capital_inicial_usdt se ajusta para reflejar el "depósito" o "retiro" lógico.
+                # Esto mantiene la consistencia en el cálculo del ROI.
+                target_operation.capital_inicial_usdt += diferencia_capital
+                changes_log.append(f"'capital_logico': {capital_logico_anterior:.2f}$ -> {capital_logico_nuevo:.2f}$")
+                changes_log.append(f"'capital_inicial_historico': ajustado en {diferencia_capital:+.2f}$")
+                self._memory_logger.log(f"CAPITAL LÓGICO AJUSTADO ({side.upper()}): {diferencia_capital:+.2f}$. Nuevo capital base ROI: {target_operation.capital_inicial_usdt:.2f}$", "WARN")
 
-            # 2. Transición ACTIVA -> EN_ESPERA (si aplica)
+            # 2. Transición ACTIVA -> EN_ESPERA (si aplica, sin cambios en la lógica)
             if estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
                 current_price = pm_api.get_current_market_price() or 0.0
                 cond_type = target_operation.tipo_cond_entrada
                 cond_value = target_operation.valor_cond_entrada
-
                 condicion_cumplida_ahora = False
                 if cond_type == 'MARKET' or cond_value is None:
                     condicion_cumplida_ahora = True
@@ -152,10 +157,11 @@ class OperationManager:
                         condicion_cumplida_ahora = True
                     elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
                         condicion_cumplida_ahora = True
-
                 if not condicion_cumplida_ahora:
                     target_operation.estado = 'EN_ESPERA'
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
+
+        # --- FIN DE LA MODIFICACIÓN ---
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -239,6 +245,10 @@ class OperationManager:
         target_operation.capital_inicial_usdt = 0.0
         target_operation.pnl_realizado_usdt = 0.0
         target_operation.comercios_cerrados_contador = 0
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se resetea el balance lógico a un estado vacío.
+        target_operation.balances = LogicalBalances()
+        # --- FIN DE LA MODIFICACIÓN ---
         
         msg = f"OPERACIÓN {side.upper()} ({tendencia_anterior}) DETENIDA. El sistema está ahora inactivo para este lado."
         self._memory_logger.log(msg, "INFO")

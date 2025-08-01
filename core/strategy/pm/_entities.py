@@ -1,10 +1,11 @@
 """
 Módulo de Entidades de Dominio para el Position Manager.
 
-v6.3 (Condición de Salida por Precio):
-- Se añaden los campos `tipo_cond_salida` y `valor_cond_salida` a la entidad
-  `Operacion` para permitir la finalización de una estrategia basada en un
-  nivel de precio específico, además de los límites existentes.
+v7.0 (Capital Lógico por Operación):
+- Se añade la dataclass `LogicalBalances` para encapsular la gestión de capital
+  a nivel de una única Operación, eliminando la necesidad de un BalanceManager global.
+- La entidad `Operacion` ahora contiene una instancia de `LogicalBalances`.
+- Se reemplaza el TP por ROI estático con un TSL por ROI dinámico para las operaciones.
 """
 import datetime
 from dataclasses import dataclass, field
@@ -51,24 +52,60 @@ class PhysicalPosition:
 
 # --- Entidades de Balance y Capital ---
 
+# --- INICIO DE LA MODIFICACIÓN ---
+
 @dataclass
-class Balances:
-    """Encapsula los balances lógicos de las cuentas operativas y de beneficios."""
-    operational_long: float = 0.0
-    operational_short: float = 0.0
-    used_long: float = 0.0
-    used_short: float = 0.0
-    profit: float = 0.0
+class LogicalBalances:
+    """
+    Encapsula y gestiona el capital lógico para una única operación.
+    Esta clase reemplaza la lógica del BalanceManager global.
+    """
+    operational_margin: float = 0.0
+    used_margin: float = 0.0
+    profit_balance: float = 0.0 # Beneficios netos transferidos fuera de esta operación
+
+    @property
+    def available_margin(self) -> float:
+        """Calcula el margen disponible para nuevas posiciones."""
+        return max(0.0, self.operational_margin - self.used_margin)
+
+    def decrease_available_margin(self, amount: float):
+        """Incrementa el margen usado, reduciendo el disponible. Llamado al abrir una posición."""
+        if isinstance(amount, (int, float)) and amount > 0:
+            self.used_margin += abs(amount)
+
+    def increase_available_margin(self, amount: float):
+        """Disminuye el margen usado, liberando capital. Llamado al cerrar una posición."""
+        if isinstance(amount, (int, float)) and amount > 0:
+            self.used_margin = max(0.0, self.used_margin - abs(amount))
+            
+    def record_profit_transfer(self, amount_transferred: float):
+        """Registra un beneficio que ha sido lógicamente 'retirado' de esta operación."""
+        if isinstance(amount_transferred, (int, float)) and amount_transferred > 0:
+            self.profit_balance += amount_transferred
+
+# @dataclass
+# class Balances:
+#     """ (OBSOLETO) Encapsulaba los balances lógicos de las cuentas operativas y de beneficios.
+#     Esta clase se ha reemplazado por `LogicalBalances` que se adjunta a cada `Operacion`.
+#     """
+#     operational_long: float = 0.0
+#     operational_short: float = 0.0
+#     used_long: float = 0.0
+#     used_short: float = 0.0
+#     profit: float = 0.0
     
-    @property
-    def available_long(self) -> float:
-        """Calcula el margen disponible para nuevas posiciones largas."""
-        return max(0.0, self.operational_long - self.used_long)
+#     @property
+#     def available_long(self) -> float:
+#         """Calcula el margen disponible para nuevas posiciones largas."""
+#         return max(0.0, self.operational_long - self.used_long)
         
-    @property
-    def available_short(self) -> float:
-        """Calcula el margen disponible para nuevas posiciones cortas."""
-        return max(0.0, self.operational_short - self.used_short)
+#     @property
+#     def available_short(self) -> float:
+#         """Calcula el margen disponible para nuevas posiciones cortas."""
+#         return max(0.0, self.operational_short - self.used_short)
+
+# --- FIN DE LA MODIFICACIÓN ---
 
 
 # --- Entidad de Operación Única ---
@@ -81,14 +118,14 @@ class Operacion:
     """
     # Identificación y Estado
     id: str
-    estado: str = 'EN_ESPERA'
+    estado: str = 'DETENIDA'  # Valores: 'DETENIDA', 'EN_ESPERA', 'ACTIVA', 'PAUSADA'
 
     # Condición de Entrada
     tipo_cond_entrada: Optional[str] = 'MARKET'
     valor_cond_entrada: Optional[float] = 0.0
 
     # Parámetros de Trading
-    tendencia: str = 'NEUTRAL'
+    tendencia: Optional[str] = None # 'LONG_ONLY' o 'SHORT_ONLY'
     tamaño_posicion_base_usdt: float = 1.0
     max_posiciones_logicas: int = 5
     apalancamiento: float = 10.0
@@ -96,17 +133,18 @@ class Operacion:
     tsl_activacion_pct: float = 0.4
     tsl_distancia_pct: float = 0.1
 
-    # Condiciones de Salida (Límites)
-    tp_roi_pct: Optional[float] = None
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Condiciones de Salida (Límites de la Operación)
+    # Se reemplaza el tp_roi_pct estático por un TSL por ROI dinámico.
+    # tp_roi_pct: Optional[float] = None
+    tsl_roi_activacion_pct: Optional[float] = None
+    tsl_roi_distancia_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
-    
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Nueva Condición de Salida por Precio
     tipo_cond_salida: Optional[str] = None # 'PRICE_ABOVE', 'PRICE_BELOW'
     valor_cond_salida: Optional[float] = None
-    # --- FIN DE LA MODIFICACIÓN ---
+    accion_al_finalizar: str = 'PAUSAR'  # 'PAUSAR' o 'DETENER'
     
     # Estado Dinámico
     capital_inicial_usdt: float = 0.0
@@ -114,3 +152,11 @@ class Operacion:
     comercios_cerrados_contador: int = 0
     tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
     posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})
+
+    # Nuevos campos para el estado dinámico del TSL por ROI
+    tsl_roi_activo: bool = False
+    tsl_roi_peak_pct: float = 0.0
+    
+    # Cada operación ahora es dueña de su propio gestor de balance lógico.
+    balances: LogicalBalances = field(default_factory=LogicalBalances)
+    # --- FIN DE LA MODIFICACIÓN ---

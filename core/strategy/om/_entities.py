@@ -1,23 +1,29 @@
 """
 Módulo de Entidades de Dominio para el Operation Manager (OM).
 
-Define las estructuras de datos clave que el OM gestiona, principalmente la
-entidad `Operacion`, que representa una estrategia de trading completa desde
-su concepción hasta su finalización.
+v8.0 (Capital Lógico por Operación):
+- La entidad `Operacion` ahora contiene una instancia de `LogicalBalances`
+  para gestionar su propio capital lógico, importada desde el paquete PM.
 """
 import datetime
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
 # --- Dependencia Cruzada ---
-# La Operación contiene una lista de Posiciones Lógicas, que son gestionadas
-# por el Position Manager. Por lo tanto, importamos la entidad desde su módulo.
+# La Operación contiene entidades gestionadas por el Position Manager.
+# Por lo tanto, importamos las entidades desde su módulo.
 try:
-    from core.strategy.pm._entities import LogicalPosition
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Importamos también la nueva clase LogicalBalances.
+    from core.strategy.pm._entities import LogicalPosition, LogicalBalances
+    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError:
     # Fallback para permitir análisis estático y evitar errores de importación circular
     # si los archivos se cargan en un orden inesperado.
     class LogicalPosition: pass
+    # --- INICIO DE LA MODIFICACIÓN ---
+    class LogicalBalances: pass
+    # --- FIN DE LA MODIFICACIÓN ---
 
 # --- Entidad de Operación Única ---
 
@@ -46,10 +52,8 @@ class Operacion:
     tsl_distancia_pct: float = 0.1
 
     # --- Condiciones de Salida (Límites) ---
-    # MODIFICADO: Se elimina tp_roi_pct y se añaden los campos para el TSL por ROI
-    tsl_roi_activacion_pct: Optional[float] = None # NUEVO
-    tsl_roi_distancia_pct: Optional[float] = None  # NUEVO
-    
+    tsl_roi_activacion_pct: Optional[float] = None
+    tsl_roi_distancia_pct: Optional[float] = None
     sl_roi_pct: Optional[float] = None
     tiempo_maximo_min: Optional[int] = None
     max_comercios: Optional[int] = None
@@ -64,6 +68,12 @@ class Operacion:
     tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
     posiciones_activas: Dict[str, List[LogicalPosition]] = field(default_factory=lambda: {'long': [], 'short': []})
 
-    # NUEVO: Campos para el estado dinámico del TSL por ROI
+    # Campos para el estado dinámico del TSL por ROI
     tsl_roi_activo: bool = False
     tsl_roi_peak_pct: float = 0.0
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se añade el campo `balances` para que cada operación gestione su propio capital lógico.
+    # Esta es la única adición necesaria en esta clase.
+    balances: LogicalBalances = field(default_factory=LogicalBalances)
+    # --- FIN DE LA MODIFICACIÓN ---

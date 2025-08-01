@@ -1,5 +1,10 @@
 """
 Módulo para la Pantalla de Edición de Configuración de la Sesión.
+
+v9.0 (Recarga en Caliente):
+- Se modifica el submenú de Ticker para impedir la modificación de `TICKER_SYMBOL`
+  y `TICKER_INTERVAL_SECONDS` mientras una sesión está activa, ya que estos
+  parámetros no pueden cambiarse dinámicamente sin reiniciar el Ticker.
 """
 from typing import Any, Dict
 import time
@@ -36,6 +41,8 @@ def show_session_config_editor_screen(config_module: Any) -> bool:
         if logger: logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
         return False
 
+    # Crear una copia temporal de la configuración para editarla sin afectar la real
+    # hasta que se guarde explícitamente.
     class TempConfig: pass
     temp_config = TempConfig()
     for attr in dir(config_module):
@@ -59,6 +66,7 @@ def _apply_changes_to_real_config(temp_cfg: Any, real_cfg: Any, logger: Any):
     for attr in dir(temp_cfg):
         if attr.isupper() and not attr.startswith('_'):
             new_value = getattr(temp_cfg, attr)
+            # Aplicar solo si el atributo existe en la config real y el valor ha cambiado
             if hasattr(real_cfg, attr) and new_value != getattr(real_cfg, attr):
                 logger.log(f"  -> {attr}: '{getattr(real_cfg, attr)}' -> '{new_value}'", "WARN")
                 setattr(real_cfg, attr, new_value)
@@ -71,8 +79,8 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
         menu_items = [
             "[1] Parámetros del Ticker",
             "[2] Parámetros de Estrategia (TA y Señal)",
-            "[3] Parámetros de Capital (Posiciones)",
-            "[4] Parámetros de Límites (Disyuntores)",
+            "[3] Parámetros de Capital (Defaults de Operación)",
+            "[4] Parámetros de Límites (Disyuntores de Sesión)",
             None,
             "[h] Ayuda",
             None,
@@ -83,9 +91,7 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
 
         menu = TerminalMenu(menu_items, title="Editor de Configuración de Sesión", **MENU_STYLE)
         
-        # --- INICIO DE LA CORRECCIÓN ---
         action = action_map.get(menu.show())
-        # --- FIN DE LA CORRECCIÓN ---
 
         if action == 'ticker': _show_ticker_config_menu(temp_cfg)
         elif action == 'strategy': _show_strategy_config_menu(temp_cfg)
@@ -93,12 +99,19 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
         elif action == 'limits': _show_session_limits_menu(temp_cfg)
         elif action == 'help': show_help_popup("config_editor")
         elif action == 'save':
-            print("\nCambios guardados."); time.sleep(1.5); return True
+            print("\nCambios guardados. Se aplicarán dinámicamente a la sesión."); time.sleep(2); return True
         elif action == 'cancel' or action is None:
             print("\nCambios descartados."); time.sleep(1.5); return False
 
 # --- SUBMENÚS DE EDICIÓN ---
 def _show_ticker_config_menu(cfg: Any):
+    """Muestra el menú para editar los parámetros del Ticker."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Verificar si la sesión ya está corriendo para deshabilitar opciones.
+    from core.strategy.sm import api as sm_api
+    is_session_running = sm_api.is_running() if sm_api else False
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     try:
         while True:
             menu_items = [
@@ -106,8 +119,25 @@ def _show_ticker_config_menu(cfg: Any):
                 f"[2] Intervalo (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
                 None, "[b] Volver"
             ]
-            submenu = TerminalMenu(menu_items, title="Configuración del Ticker", **MENU_STYLE)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Añadir mensaje informativo si la sesión está activa
+            title = "Configuración del Ticker"
+            if is_session_running:
+                title += "\n(Símbolo e Intervalo no se pueden cambiar durante una sesión activa)"
+            # --- FIN DE LA MODIFICACIÓN ---
+
+            submenu = TerminalMenu(menu_items, title=title, **MENU_STYLE)
             choice = submenu.show()
+
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Bloquear la edición si la sesión está activa
+            if is_session_running and choice in [0, 1]:
+                print("\nEste parámetro no puede ser modificado mientras la sesión está en ejecución.")
+                time.sleep(2)
+                continue
+            # --- FIN DE LA MODIFICACIÓN ---
+
             if choice == 0:
                 new_val = get_input("\nNuevo Símbolo (ej. ETHUSDT)", str, getattr(cfg, 'TICKER_SYMBOL', 'N/A'))
                 setattr(cfg, 'TICKER_SYMBOL', new_val.upper())
@@ -119,6 +149,7 @@ def _show_ticker_config_menu(cfg: Any):
 
 
 def _show_strategy_config_menu(cfg: Any):
+    """Muestra el menú para editar los parámetros de la estrategia."""
     try:
         while True:
             menu_items = [
@@ -126,7 +157,7 @@ def _show_strategy_config_menu(cfg: Any):
                 f"[2] Margen de Venta (%) (Actual: {getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)})",
                 f"[3] Umbral de Decremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0)})",
                 f"[4] Umbral de Incremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0)})",
-                f"[5] Período EMA (Actual: {getattr(cfg, 'TA_EMA_WINDOW', 0)})",
+                f"[5] Período EMA (TA_EMA_WINDOW) (Actual: {getattr(cfg, 'TA_EMA_WINDOW', 0)})",
                 None, "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Parámetros de la Estrategia (TA y Señal)", **MENU_STYLE)
@@ -140,6 +171,7 @@ def _show_strategy_config_menu(cfg: Any):
     except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_pm_capital_config_menu(cfg: Any):
+    """Muestra el menú para editar los parámetros de capital por defecto."""
     try:
         while True:
             menu_items = [
@@ -149,7 +181,7 @@ def _show_pm_capital_config_menu(cfg: Any):
                 f"[4] % de Reinversión de Ganancias (Actual: {getattr(cfg, 'POSITION_REINVEST_PROFIT_PCT', 0.0):.1f}%)",
                 None, "[b] Volver"
             ]
-            submenu = TerminalMenu(menu_items, title="Gestión de Posiciones (Capital)", **MENU_STYLE)
+            submenu = TerminalMenu(menu_items, title="Gestión de Posiciones (Defaults para Operaciones)", **MENU_STYLE)
             choice = submenu.show()
             if choice == 0: setattr(cfg, 'POSITION_BASE_SIZE_USDT', get_input("\nNuevo Tamaño Base (USDT)", float, getattr(cfg, 'POSITION_BASE_SIZE_USDT', 0.0), min_val=0.1))
             elif choice == 1: setattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', get_input("\nNuevo Máximo de Posiciones por Lado", int, getattr(cfg, 'POSITION_MAX_LOGICAL_POSITIONS', 0), min_val=1))
@@ -159,6 +191,7 @@ def _show_pm_capital_config_menu(cfg: Any):
     except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_session_limits_menu(cfg: Any):
+    """Muestra el menú para editar los disyuntores de la sesión."""
     try:
         while True:
             duration = getattr(cfg, 'SESSION_MAX_DURATION_MINUTES', 0)
