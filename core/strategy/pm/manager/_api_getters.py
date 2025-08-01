@@ -1,5 +1,11 @@
+# core/strategy/pm/manager/_api_getters.py
+
 """
 Módulo del Position Manager: API de Getters.
+
+v7.4 (Dashboard Enriquecido):
+- Se añade el sub-diccionario 'operations_info' al resumen para exponer
+  los detalles de las operaciones Long y Short a la TUI.
 
 v7.3 (Corrección Final de Getters):
 - Se corrige la función `get_unrealized_pnl` para que obtenga las operaciones
@@ -65,6 +71,29 @@ class _ApiGetters:
         if short_op.estado == 'ACTIVA': active_tendencies.append(short_op.tendencia)
         display_tendencia = ' & '.join(active_tendencies) if active_tendencies else 'NEUTRAL'
 
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Extraer detalles de las operaciones para la TUI
+        def get_op_details(op: Operacion):
+            if not op: return {}
+            start_time = op.tiempo_inicio_ejecucion
+            duration_str = "N/A"
+            if op.estado == 'ACTIVA' and start_time:
+                 duration = datetime.datetime.now(datetime.timezone.utc) - start_time
+                 duration_str = str(datetime.timedelta(seconds=int(duration.total_seconds())))
+            
+            return {
+                "id": op.id,
+                "estado": op.estado,
+                "tendencia": op.tendencia,
+                "duracion_activa": duration_str
+            }
+        
+        operations_info = {
+            'long': get_op_details(long_op),
+            'short': get_op_details(short_op)
+        }
+        # --- FIN DE LA MODIFICACIÓN ---
+
         reference_op = long_op if long_op.estado == 'ACTIVA' else short_op
         
         op_status_summary = {
@@ -79,6 +108,9 @@ class _ApiGetters:
             "initialized": True,
             "operation_mode": display_tendencia,
             "operation_status": op_status_summary,
+            # --- INICIO DE LA MODIFICACIÓN ---
+            "operations_info": operations_info, # Añadir los nuevos detalles
+            # --- FIN DE LA MODIFICACIÓN ---
             "operation_pnl": total_pnl_ops,
             "operation_roi": operation_roi,
             "operation_long_pnl": operation_long_pnl,

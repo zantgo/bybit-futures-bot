@@ -3,6 +3,10 @@
 """
 Orquestador Principal del Procesamiento de Eventos.
 
+v8.3 (Dashboard Enriquecido):
+- Se añade el atributo `_latest_signal_data` para almacenar la última señal.
+- Se añade el método `get_latest_signal_data` para exponerla.
+
 v8.2 (Refactor Signal Generator):
 - Se actualiza el constructor para recibir una instancia de la clase SignalGenerator.
 - La generación de señales ahora se delega al método de la instancia inyectada.
@@ -73,6 +77,9 @@ class EventProcessor:
 
         # Atributos de estado que antes eran globales, ahora son de instancia
         self._operation_mode: str = "unknown"
+        # --- INICIO DE LA MODIFICACIÓN ---
+        self._latest_signal_data: Dict[str, Any] = {}
+        # --- FIN DE LA MODIFICACIÓN ---
         self._global_stop_loss_event: Optional[threading.Event] = None
         self._pm_instance: Optional['PositionManager'] = None
         self._global_stop_loss_triggered: bool = False
@@ -95,6 +102,9 @@ class EventProcessor:
         self._global_stop_loss_event = global_stop_loss_event
         self._pm_instance = pm_instance
 
+        # --- INICIO DE LA MODIFICACIÓN ---
+        self._latest_signal_data = {} # Resetear al iniciar sesión
+        # --- FIN DE LA MODIFICACIÓN ---
         self._previous_raw_event_price = np.nan
         self._is_first_event = True
         self._global_stop_loss_triggered = False
@@ -105,6 +115,12 @@ class EventProcessor:
         # (El SignalGenerator no requiere inicialización por ahora, pero el patrón está listo si se necesitara)
         
         self._memory_logger.log("Event Processor: Orquestador inicializado.", level="INFO")
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def get_latest_signal_data(self) -> Dict[str, Any]:
+        """Devuelve una copia de la última señal generada."""
+        return self._latest_signal_data.copy()
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def has_global_stop_loss_triggered(self) -> bool:
         """
@@ -257,6 +273,11 @@ class EventProcessor:
         if self._signal_generator and processed_data:
              signal_data = self._signal_generator.generate_signal(processed_data)
         # FIN DEL CAMBIO
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Almacenar la señal generada para que sea accesible
+        self._latest_signal_data = signal_data
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if self._signal_logger and getattr(self._config, 'LOG_SIGNAL_OUTPUT', False):
             self._signal_logger.log_signal_event(signal_data.copy())

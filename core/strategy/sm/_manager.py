@@ -3,6 +3,10 @@
 """
 Módulo Gestor de Sesión (SessionManager).
 
+v3.1 (Dashboard Enriquecido):
+- get_session_summary ahora enriquece el resumen del PM con la última
+  señal generada por el EventProcessor.
+
 v3.0 (Refactor Connection Layer):
 - Se adapta para usar la clase Ticker en lugar del módulo connection.ticker.
 - El SessionManager ahora crea y posee su propia instancia de Ticker.
@@ -19,7 +23,7 @@ from typing import Dict, Any, Optional
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
     from core.logging import memory_logger
-    from core.strategy._event_processor import GlobalStopLossException
+    from core.strategy._event_processor import GlobalStopLossException, EventProcessor
     # --- INICIO DE LA MODIFICACIÓN: Importar Ticker para la instanciación ---
     from connection import Ticker
     # --- FIN DE LA MODIFICACIÓN ---
@@ -27,6 +31,7 @@ except ImportError:
     # Fallbacks para análisis estático y resiliencia
     memory_logger = type('obj', (object,), {'log': print})()
     class GlobalStopLossException(Exception): pass
+    class EventProcessor: pass
     class Ticker: pass
 
 
@@ -154,7 +159,16 @@ class SessionManager:
             return {"error": "El Position Manager de la sesión no está inicializado."}
 
         try:
+            # 1. Obtener el resumen base desde el Position Manager
             summary = self._pm_api.get_position_summary()
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # 2. Enriquecer el resumen con datos del Event Processor
+            if self._event_processor:
+                latest_signal = self._event_processor.get_latest_signal_data()
+                summary['latest_signal'] = latest_signal
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             return summary
         except Exception as e:
             error_msg = f"Error generando el resumen de la sesión: {e}"
