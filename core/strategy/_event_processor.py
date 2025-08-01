@@ -1,14 +1,17 @@
+# core/strategy/_event_processor.py
+
 """
 Orquestador Principal del Procesamiento de Eventos.
 
+v8.2 (Refactor Signal Generator):
+- Se actualiza el constructor para recibir una instancia de la clase SignalGenerator.
+- La generación de señales ahora se delega al método de la instancia inyectada.
+
+v8.1 (Refactor TA Manager):
+- Se actualiza el constructor para recibir una instancia de la clase TAManager.
+
 v8.0 (Refactor a Clase):
 - Toda la lógica del módulo se ha encapsulado en la clase `EventProcessor`.
-- Las dependencias (APIs, loggers, etc.) se inyectan en el constructor
-  para una gestión de estado y dependencias limpia y coherente.
-- Las variables de estado globales se han convertido en atributos de instancia
-  (ej. self._global_stop_loss_triggered), aislando el estado de cada sesión.
-- La funcionalidad original se ha preservado al 100%, cambiando únicamente
-  la estructura organizativa del código.
 """
 import sys
 import os
@@ -22,16 +25,17 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 # --- Dependencias de Tipado ---
 if TYPE_CHECKING:
     from core.strategy.pm import PositionManager
+    from core.strategy.ta import TAManager
+    from core.strategy.signal import SignalGenerator # <-- INICIO DEL CAMBIO: Tipado para SignalGenerator
 
 # --- Importaciones de Módulos del Proyecto ---
-# Estas importaciones son necesarias para que la clase funcione correctamente.
+# Se elimina la importación directa de 'signal', ya que se recibirá por inyección.
 try:
     import config
     from core import utils
     from core.logging import memory_logger, signal_logger
     from core.strategy.pm import api as pm_api
     from core.strategy.om import api as om_api
-    from core.strategy import ta, signal
 except ImportError as e:
     print(f"ERROR CRÍTICO [Event Proc Import]: Falló importación: {e}")
     traceback.print_exc()
@@ -55,14 +59,17 @@ class EventProcessor:
         Inicializa el EventProcessor inyectando todas sus dependencias.
         """
         # Inyección de dependencias a través del constructor
-        self._config = dependencies.get('config_module', config)
-        self._utils = dependencies.get('utils_module', utils)
-        self._memory_logger = dependencies.get('memory_logger_module', memory_logger)
-        self._signal_logger = dependencies.get('signal_logger_module', signal_logger)
-        self._pm_api = dependencies.get('position_manager_api_module', pm_api)
-        self._om_api = dependencies.get('operation_manager_api_module', om_api)
-        self._ta = dependencies.get('ta_module', ta)
-        self._signal = dependencies.get('signal_module', signal)
+        self._config = dependencies.get('config_module')
+        self._utils = dependencies.get('utils_module')
+        self._memory_logger = dependencies.get('memory_logger_module')
+        self._signal_logger = dependencies.get('signal_logger_module')
+        self._pm_api = dependencies.get('position_manager_api_module')
+        self._om_api = dependencies.get('operation_manager_api_module')
+        
+        # Se reciben INSTANCIAS de TAManager y SignalGenerator
+        self._ta_manager: 'TAManager' = dependencies.get('ta_manager') 
+        self._signal_generator: 'SignalGenerator' = dependencies.get('signal_generator')
+        # <-- FIN DEL CAMBIO
 
         # Atributos de estado que antes eran globales, ahora son de instancia
         self._operation_mode: str = "unknown"
@@ -88,13 +95,14 @@ class EventProcessor:
         self._global_stop_loss_event = global_stop_loss_event
         self._pm_instance = pm_instance
 
-        # Lógica de las funciones 'initialize_data_processing' y 'initialize_limit_checks'
-        # ahora está integrada aquí para un reseteo de estado limpio.
         self._previous_raw_event_price = np.nan
         self._is_first_event = True
         self._global_stop_loss_triggered = False
 
-        self._ta.initialize()
+        if self._ta_manager:
+            self._ta_manager.initialize()
+        
+        # (El SignalGenerator no requiere inicialización por ahora, pero el patrón está listo si se necesitara)
         
         self._memory_logger.log("Event Processor: Orquestador inicializado.", level="INFO")
 
@@ -228,6 +236,10 @@ class EventProcessor:
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
 
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
+        """
+        Procesa el tick para generar un evento crudo y luego usa TAManager y
+        el SignalGenerator para obtener una señal de bajo nivel.
+        """
         increment, decrement = 0, 0
         if not self._is_first_event and pd.notna(self._previous_raw_event_price):
             if price > self._previous_raw_event_price: increment = 1
@@ -235,8 +247,16 @@ class EventProcessor:
         self._is_first_event = False
 
         raw_event = {'timestamp': timestamp, 'price': price, 'increment': increment, 'decrement': decrement}
-        processed_data = self._ta.process_raw_price_event(raw_event) if getattr(self._config, 'TA_CALCULATE_PROCESSED_DATA', True) else None
-        signal_data = self._signal.generate_signal(processed_data) if processed_data else {"signal": "HOLD_NO_TA"}
+        
+        processed_data = None
+        if self._ta_manager and getattr(self._config, 'TA_CALCULATE_PROCESSED_DATA', True):
+            processed_data = self._ta_manager.process_raw_price_event(raw_event)
+        
+        # INICIO DEL CAMBIO: Usar la instancia self._signal_generator
+        signal_data = {"signal": "HOLD_NO_TA"}
+        if self._signal_generator and processed_data:
+             signal_data = self._signal_generator.generate_signal(processed_data)
+        # FIN DEL CAMBIO
         
         if self._signal_logger and getattr(self._config, 'LOG_SIGNAL_OUTPUT', False):
             self._signal_logger.log_signal_event(signal_data.copy())

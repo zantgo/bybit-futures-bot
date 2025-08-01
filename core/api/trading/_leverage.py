@@ -9,7 +9,6 @@ from typing import Optional, Union
 
 # --- Dependencias del Proyecto ---
 import config
-from connection import manager as connection_manager
 from core.logging import memory_logger
 
 # Importar excepciones específicas con fallbacks
@@ -24,6 +23,10 @@ except ImportError:
 
 # Importar helper de la capa superior de la API
 from .._helpers import _handle_api_error_generic
+# --- INICIO DE LA CORRECCIÓN: Usar importación absoluta ---
+from connection._manager import get_connection_manager_instance
+connection_manager = get_connection_manager_instance()
+# --- FIN DE LA CORRECCIÓN ---
 
 def set_leverage(
     symbol: str,

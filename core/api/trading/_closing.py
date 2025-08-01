@@ -8,11 +8,14 @@ from typing import Optional
 
 # --- Dependencias del Proyecto ---
 import config
-from connection import manager as connection_manager
 from core.logging import memory_logger
 # Importamos funciones de módulos "primos" y "hermanos"
 from .._account import get_active_position_details_api
 from ._placing import place_market_order
+# --- INICIO DE LA CORRECCIÓN: Usar importación absoluta ---
+from connection._manager import get_connection_manager_instance
+connection_manager = get_connection_manager_instance()
+# --- FIN DE LA CORRECCIÓN ---
 
 def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) -> bool:
     """

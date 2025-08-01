@@ -1,18 +1,16 @@
 """
 Módulo Ensamblador de Dependencias.
 
-v4.1 (Refactor EventProcessor):
-- Se actualiza la importación de `event_processor` para registrar la
-  clase `EventProcessor` en el diccionario de dependencias, en lugar
-  del módulo, para permitir su instanciación por parte del SessionManager.
+v5.0 (Refactor Connection a OOP):
+- Se actualizan las importaciones del paquete 'connection' para registrar las
+  clases 'ConnectionManager' y 'Ticker' en lugar de los módulos,
+  completando la refactorización a un enfoque orientado a objetos.
 
-v4.0 (Arquitectura de Controladores):
-- Este módulo ya no es responsable de la inicialización de los componentes.
-- Su única responsabilidad ahora es importar todas las clases y módulos del
-  sistema y ensamblarlos en un único diccionario de dependencias.
-- Este diccionario se inyecta en los controladores de alto nivel (como el
-  BotController), que son los que realmente gestionan la instanciación y el
-  ciclo de vida de los objetos.
+v4.x (Refactors Anteriores):
+- Actualizaciones para registrar las clases TAManager, SignalGenerator y
+  EventProcessor.
+- Arquitectura de Controladores: responsabilidad única de ensamblar
+  dependencias.
 """
 from typing import Dict, Any
 
@@ -44,11 +42,14 @@ def assemble_dependencies() -> Dict[str, Any]:
         dependencies["closed_position_logger_module"] = closed_position_logger
         dependencies["signal_logger_module"] = signal_logger
 
-        # --- Paquete de Conexión ---
-        from connection import manager as connection_manager
-        from connection import ticker as connection_ticker
-        dependencies["connection_manager_module"] = connection_manager
-        dependencies["connection_ticker_module"] = connection_ticker
+        # --- INICIO DE LA MODIFICACIÓN: Paquete de Conexión a Clases ---
+        # Se importan las CLASES en lugar de los módulos.
+        from connection import ConnectionManager, Ticker
+        
+        # Se registran las CLASES para que puedan ser instanciadas por los controladores.
+        dependencies["ConnectionManager"] = ConnectionManager
+        dependencies["Ticker"] = Ticker
+        # --- FIN DE LA MODIFICACIÓN ---
         
         # --- Paquete de API de Exchange (bajo nivel) ---
         from core.api import trading as trading_api
@@ -58,16 +59,14 @@ def assemble_dependencies() -> Dict[str, Any]:
         from core.exchange._bybit_adapter import BybitAdapter
         dependencies["BybitAdapter"] = BybitAdapter
 
-        # --- INICIO DE LA CORRECCIÓN: Componentes de Estrategia ---
-        from core.strategy import ta, signal
-        # Se importa la CLASE EventProcessor directamente desde su archivo.
+        # --- Componentes de Estrategia (Clases) ---
+        from core.strategy.ta import TAManager
+        from core.strategy.signal import SignalGenerator
         from core.strategy._event_processor import EventProcessor 
         
-        dependencies["ta_manager_module"] = ta
-        dependencies["signal_generator_module"] = signal
-        # Se registra la CLASE bajo la clave "EventProcessor" que el SessionManager espera.
+        dependencies["TAManager"] = TAManager
+        dependencies["SignalGenerator"] = SignalGenerator
         dependencies["EventProcessor"] = EventProcessor
-        # --- FIN DE LA CORRECCIÓN ---
 
         # --- NUEVOS CONTROLADORES Y SUS APIs ---
         # BotController
@@ -111,4 +110,4 @@ def assemble_dependencies() -> Dict[str, Any]:
         import traceback
         traceback.print_exc()
         # Devolvemos un diccionario vacío para que el lanzador principal falle limpiamente.
-        return {}
+        return {} 

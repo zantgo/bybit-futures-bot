@@ -9,9 +9,11 @@ from typing import Optional, Dict
 
 # --- Dependencias del Proyecto ---
 import config
-from connection import manager as connection_manager
 from core.logging import memory_logger
-
+# --- INICIO DE LA CORRECCIÓN: Usar importación absoluta ---
+from connection._manager import get_connection_manager_instance
+connection_manager = get_connection_manager_instance()
+# --- FIN DE LA CORRECCIÓN ---
 # Importar excepciones específicas con fallbacks
 try:
     from pybit.exceptions import InvalidRequestError, FailedRequestError

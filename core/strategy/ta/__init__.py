@@ -4,21 +4,15 @@
 Paquete de Análisis Técnico (TA).
 
 Este __init__.py actúa como la fachada pública para todo el paquete de TA.
-Expone las funciones del gestor (`_manager.py`), ocultando los detalles
-de implementación del almacenamiento de datos (`_data_store.py`) y los
-cálculos (`_calculator.py`).
+Expone la clase principal TAManager, que encapsula toda la lógica de TA,
+ocultando los detalles de implementación internos.
 """
 
-# Importar y exponer la interfaz pública desde el módulo gestor
-from ._manager import (
-    initialize,
-    process_raw_price_event,
-    get_latest_indicators,
-)
+# Importar y exponer la nueva clase principal como la API pública del paquete
+from ._manager import TAManager
 
-# Definir __all__ para una API de paquete limpia y explícita
+# Definir __all__ para una API de paquete limpia y explícita.
+# Cualquiera que haga 'from core.strategy.ta import *' solo obtendrá TAManager.
 __all__ = [
-    'initialize',
-    'process_raw_price_event',
-    'get_latest_indicators',
+    'TAManager',
 ]

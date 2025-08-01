@@ -12,7 +12,6 @@ from typing import Optional, Dict, Any
 import time
 
 # --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
-# (Esta sección se mantiene igual, es correcta)
 if __name__ != "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
@@ -21,7 +20,10 @@ if __name__ != "__main__":
 
 try:
     import config
-    from connection import manager as connection_manager
+    # --- MODIFICADO: Usar el accesor de instancia ---
+    from connection._manager import get_connection_manager_instance
+    connection_manager = get_connection_manager_instance()
+    # --- FIN DE LA MODIFICACIÓN ---
     from core.logging import memory_logger
     from ._helpers import _handle_api_error_generic
     from pybit.exceptions import InvalidRequestError, FailedRequestError

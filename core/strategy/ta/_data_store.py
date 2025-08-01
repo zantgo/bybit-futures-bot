@@ -1,9 +1,11 @@
-"""
-Módulo de Almacenamiento de Datos para el Análisis Técnico.
+# core/strategy/ta/_data_store.py
 
-v2.0: Actualizado para que el DataFrame interno trabaje con timestamps
-conscientes de la zona horaria (UTC), evitando errores de conversión y
-manteniendo la consistencia a lo largo del flujo de datos.
+"""
+Módulo de Almacenamiento de Datos para el Análisis Técnico (Versión de Clase).
+
+v2.0: El DataFrame interno trabaja con timestamps conscientes de la zona horaria
+(UTC) para mantener la consistencia a lo largo del flujo de datos.
+Esta clase encapsula el estado y la lógica de gestión del DataFrame.
 """
 import pandas as pd
 import numpy as np
@@ -11,71 +13,79 @@ import numpy as np
 # Dependencias del proyecto
 import config
 from core import utils
-from core.logging import memory_logger # Importar el logger
+from core.logging import memory_logger
 
-# --- Estado del Módulo (Privado) ---
-
-# Se cambia el tipo de dato para la columna timestamp para que sea consciente
-# de la zona horaria (timezone-aware) y esté fijado a UTC.
-_RAW_TABLE_DTYPES = {
-    'timestamp': 'datetime64[ns, UTC]', # <-- Cambio clave para soportar UTC
-    'price': 'float64',
-    'increment': 'int8',
-    'decrement': 'int8'
-}
-
-# Inicializa el DataFrame vacío con los tipos correctos
-_raw_data_df = pd.DataFrame(columns=list(_RAW_TABLE_DTYPES.keys())).astype(_RAW_TABLE_DTYPES)
-
-# --- Interfaz del Módulo (Funciones Públicas) ---
-
-def initialize():
+class DataStore:
     """
-    Resetea el almacén de datos a un estado vacío.
+    Gestiona un DataFrame en memoria para almacenar eventos de precios recientes,
+    manteniendo una ventana de tamaño fijo y asegurando la consistencia de los
+    timestamps en UTC.
     """
-    global _raw_data_df
-    _raw_data_df = pd.DataFrame(columns=list(_RAW_TABLE_DTYPES.keys())).astype(_RAW_TABLE_DTYPES)
+    # Definición de tipos de datos como atributo de clase.
+    # El cambio clave a 'datetime64[ns, UTC]' se mantiene.
+    _RAW_TABLE_DTYPES = {
+        'timestamp': 'datetime64[ns, UTC]',
+        'price': 'float64',
+        'increment': 'int8',
+        'decrement': 'int8'
+    }
 
-def add_event(raw_event_data: dict):
-    """
-    Añade un nuevo evento de precio al DataFrame, asegura los tipos de datos
-    y mantiene el tamaño de la ventana definido en la configuración.
-    """
-    global _raw_data_df
-    if not isinstance(raw_event_data, dict):
-        return
+    def __init__(self):
+        """
+        Inicializa el DataStore.
+        Lee el tamaño de la ventana de la configuración y crea un DataFrame
+        vacío con los tipos de datos correctos.
+        """
+        self._window_size = getattr(config, 'TA_WINDOW_SIZE', 100)
+        self._raw_data_df = pd.DataFrame(columns=list(self._RAW_TABLE_DTYPES.keys())).astype(self._RAW_TABLE_DTYPES)
 
-    try:
-        # Prepara los datos para añadir, convirtiendo y validando tipos.
-        # pd.to_datetime manejará correctamente el objeto datetime aware que viene del ticker.
-        data_to_add = {
-            'timestamp': pd.to_datetime(raw_event_data.get('timestamp'), errors='coerce', utc=True),
-            'price': utils.safe_float_convert(raw_event_data.get('price'), default=np.nan),
-            'increment': int(utils.safe_float_convert(raw_event_data.get('increment', 0), default=0)),
-            'decrement': int(utils.safe_float_convert(raw_event_data.get('decrement', 0), default=0))
-        }
+    def initialize(self):
+        """
+        Resetea el almacén de datos a un estado vacío, manteniendo los tipos.
+        Este método es idéntico a la función `initialize` original.
+        """
+        self._raw_data_df = pd.DataFrame(columns=list(self._RAW_TABLE_DTYPES.keys())).astype(self._RAW_TABLE_DTYPES)
 
-        # Omite el evento si los datos esenciales son inválidos
-        if pd.isna(data_to_add['timestamp']) or pd.isna(data_to_add['price']):
+    def add_event(self, raw_event_data: dict):
+        """
+        Añade un nuevo evento de precio al DataFrame, asegura los tipos de datos
+        (incluyendo la conversión a UTC) y mantiene el tamaño de la ventana.
+        Este método contiene toda la lógica de la función `add_event` original.
+        """
+        if not isinstance(raw_event_data, dict):
             return
 
-        # Crea una nueva fila. No es estrictamente necesario convertirla a los dtypes
-        # aquí, ya que el DataFrame principal ya tiene los tipos definidos.
-        new_row = pd.DataFrame([data_to_add])
+        try:
+            # Prepara los datos para añadir. La lógica de conversión es idéntica
+            # a la versión funcional, asegurando la conversión a UTC.
+            data_to_add = {
+                'timestamp': pd.to_datetime(raw_event_data.get('timestamp'), errors='coerce', utc=True),
+                'price': utils.safe_float_convert(raw_event_data.get('price'), default=np.nan),
+                'increment': int(utils.safe_float_convert(raw_event_data.get('increment', 0), default=0)),
+                'decrement': int(utils.safe_float_convert(raw_event_data.get('decrement', 0), default=0))
+            }
 
-        # Concatena. Pandas manejará la unión de tipos iguales (datetime64[ns, UTC]) sin problemas.
-        _raw_data_df = pd.concat([_raw_data_df, new_row], ignore_index=True)
+            # Omite el evento si los datos esenciales son inválidos.
+            if pd.isna(data_to_add['timestamp']) or pd.isna(data_to_add['price']):
+                return
 
-        # Mantiene el tamaño de la ventana, eliminando los datos más antiguos si es necesario
-        window_size = getattr(config, 'TA_WINDOW_SIZE', 100)
-        if len(_raw_data_df) > window_size:
-            _raw_data_df = _raw_data_df.iloc[-window_size:]
+            new_row = pd.DataFrame([data_to_add])
 
-    except Exception as e:
-        memory_logger.log(f"ERROR [TA Data Store - Add Event]: {e}", level="ERROR")
+            # Concatena la nueva fila. El estado (_raw_data_df) ahora es un
+            # atributo de la instancia (self).
+            self._raw_data_df = pd.concat([self._raw_data_df, new_row], ignore_index=True)
 
-def get_data() -> pd.DataFrame:
-    """
-    Devuelve una copia del DataFrame actual para evitar modificaciones externas.
-    """
-    return _raw_data_df.copy()
+            # Mantiene el tamaño de la ventana, usando el tamaño almacenado en el constructor.
+            if len(self._raw_data_df) > self._window_size:
+                self._raw_data_df = self._raw_data_df.iloc[-self._window_size:]
+
+        except Exception as e:
+            # El registro de errores se mantiene igual.
+            memory_logger.log(f"ERROR [DataStore - add_event]: {e}", level="ERROR")
+
+    def get_data(self) -> pd.DataFrame:
+        """
+        Devuelve una copia del DataFrame actual para evitar modificaciones externas.
+        Este método es idéntico a la función `get_data` original.
+        """
+        return self._raw_data_df.copy()
