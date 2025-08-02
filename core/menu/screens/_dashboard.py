@@ -113,9 +113,11 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     duration_str = "00:00:00"
     if session_start_time:
         start_time_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S (UTC)')
-        duration_seconds = (datetime.datetime.now(timezone.utc) - session_start_time).total_seconds()
+        now_utc = datetime.datetime.now(timezone.utc)
+        start_time_utc = session_start_time.replace(tzinfo=timezone.utc)
+        duration_seconds = (now_utc - start_time_utc).total_seconds()
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
-
+        
     # Datos de operaciones
     op_infos = summary.get('operations_info', {})
     long_op_info = op_infos.get('long', {})
@@ -139,15 +141,31 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     long_pnl = summary.get('operation_long_pnl', 0.0)
     short_pnl = summary.get('operation_short_pnl', 0.0)
 
+    # Cálculo de ROI por lado
+    long_capital = long_op_info.get('capital_inicial_usdt', 0.0)
+    short_capital = short_op_info.get('capital_inicial_usdt', 0.0)
+    long_roi = (long_pnl / long_capital) * 100 if long_capital > 0 else 0.0
+    short_roi = (short_pnl / short_capital) * 100 if short_capital > 0 else 0.0
+
+    # Extracción de precios de liquidación
+    avg_liq_l = summary.get('avg_liq_price_long', 'N/A')
+    avg_liq_s = summary.get('avg_liq_price_short', 'N/A')
+
     # --- 2. Renderizar la pantalla ---
-    # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-    # --- (COMENTADO) ---
-    # ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
-    # --- (CORREGIDO) ---
     ticker_symbol = config_module.BOT_CONFIG["TICKER"]["SYMBOL"]
-    # --- FIN DE LA MODIFICACIÓN ---
-    header_title = f"Dashboard Sesión: {ticker_symbol} @ {current_price:.4f} USDT"
-    print_tui_header(header_title)
+    
+    # Formato de cabecera mejorado
+    now_str = datetime.datetime.now(timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
+    price_str_header = f"{current_price:.4f} USDT"
+    header_title = f"Dashboard Sesión: {ticker_symbol} @ {price_str_header}"
+    sub_header = f"{now_str}"
+    
+    # Se construye la cabecera manualmente para lograr el formato de dos líneas
+    width = 80
+    print("=" * width)
+    print(f"|{header_title.center(width - 2)}|")
+    print(f"|{sub_header.center(width - 2)}|")
+    print("=" * width)
     
     print("\n--- Estado de la Sesión en Tiempo Real " + "-"*40)
     print(f"  Inicio Sesión: {start_time_str}  |  Duración: {duration_str}")
@@ -155,11 +173,10 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     print(f"  PNL Total: {pnl_color}{total_pnl:+.4f} USDT\033[0m  |  ROI Sesión: {pnl_color}{total_roi:+.2f}%\033[0m")
     
     print(f"\n  Operaciones: [{long_op_status}] | [{short_op_status}]")
-    print(f"  Última Señal: {signal_str} ({signal_reason})")
     print(f"  Posiciones Abiertas: LONGs: {longs_count} | SHORTs: {shorts_count}")
 
     print("\n--- Balances de Operaciones Lógicas " + "-"*45)
-    header = f"  {'Operación':<15} | {'Capital Lógico':>15} | {'Usado':>15} | {'Disponible':>15} | {'PNL Op.':>15}"
+    header = f"  {'Operación':<15} | {'Capital Lógico':>15} | {'Usado':>15} | {'Disponible':>15} | {'Ganancias Netas':>15}"
     print(header)
     print("  " + "-" * (len(header) - 2))
     
@@ -169,37 +186,64 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     pnl_short_color = "\033[92m" if short_pnl >= 0 else "\033[91m"
     print(f"  {'SHORT':<15} | {short_balance.get('operational_margin', 0.0):15.2f} | {short_balance.get('used_margin', 0.0):15.2f} | {short_balance.get('available_margin', 0.0):15.2f} | {pnl_short_color}{short_pnl:15.4f}\033[0m")
     
-    # --- INICIO DE LA MODIFICACIÓN: Añadir la sección del último TICK ---
-    print("\n--- Último Evento Procesado " + "-"*53)
+    # --- INICIO DE LA MODIFICACIÓN: Añadir separador y datos al TICK STATUS ---
+    print("\n" + "=" * 80) # Separador añadido
+    ts_str = latest_signal_info.get('timestamp', 'HH:MM:SS')
+    print(f"--- TICK STATUS @ {ts_str} " + "-"*53)
     
     if latest_signal_info:
-        # Extraer datos de la señal. Usar .get con valores por defecto por seguridad.
-        # El timestamp y el precio ahora vienen formateados desde el SessionManager
-        ts_str = latest_signal_info.get('timestamp', 'N/A')
-        price_str = latest_signal_info.get('price', 'N/A')
-        
-        # El estado de las operaciones ya lo tenemos extraído arriba
-        op_display_long = f"L: {long_op_info.get('tendencia', 'N/A') if long_op_info.get('estado') == 'ACTIVA' else long_op_info.get('estado', 'N/A')}"
-        op_display_short = f"S: {short_op_info.get('tendencia', 'N/A') if short_op_info.get('estado') == 'ACTIVA' else short_op_info.get('estado', 'N/A')}"
+        price_str_tick = latest_signal_info.get('price', 'N/A')
+        print(f"  Precio Actual : {price_str_tick}")
 
-        header_line = f"  TICK @ {ts_str} | Precio: {price_str} | Ops: {op_display_long}, {op_display_short}"
+        print("  Indicadores TA:")
         
-        print(header_line)
-        print(f"  TA:  EMA={latest_signal_info.get('ema', 'N/A'):<15} W.Inc={latest_signal_info.get('weighted_increment', 'N/A'):<8} W.Dec={latest_signal_info.get('weighted_decrement', 'N/A'):<8}")
-        # La razón de la señal ya la tenemos extraída arriba
-        print(f"  SIG: {signal_str:<15} | Razón: {signal_reason}")
+        ema_val = latest_signal_info.get('ema', 'N/A')
+        w_inc_val = latest_signal_info.get('weighted_increment', 'N/A')
+        w_dec_val = latest_signal_info.get('weighted_decrement', 'N/A')
+        inc_pct_val = latest_signal_info.get('increment_pct', 'N/A') # Nuevo
+        dec_pct_val = latest_signal_info.get('decrement_pct', 'N/A') # Nuevo
 
-        # Máximas posiciones lógicas de las operaciones
+        ema_str = f"{ema_val:.4f}" if isinstance(ema_val, (int, float)) else str(ema_val)
+        w_inc_str = f"{w_inc_val:.4f}" if isinstance(w_inc_val, (int, float)) else str(w_inc_val)
+        w_dec_str = f"{w_dec_val:.4f}" if isinstance(w_dec_val, (int, float)) else str(w_dec_val)
+        inc_pct_str = f"{inc_pct_val:.4f}" if isinstance(inc_pct_val, (int, float)) else str(inc_pct_val)
+        dec_pct_str = f"{dec_pct_val:.4f}" if isinstance(dec_pct_val, (int, float)) else str(dec_pct_val)
+
+        print(f"    EMA       : {ema_str:<15} W.Inc : {w_inc_str:<8} W.Dec : {w_dec_str:<8}")
+        print(f"    Inc %     : {inc_pct_str:<15} Dec % : {dec_pct_str:<8}") # Nueva línea
+
+        print("  Señal Generada:")
+        print(f"    Signal: {signal_str:<15} Reason: {signal_reason}")
+
+        print("  Estado Posiciones:")
         max_pos_l = long_op_info.get('max_posiciones_logicas', 'N/A') if long_op_info.get('estado') != 'DETENIDA' else 'N/A'
         max_pos_s = short_op_info.get('max_posiciones_logicas', 'N/A') if short_op_info.get('estado') != 'DETENIDA' else 'N/A'
+        print(f"    Longs: {longs_count}/{max_pos_l} | Shorts: {shorts_count}/{max_pos_s}")
         
-        # El PNL de la sesión se obtiene del resumen general
-        pnl_sesion_str = f"{summary.get('total_realized_pnl_session', 0.0):+.4f} USDT"
-        print(f"  POS: Longs={longs_count}/{max_pos_l} | Shorts={shorts_count}/{max_pos_s} | PNL Sesión: {pnl_sesion_str}")
+        # Nuevas líneas de margen
+        long_disp_str = f"{long_balance.get('available_margin', 0.0):.4f}"
+        long_used_str = f"{long_balance.get('used_margin', 0.0):.4f}"
+        short_disp_str = f"{short_balance.get('available_margin', 0.0):.4f}"
+        short_used_str = f"{short_balance.get('used_margin', 0.0):.4f}"
+        print(f"    Margen Disp(L): {long_disp_str:<15} Usado(L): {long_used_str}")
+        print(f"    Margen Disp(S): {short_disp_str:<15} Usado(S): {short_used_str}")
+        
+        print(f"    Ganancias Netas(L): {pnl_long_color}{long_pnl: <+10.4f}\033[0m | ROI(L): {pnl_long_color}{long_roi: >+7.2f}%\033[0m")
+        print(f"    Ganancias Netas(S): {pnl_short_color}{short_pnl: <+10.4f}\033[0m | ROI(S): {pnl_short_color}{short_roi: >+7.2f}%\033[0m")
+
+        # Nueva línea de Transferido
+        transferido_val = summary.get('total_realized_pnl_session', 0.0)
+        transferido_str = f"{transferido_val:+.4f}"
+        
+        liq_l_str = f"{avg_liq_l:.4f}" if isinstance(avg_liq_l, (int, float)) else "N/A"
+        liq_s_str = f"{avg_liq_s:.4f}" if isinstance(avg_liq_s, (int, float)) else "N/A"
+        print(f"    Avg LiqP Long : {liq_l_str}")
+        print(f"    Avg LiqP Short: {liq_s_str}")
+        print(f"    Total Transferido   : {transferido_str} USDT")
+
     else:
         print("  (Esperando primer evento de precio...)")
     # --- FIN DE LA MODIFICACIÓN ---
-
 
 # --- Lógica Principal de la Pantalla ---
 def show_dashboard_screen(session_manager: Any):
@@ -247,6 +291,8 @@ def show_dashboard_screen(session_manager: Any):
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
         
+        print("=" * 80)
+        
         menu_items = [
             "[1] Gestionar Operación LONG", 
             "[2] Gestionar Operación SHORT",
@@ -266,7 +312,7 @@ def show_dashboard_screen(session_manager: Any):
         menu_options['clear_screen'] = False
         menu_options['menu_cursor_style'] = ("fg_cyan", "bold")
 
-        menu = TerminalMenu(menu_items, title="\nAcciones de la Sesión:", **menu_options)
+        menu = TerminalMenu(menu_items, title="Acciones de la Sesión:", **menu_options)
         choice = menu.show()
         action = action_map.get(choice)
         
