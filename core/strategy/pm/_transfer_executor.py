@@ -1,3 +1,5 @@
+# core/strategy/pm/_transfer_executor.py
+
 """
 Módulo dedicado a la ejecución de transferencias de fondos entre cuentas.
 

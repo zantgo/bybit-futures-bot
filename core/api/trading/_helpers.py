@@ -1,3 +1,5 @@
+# core/api/trading/_helpers.py
+
 """
 Módulo de Ayuda para las Operaciones de Trading.
 
@@ -39,8 +41,8 @@ def _validate_and_round_quantity(
     """
     # Obtener la precisión y la cantidad mínima, con fallbacks a config
     instrument_info = get_instrument_info(symbol)
-    qty_precision = getattr(config, 'DEFAULT_QTY_PRECISION', 3)
-    min_qty = getattr(config, 'DEFAULT_MIN_ORDER_QTY', 0.001)
+    qty_precision = config.PRECISION_FALLBACKS["QTY_PRECISION"]
+    min_qty = config.PRECISION_FALLBACKS["MIN_ORDER_QTY"]
 
     if instrument_info:
         qty_step_str = instrument_info.get('qtyStep')

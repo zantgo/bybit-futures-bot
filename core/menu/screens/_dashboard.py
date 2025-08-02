@@ -1,6 +1,9 @@
 """
 Módulo para la Pantalla del Dashboard de Sesión.
 
+v8.1 (Refactor de Configuración):
+- Adaptado para leer el `TICKER_SYMBOL` desde la nueva estructura de `config.py`.
+
 v8.0 (Capital Lógico y Nuevo UI):
 - La pantalla ha sido rediseñada completamente para mostrar el estado de la sesión
   y los balances lógicos de las operaciones LONG y SHORT de forma separada y clara.
@@ -26,7 +29,7 @@ from .._helpers import (
 )
 from .. import _helpers as helpers_module
 from . import _log_viewer, operation_manager
-# --- INICIO DE LA MODIFICACIÓN ---
+# --- INICIO DE LA MODIFICACIÓN --- (Mantenida desde tu código original)
 # Se comenta la importación de _position_viewer ya que no se usará desde aquí.
 # from . import _position_viewer
 # --- FIN DE LA MODIFICACIÓN ---
@@ -60,11 +63,11 @@ def _display_final_summary(summary: Dict[str, Any]):
         press_enter_to_continue()
         return
 
-    # --- INICIO DE LA MODIFICACIÓN ---
+    # --- INICIO DE LA MODIFICACIÓN --- (Mantenida desde tu código original)
     # Usar los nuevos datos agregados por el SessionManager
     realized_pnl = summary.get('total_session_pnl', 0.0)
     initial_capital = summary.get('total_session_initial_capital', 0.0)
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- FIN DE LA MODIFICACIÓN --- (Mantenida desde tu código original)
     final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
     start_time = pm_api.get_session_start_time()
     duration_str = "N/A"
@@ -95,8 +98,7 @@ def _display_final_summary(summary: Dict[str, Any]):
 
     press_enter_to_continue()
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Nueva función para renderizar el cuerpo del dashboard
+
 def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     """Función dedicada a imprimir el layout completo del dashboard."""
     # --- 1. Extraer datos del resumen ---
@@ -138,7 +140,12 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     short_pnl = summary.get('operation_short_pnl', 0.0)
 
     # --- 2. Renderizar la pantalla ---
-    ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+    # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+    # --- (COMENTADO) ---
+    # ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+    # --- (CORREGIDO) ---
+    ticker_symbol = config_module.BOT_CONFIG["TICKER"]["SYMBOL"]
+    # --- FIN DE LA MODIFICACIÓN ---
     header_title = f"Dashboard Sesión: {ticker_symbol} @ {current_price:.4f} USDT"
     print_tui_header(header_title)
     
@@ -161,10 +168,37 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     
     pnl_short_color = "\033[92m" if short_pnl >= 0 else "\033[91m"
     print(f"  {'SHORT':<15} | {short_balance.get('operational_margin', 0.0):15.2f} | {short_balance.get('used_margin', 0.0):15.2f} | {short_balance.get('available_margin', 0.0):15.2f} | {pnl_short_color}{short_pnl:15.4f}\033[0m")
+    
+    # --- INICIO DE LA MODIFICACIÓN: Añadir la sección del último TICK ---
+    print("\n--- Último Evento Procesado " + "-"*53)
+    
+    if latest_signal_info:
+        # Extraer datos de la señal. Usar .get con valores por defecto por seguridad.
+        # El timestamp y el precio ahora vienen formateados desde el SessionManager
+        ts_str = latest_signal_info.get('timestamp', 'N/A')
+        price_str = latest_signal_info.get('price', 'N/A')
+        
+        # El estado de las operaciones ya lo tenemos extraído arriba
+        op_display_long = f"L: {long_op_info.get('tendencia', 'N/A') if long_op_info.get('estado') == 'ACTIVA' else long_op_info.get('estado', 'N/A')}"
+        op_display_short = f"S: {short_op_info.get('tendencia', 'N/A') if short_op_info.get('estado') == 'ACTIVA' else short_op_info.get('estado', 'N/A')}"
 
-    # print("\n--- Balances de Cuentas Reales " + "-"*50)
-    # print("  (La visualización de balances reales se ha omitido por simplicidad)")
-# --- FIN DE LA MODIFICACIÓN ---
+        header_line = f"  TICK @ {ts_str} | Precio: {price_str} | Ops: {op_display_long}, {op_display_short}"
+        
+        print(header_line)
+        print(f"  TA:  EMA={latest_signal_info.get('ema', 'N/A'):<15} W.Inc={latest_signal_info.get('weighted_increment', 'N/A'):<8} W.Dec={latest_signal_info.get('weighted_decrement', 'N/A'):<8}")
+        # La razón de la señal ya la tenemos extraída arriba
+        print(f"  SIG: {signal_str:<15} | Razón: {signal_reason}")
+
+        # Máximas posiciones lógicas de las operaciones
+        max_pos_l = long_op_info.get('max_posiciones_logicas', 'N/A') if long_op_info.get('estado') != 'DETENIDA' else 'N/A'
+        max_pos_s = short_op_info.get('max_posiciones_logicas', 'N/A') if short_op_info.get('estado') != 'DETENIDA' else 'N/A'
+        
+        # El PNL de la sesión se obtiene del resumen general
+        pnl_sesion_str = f"{summary.get('total_realized_pnl_session', 0.0):+.4f} USDT"
+        print(f"  POS: Longs={longs_count}/{max_pos_l} | Shorts={shorts_count}/{max_pos_s} | PNL Sesión: {pnl_sesion_str}")
+    else:
+        print("  (Esperando primer evento de precio...)")
+    # --- FIN DE LA MODIFICACIÓN ---
 
 
 # --- Lógica Principal de la Pantalla ---
@@ -210,12 +244,9 @@ def show_dashboard_screen(session_manager: Any):
         if error_message:
             print(f"\033[91m{error_message}\033[0m")
         
-        # --- INICIO DE LA MODIFICACIÓN: Llamada a la nueva función de renderizado ---
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
-        # --- FIN DE LA MODIFICACIÓN ---
         
-        # --- INICIO DE LA MODIFICACIÓN: Nuevo menú de acciones ---
         menu_items = [
             "[1] Gestionar Operación LONG", 
             "[2] Gestionar Operación SHORT",
@@ -240,29 +271,25 @@ def show_dashboard_screen(session_manager: Any):
         action = action_map.get(choice)
         
         if action == 'manage_long':
-            # Asumimos que operation_manager tendrá una función para mostrar la vista de un solo lado.
-            # Esto se implementará en el archivo `operation_manager/_main.py`.
             operation_manager.show_operation_manager_screen(side_filter='long')
         elif action == 'manage_short':
             operation_manager.show_operation_manager_screen(side_filter='short')
         elif action == 'edit_config':
-            changes_saved = show_session_config_editor_screen(config_module)
-            if changes_saved:
-                # Al guardar, notificamos al SessionManager para que aplique los cambios "en caliente".
-                # Pasamos un diccionario vacío como placeholder, la lógica de `update` leerá desde `config`.
-                sm_api.update_session_parameters({}) 
+            changes_made = show_session_config_editor_screen(config_module)
+            if changes_made:
+                # Al guardar, notificamos al SessionManager. Pasamos el dict de claves que cambiaron.
+                sm_api.update_session_parameters(changes_made) 
         elif action == 'view_logs': 
             _log_viewer.show_log_viewer()
         elif action == 'refresh':
-            time.sleep(0.1) # Pequeña pausa para feedback visual
-            continue # Vuelve al inicio del bucle para refrescar la pantalla
+            time.sleep(0.1)
+            continue
         elif action == 'help': 
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **helpers_module.MENU_STYLE)
             if confirm_menu.show() == 0: 
                 break
-        # --- FIN DE LA MODIFICACIÓN ---
     
     final_summary_data = sm_api.get_session_summary()
     _display_final_summary(final_summary_data)

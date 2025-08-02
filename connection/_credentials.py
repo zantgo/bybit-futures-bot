@@ -26,8 +26,8 @@ def load_api_credentials() -> Dict[str, Dict[str, str]]:
     _find_and_load_env()
 
     api_credentials = {}
-    api_map = getattr(config, 'ACCOUNT_API_KEYS_ENV_MAP', {})
-    accounts_to_check = getattr(config, 'ACCOUNTS_TO_INITIALIZE', [])
+    api_map = config.BOT_CONFIG["API_KEYS_ENV_MAP"]
+    accounts_to_check = config.BOT_CONFIG["ACCOUNTS"].values()
 
     for account_name in accounts_to_check:
         if account_name in api_map:
@@ -48,7 +48,7 @@ def load_and_validate_uids():
     """
     _find_and_load_env()
     
-    uid_map = getattr(config, 'ACCOUNT_UID_ENV_VAR_MAP', {})
+    uid_map = config.BOT_CONFIG["UID_ENV_VAR_MAP"]
     if not uid_map:
         memory_logger.log("Info [Credentials]: No hay mapeo de UIDs en config.", level="INFO")
         return

@@ -1,7 +1,8 @@
-# runner/_shutdown.py
-
 """
 Módulo responsable de la secuencia de apagado limpio de una sesión de trading.
+
+v6.0 (Refactor de Configuración):
+- Adaptado para leer la configuración desde la nueva estructura de diccionarios.
 
 v4.0 (Arquitectura de Controladores):
 - La responsabilidad de este módulo se ha redefinido. Ahora se centra en el
@@ -41,20 +42,29 @@ def shutdown_session_backend(
         print("Ticker detenido.")
 
     # 2. Obtener y guardar el resumen final de la sesión
-    if getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
+    # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+    # La variable 'POSITION_MANAGEMENT_ENABLED' ya no existe. El sistema ahora siempre
+    # opera con la gestión de posiciones activada. Se puede simplificar la condición a True.
+    # --- (COMENTADO) ---
+    # if getattr(config_module, 'POSITION_MANAGEMENT_ENABLED', False):
+    # --- (CORREGIDO) ---
+    if True: # Se asume que la gestión de posiciones está siempre activa.
         print("Obteniendo resumen final para logging...")
         summary = session_manager.get_session_summary()
         
         if summary and not summary.get('error'):
-            # --- INICIO DE LA MODIFICACIÓN ---
+            # --- INICIO DE LA MODIFICACIÓN --- (Mantenida desde tu código original)
             # Aseguramos que el diccionario que recibimos se limpie y se popule.
             # Esto es útil si una capa superior necesita acceder a este resumen.
             final_summary.clear()
             final_summary.update(summary)
-            # --- FIN DE LA MODIFICACIÓN ---
+            # --- FIN DE LA MODIFICACIÓN --- (Mantenida desde tu código original)
 
             # Loguear el snapshot final de posiciones abiertas si está configurado
-            if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
+            # --- (COMENTADO) ---
+            # if open_snapshot_logger_module and getattr(config_module, 'POSITION_LOG_OPEN_SNAPSHOT', False):
+            # --- (CORREGIDO) ---
+            if open_snapshot_logger_module and config_module.BOT_CONFIG["LOGGING"]["LOG_OPEN_SNAPSHOT"]:
                 # La función de log ahora usa el 'summary' que acabamos de obtener.
                 open_snapshot_logger_module.log_open_positions_snapshot(summary)
             
@@ -63,5 +73,7 @@ def shutdown_session_backend(
             final_summary['error'] = 'No se pudo obtener el resumen final de la sesión.'
             error_msg = summary.get('error', 'Error desconocido') if summary else 'N/A'
             print(f"No se pudo obtener el resumen final: {error_msg}")
+    
+    # --- FIN DE LA MODIFICACIÓN ---
     
     print("Secuencia de apagado de la sesión (Backend) completada.")

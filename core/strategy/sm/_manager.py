@@ -1,6 +1,10 @@
 """
 Módulo Gestor de Sesión (SessionManager).
 
+v6.0 (Refactor de Configuración):
+- Adaptado para leer la configuración desde los nuevos diccionarios anidados
+  en `config.py` (BOT_CONFIG, SESSION_CONFIG, OPERATION_DEFAULTS).
+
 v5.2 (Validación de Símbolo en Caliente):
 - `update_session_parameters` ahora valida activamente un cambio en `TICKER_SYMBOL`.
 - Si el nuevo símbolo es inválido, revierte el cambio al último símbolo válido
@@ -105,12 +109,17 @@ class SessionManager:
         self._session_start_time: Optional[datetime.datetime] = None
         self._global_stop_loss_event = None
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Ahora se llama `_last_known_valid_symbol` para mayor claridad.
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # El objetivo es leer el Ticker Symbol desde la nueva estructura anidada.
         self._last_known_valid_symbol = "BTCUSDT" # Un fallback seguro
-        if hasattr(self._config, 'TICKER_SYMBOL'):
-            self._last_known_valid_symbol = getattr(self._config, 'TICKER_SYMBOL')
+        # --- (COMENTADO) ---
+        # if hasattr(self._config, 'TICKER_SYMBOL'):
+        #     self._last_known_valid_symbol = getattr(self._config, 'TICKER_SYMBOL')
+        # --- (CORREGIDO) ---
+        if hasattr(self._config, 'BOT_CONFIG') and "TICKER" in self._config.BOT_CONFIG:
+            self._last_known_valid_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         # --- FIN DE LA MODIFICACIÓN ---
+
 
     def initialize(self):
         """
@@ -119,28 +128,44 @@ class SessionManager:
         """
         memory_logger.log("SessionManager: Inicializando nueva sesión...", "INFO")
 
-        symbol = getattr(self._config, 'TICKER_SYMBOL')
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # Leer Ticker Symbol desde config.BOT_CONFIG
+        # --- (COMENTADO) ---
+        # symbol = getattr(self._config, 'TICKER_SYMBOL')
+        # --- (CORREGIDO) ---
+        symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+        # --- FIN DE LA MODIFICACIÓN ---
+
         operation_mode = "live_interactive"
 
         if not self._exchange_adapter.initialize(symbol):
             memory_logger.log(f"SessionManager: Fallo al inicializar adaptador para '{symbol}'. "
                               f"Reintentando con el símbolo de respaldo '{self._last_known_valid_symbol}'.", "WARN")
             
-            setattr(self._config, 'TICKER_SYMBOL', self._last_known_valid_symbol)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # Escribir el Ticker Symbol en config.BOT_CONFIG
+            # --- (COMENTADO) ---
+            # setattr(self._config, 'TICKER_SYMBOL', self._last_known_valid_symbol)
+            # --- (CORREGIDO) ---
+            self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = self._last_known_valid_symbol
+            # --- FIN DE LA MODIFICACIÓN ---
             symbol = self._last_known_valid_symbol
 
             if not self._exchange_adapter.initialize(symbol):
                 raise RuntimeError(f"SessionManager: Fallo crítico al inicializar adaptador. "
                                    f"Incluso el símbolo de respaldo '{symbol}' falló.")
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # El símbolo ha sido validado, así que lo guardamos como el último válido conocido.
         self._last_known_valid_symbol = symbol
-        # --- FIN DE LA MODIFICACIÓN ---
 
         self._pm.initialize(operation_mode=operation_mode)
         
-        leverage = getattr(self._config, 'POSITION_LEVERAGE', None)
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # Leer el apalancamiento por defecto desde config.OPERATION_DEFAULTS
+        # --- (COMENTADO) ---
+        # leverage = getattr(self._config, 'POSITION_LEVERAGE', None)
+        # --- (CORREGIDO) ---
+        leverage = self._config.OPERATION_DEFAULTS["CAPITAL"].get('LEVERAGE')
+        # --- FIN DE LA MODIFICACIÓN ---
         if leverage:
             self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(leverage), sell_leverage=str(leverage))
 
@@ -240,48 +265,50 @@ class SessionManager:
         if not isinstance(params, dict):
             params = {}
             
-        changed_keys = set()
-        for attr, new_value in params.items():
-            if hasattr(self._config, attr):
-                old_value = getattr(self._config, attr, None)
-                if new_value != old_value:
-                    # Aplicar el cambio temporalmente para registrarlo
-                    setattr(self._config, attr, new_value)
-                    changed_keys.add(attr)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Esta sección se simplifica. El editor de config ahora modifica el objeto config
+        # directamente. El `params` dict solo nos dice QUÉ cambió.
+        changed_keys = set(params.keys())
+        # --- (COMENTADO) ---
+        # changed_keys = set()
+        # for attr, new_value in params.items():
+        #     if hasattr(self._config, attr):
+        #         old_value = getattr(self._config, attr, None)
+        #         if new_value != old_value:
+        #             # Aplicar el cambio temporalmente para registrarlo
+        #             setattr(self._config, attr, new_value)
+        #             changed_keys.add(attr)
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if not changed_keys:
             memory_logger.log("SessionManager: No se detectaron cambios en la configuración.", "INFO")
             return
             
-        # --- INICIO DE LA MODIFICACIÓN PRINCIPAL ---
-
-        # 1. Manejo especial para el cambio de Ticker Symbol
+        # Manejo especial para el cambio de Ticker Symbol
         if 'TICKER_SYMBOL' in changed_keys:
-            new_symbol = getattr(self._config, 'TICKER_SYMBOL')
+            # --- INICIO DE LA MODIFICACIÓN ---
+            new_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            # --- FIN DE LA MODIFICACIÓN ---
             memory_logger.log(f"SessionManager: Se detectó cambio de símbolo a '{new_symbol}'. Validando...", "WARN")
 
-            # Usamos el adaptador para verificar si el nuevo símbolo es válido
             is_new_symbol_valid = self._exchange_adapter.get_instrument_info(new_symbol) is not None
             
             if is_new_symbol_valid:
                 memory_logger.log(f"SessionManager: Símbolo '{new_symbol}' validado con éxito.", "INFO")
-                # Actualizamos nuestro respaldo al nuevo símbolo válido
                 self._last_known_valid_symbol = new_symbol
-                # Forzamos un reinicio completo, ya que un nuevo símbolo lo requiere
-                changed_keys.add('TICKER_INTERVAL_SECONDS') # Añadimos esto para asegurar que el ticker se reinicie
-                for k in STRATEGY_AFFECTING_KEYS: changed_keys.add(k) # Forzamos reinicio de la estrategia
+                changed_keys.add('TICKER_INTERVAL_SECONDS') 
+                for k in STRATEGY_AFFECTING_KEYS: changed_keys.add(k)
             else:
                 memory_logger.log(f"SessionManager: ERROR - El símbolo '{new_symbol}' es INVÁLIDO. Revertiendo a '{self._last_known_valid_symbol}'.", "ERROR")
-                # Revertimos el cambio en el objeto config
-                setattr(self._config, 'TICKER_SYMBOL', self._last_known_valid_symbol)
-                # Eliminamos la clave de los cambios para que no active ninguna otra acción
+                # --- INICIO DE LA MODIFICACIÓN ---
+                self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = self._last_known_valid_symbol
+                # --- FIN DE LA MODIFICACIÓN ---
                 changed_keys.remove('TICKER_SYMBOL')
         
-        # Loggear los cambios que SÍ se van a aplicar
+        # El logueo de `getattr` ya no es fiable para estructuras anidadas, se simplifica el log.
         for key in changed_keys:
-            memory_logger.log(f"SessionManager: Aplicando config '{key}' -> '{getattr(self._config, key)}'", "WARN")
+            memory_logger.log(f"SessionManager: Se detectó cambio de configuración para '{key}'", "WARN")
 
-        # 2. Lógica de reinicio basada en los cambios finales y validados
         strategy_needs_reset = any(key in STRATEGY_AFFECTING_KEYS for key in changed_keys)
         if strategy_needs_reset:
             memory_logger.log("SessionManager: Cambios en parámetros de estrategia detectados. Reiniciando componentes de TA y Señal...", "WARN")
@@ -293,15 +320,26 @@ class SessionManager:
             self.stop()
             self.start()
 
-        # 3. Lógica para límites de sesión (sin cambios)
-        if any(key in ['SESSION_STOP_LOSS_ROI_PCT', 'SESSION_ROI_SL_ENABLED'] for key in changed_keys):
-            sl_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT') if getattr(self._config, 'SESSION_ROI_SL_ENABLED', False) else 0
-            self._pm_api.set_global_stop_loss_pct(sl_pct)
-            
-        if any(key in ['SESSION_TAKE_PROFIT_ROI_PCT', 'SESSION_ROI_TP_ENABLED'] for key in changed_keys):
-            tp_pct = getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT') if getattr(self._config, 'SESSION_ROI_TP_ENABLED', False) else 0
-            self._pm_api.set_global_take_profit_pct(tp_pct)
-        # --- FIN DE LA MODIFICACIÓN PRINCIPAL ---
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # Leer los límites de sesión desde `config.SESSION_CONFIG`
+        # --- (COMENTADO) ---
+        # if any(key in ['SESSION_STOP_LOSS_ROI_PCT', 'SESSION_ROI_SL_ENABLED'] for key in changed_keys):
+        #     sl_pct = getattr(self._config, 'SESSION_STOP_LOSS_ROI_PCT') if getattr(self._config, 'SESSION_ROI_SL_ENABLED', False) else 0
+        #     self._pm_api.set_global_stop_loss_pct(sl_pct)
+        # --- (CORREGIDO) ---
+        sl_enabled = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["ENABLED"]
+        sl_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["PERCENTAGE"] if sl_enabled else 0
+        self._pm_api.set_global_stop_loss_pct(sl_pct)
+        
+        # --- (COMENTADO) ---
+        # if any(key in ['SESSION_TAKE_PROFIT_ROI_PCT', 'SESSION_ROI_TP_ENABLED'] for key in changed_keys):
+        #     tp_pct = getattr(self._config, 'SESSION_TAKE_PROFIT_ROI_PCT') if getattr(self._config, 'SESSION_ROI_TP_ENABLED', False) else 0
+        #     self._pm_api.set_global_take_profit_pct(tp_pct)
+        # --- (CORREGIDO) ---
+        tp_enabled = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["ENABLED"]
+        tp_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["PERCENTAGE"] if tp_enabled else 0
+        self._pm_api.set_global_take_profit_pct(tp_pct)
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""

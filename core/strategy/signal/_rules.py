@@ -25,8 +25,8 @@ def check_buy_condition(
     """
     # Usar pd.notna y np.isfinite para una validación robusta de los indicadores
     return (
-        pd.notna(dec_pct) and np.isfinite(dec_pct) and dec_pct <= config.STRATEGY_MARGIN_BUY and
-        pd.notna(w_dec) and w_dec >= config.STRATEGY_DECREMENT_THRESHOLD and
+        pd.notna(dec_pct) and np.isfinite(dec_pct) and dec_pct <= config.SESSION_CONFIG["STRATEGY"]["MARGIN_BUY"] and
+        pd.notna(w_dec) and w_dec >= config.SESSION_CONFIG["STRATEGY"]["DECREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price < ema
     )
 
@@ -40,8 +40,8 @@ def check_sell_condition(
     Evalúa si se cumplen todas las condiciones para una señal de VENTA.
     """
     return (
-        pd.notna(inc_pct) and np.isfinite(inc_pct) and inc_pct >= config.STRATEGY_MARGIN_SELL and
-        pd.notna(w_inc) and w_inc >= config.STRATEGY_INCREMENT_THRESHOLD and
+        pd.notna(inc_pct) and np.isfinite(inc_pct) and inc_pct >= config.SESSION_CONFIG["STRATEGY"]["MARGIN_SELL"] and
+        pd.notna(w_inc) and w_inc >= config.SESSION_CONFIG["STRATEGY"]["INCREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price > ema
     )
 
@@ -61,12 +61,12 @@ def evaluate_strategy(
     """
     if check_buy_condition(price, ema, dec_pct, w_dec):
         signal = "BUY"
-        reason = f"dec_pct({dec_pct:.2f}%) <= {config.STRATEGY_MARGIN_BUY}%, w_dec({w_dec:.2f}) >= {config.STRATEGY_DECREMENT_THRESHOLD}, price < EMA"
+        reason = f"dec_pct({dec_pct:.2f}%) <= {config.SESSION_CONFIG['STRATEGY']['MARGIN_BUY']}%, w_dec({w_dec:.2f}) >= {config.SESSION_CONFIG['STRATEGY']['DECREMENT_THRESHOLD']}, price < EMA"
         return signal, reason
     
     if check_sell_condition(price, ema, inc_pct, w_inc):
         signal = "SELL"
-        reason = f"inc_pct({inc_pct:.2f}%) >= {config.STRATEGY_MARGIN_SELL}%, w_inc({w_inc:.2f}) >= {config.STRATEGY_INCREMENT_THRESHOLD}, price > EMA"
+        reason = f"inc_pct({inc_pct:.2f}%) >= {config.SESSION_CONFIG['STRATEGY']['MARGIN_SELL']}%, w_inc({w_inc:.2f}) >= {config.SESSION_CONFIG['STRATEGY']['INCREMENT_THRESHOLD']}, price > EMA"
         return signal, reason
 
     return "HOLD", "Condiciones BUY/SELL no cumplidas"

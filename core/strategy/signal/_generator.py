@@ -1,3 +1,5 @@
+# core/strategy/signal/_generator.py
+
 """
 Módulo Generador de Señales (Versión de Clase).
 
@@ -106,7 +108,7 @@ class SignalGenerator:
                 reason = "Calculando indicadores iniciales..."
             
             # 2. Evaluar la lógica de la estrategia (si está habilitada en la config)
-            elif self._config.STRATEGY_ENABLED:
+            elif self._config.SESSION_CONFIG["STRATEGY"]["ENABLED"]:
                 # Loguear un único mensaje la primera vez que la estrategia está lista.
                 if not self._strategy_is_ready and self._memory_logger:
                     self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
@@ -118,7 +120,7 @@ class SignalGenerator:
             # Si la estrategia no está habilitada, se mantiene en HOLD por defecto.
             else:
                 signal = "HOLD_STRATEGY_DISABLED"
-                reason = "Estrategia desactivada en config.py"
+                reason = "Estrategia desactivada en config"
         # --- FIN DE LA MODIFICACIÓN ---
 
         # 3. Construir el diccionario de salida final usando el manejador de datos

@@ -121,7 +121,7 @@ class Ticker:
             self._memory_logger.log("Ticker ERROR FATAL: Adaptador de exchange no disponible en el hilo.", "ERROR")
             return
 
-        fetch_interval = getattr(self._config, 'TICKER_INTERVAL_SECONDS', 1)
+        fetch_interval = self._config.SESSION_CONFIG["TICKER_INTERVAL_SECONDS"]
         
         if not callable(self._raw_event_callback):
             self._memory_logger.log(f"Ticker ERROR FATAL: Callback inválido. Saliendo del hilo.", level="ERROR")
@@ -135,9 +135,9 @@ class Ticker:
             start_time = time.monotonic()
             
             try:
-                symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
+                symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
 
-                if symbol == 'N/A':
+                if not symbol: # Se valida que el símbolo no esté vacío
                     time.sleep(fetch_interval)
                     continue
                 
@@ -187,7 +187,9 @@ class Ticker:
             self._intermediate_ticks_buffer.append(current_tick_info)
             self._tick_counter += 1
             
-            raw_event_ticks = getattr(self._config, 'RAW_PRICE_TICK_INTERVAL', 1)
+            # Comentario: La lógica de RAW_PRICE_TICK_INTERVAL se mantiene por si se reintroduce.
+            # De lo contrario, este bloque se ejecutará en cada tick.
+            raw_event_ticks = getattr(self._config, 'RAW_PRICE_TICK_INTERVAL', 1) 
             if self._tick_counter >= raw_event_ticks:
                 final_info = self._latest_price_info.copy()
                 intermediate_info = self._intermediate_ticks_buffer.copy()

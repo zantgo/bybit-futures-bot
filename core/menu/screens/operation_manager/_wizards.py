@@ -1,6 +1,10 @@
 """
 Módulo de Asistentes del Panel de Control de Operación.
 
+v9.1 (Refactor de Configuración):
+- El asistente ahora lee los valores por defecto para nuevas operaciones
+  desde el diccionario `config.OPERATION_DEFAULTS`.
+
 v9.0 (Capital Lógico):
 - El `_operation_setup_wizard` ahora solicita explícitamente al usuario que defina
   el "Capital Lógico Operativo" al configurar o modificar una operación.
@@ -61,7 +65,6 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
     
     try:
         # --- SECCIÓN 1: CONDICIÓN DE ENTRADA ---
-        # (Se mantiene la lógica anterior, pero ahora se permite modificar la condición)
         print("\n--- 1. Condición de Entrada ---")
         cond_menu_items = ["[1] Activación Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
         cond_menu = TerminalMenu(
@@ -82,7 +85,7 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
             new_cond_type = 'PRICE_BELOW'
             new_cond_value = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada, is_optional=False)
             print(f"  -> Condición seleccionada: Precio < {new_cond_value}")
-        else: return # Cancelado
+        else: return
         
         params_to_update['tipo_cond_entrada'] = new_cond_type
         params_to_update['valor_cond_entrada'] = new_cond_value
@@ -92,33 +95,35 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
             params_to_update['tendencia'] = tendencia
             print(f"  -> Tendencia establecida automáticamente a: {tendencia}")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         # --- SECCIÓN 2: CAPITAL LÓGICO ---
         print(f"\n--- 2. Capital Lógico ---")
         default_capital = current_op.balances.operational_margin if is_modification and current_op.balances.operational_margin > 0 else 100.0
         
-        # Al modificar, el campo es opcional. Al crear, es obligatorio.
         is_capital_optional = is_modification
         
         new_capital = get_input(
             "Capital Lógico Operativo (USDT)", 
             float, 
             default=default_capital, 
-            min_val=1.0, # Un capital mínimo de 1 USDT
+            min_val=1.0,
             is_optional=is_capital_optional
         )
         
         if new_capital is not None:
-             # El OperationManager espera una clave 'operational_margin' para actualizar el balance
              params_to_update['operational_margin'] = new_capital
              print(f"  -> Capital Lógico establecido en: {new_capital:.2f} USDT")
-        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- SECCIÓN 3: PARÁMETROS DE TRADING ---
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
         use_config_defaults = not is_modification
-        default_base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 1.0) if use_config_defaults else current_op.tamaño_posicion_base_usdt
-        default_max_pos = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5) if use_config_defaults else current_op.max_posiciones_logicas
-        default_leverage = getattr(config_module, 'POSITION_LEVERAGE', 10.0) if use_config_defaults else current_op.apalancamiento
+        # --- (COMENTADO) ---
+        # default_base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 1.0) if use_config_defaults else current_op.tamaño_posicion_base_usdt
+        # default_max_pos = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5) if use_config_defaults else current_op.max_posiciones_logicas
+        # default_leverage = getattr(config_module, 'POSITION_LEVERAGE', 10.0) if use_config_defaults else current_op.apalancamiento
+        # --- (CORREGIDO) ---
+        default_base_size = config_module.OPERATION_DEFAULTS["CAPITAL"]["BASE_SIZE_USDT"] if use_config_defaults else current_op.tamaño_posicion_base_usdt
+        default_max_pos = config_module.OPERATION_DEFAULTS["CAPITAL"]["MAX_POSITIONS"] if use_config_defaults else current_op.max_posiciones_logicas
+        default_leverage = config_module.OPERATION_DEFAULTS["CAPITAL"]["LEVERAGE"] if use_config_defaults else current_op.apalancamiento
         
         print(f"\n--- 3. Parámetros de Trading (Obligatorios) ---")
         params_to_update['tamaño_posicion_base_usdt'] = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01)
@@ -126,9 +131,15 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         params_to_update['apalancamiento'] = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
 
         print(f"\n--- 4. Riesgo por Posición (Opcional, Enter para desactivar) ---")
-        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=current_op.sl_posicion_individual_pct, min_val=0.0, is_optional=True) or 0.0
-        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=current_op.tsl_activacion_pct, min_val=0.0, is_optional=True) or 0.0
-        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=current_op.tsl_distancia_pct, min_val=0.0, is_optional=True) or 0.0
+        # --- (CORREGIDO) ---
+        default_sl_pct = config_module.OPERATION_DEFAULTS["RISK"]["INDIVIDUAL_SL_PCT"] if use_config_defaults else current_op.sl_posicion_individual_pct
+        default_tsl_act = config_module.OPERATION_DEFAULTS["RISK"]["TSL_ACTIVATION_PCT"] if use_config_defaults else current_op.tsl_activacion_pct
+        default_tsl_dist = config_module.OPERATION_DEFAULTS["RISK"]["TSL_DISTANCE_PCT"] if use_config_defaults else current_op.tsl_distancia_pct
+        
+        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=default_sl_pct, min_val=0.0, is_optional=True) or 0.0
+        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=default_tsl_act, min_val=0.0, is_optional=True) or 0.0
+        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=default_tsl_dist, min_val=0.0, is_optional=True) or 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- SECCIÓN 5: CONDICIONES DE SALIDA DE LA OPERACIÓN ---
         print(f"\n--- 5. Condiciones de Salida de la Operación (Opcional) ---")

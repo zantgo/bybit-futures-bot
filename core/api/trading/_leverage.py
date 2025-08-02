@@ -1,3 +1,5 @@
+# core/api/trading/_leverage.py
+
 """
 Módulo para la gestión del Apalancamiento.
  
@@ -90,7 +92,7 @@ def set_leverage(
             return False # Es un error de entrada, fallar inmediatamente.
             
         params = {
-            "category": getattr(config, 'CATEGORY_LINEAR', 'linear'),
+            "category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"],
             "symbol": symbol,
             "buyLeverage": buy_lev_str,
             "sellLeverage": sell_lev_str,

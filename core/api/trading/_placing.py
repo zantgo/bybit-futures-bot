@@ -1,3 +1,5 @@
+# core/api/trading/_placing.py
+
 """
 Módulo para la Colocación de Órdenes.
  
@@ -90,7 +92,7 @@ def place_market_order(
 
     # 3. Construir los parámetros de la orden
     params = {
-        "category": getattr(config, 'CATEGORY_LINEAR', 'linear'),
+        "category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"],
         "symbol": symbol,
         "side": side,
         "orderType": "Market",
@@ -99,7 +101,7 @@ def place_market_order(
     }
     
     # Añadir lógica de positionIdx para Hedge Mode
-    is_hedge_mode = getattr(config, 'BYBIT_HEDGE_MODE_ENABLED', True)
+    is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
     if is_hedge_mode:
         if position_idx is None:
             # Por defecto: 1 para Long (Buy), 2 para Short (Sell)

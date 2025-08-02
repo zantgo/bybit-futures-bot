@@ -1,3 +1,5 @@
+# core/strategy/pm/_helpers.py
+
 """
 Funciones auxiliares para Position Manager y sus ejecutores.
 Incluye formateo, redondeo de cantidades y extracción de datos.
@@ -51,7 +53,7 @@ def format_pos_for_summary(pos: Dict[str, Any]) -> Dict[str, Any]:
         entry_ts_str = _utils.format_datetime(pos.get('entry_timestamp')) if pos.get('entry_timestamp') else "N/A"
         size_contracts = _utils.safe_float_convert(pos.get('size_contracts'), default=0.0)
         
-        price_prec_summary = getattr(_config, 'PRICE_PRECISION', 4)
+        price_prec_summary = _config.PRECISION_FALLBACKS["PRICE_PRECISION"]
         
         est_liq_price_val = _utils.safe_float_convert(pos.get('est_liq_price'))
         est_liq_price_formatted = round(est_liq_price_val, price_prec_summary) if est_liq_price_val is not None and np.isfinite(est_liq_price_val) else None
@@ -64,7 +66,7 @@ def format_pos_for_summary(pos: Dict[str, Any]) -> Dict[str, Any]:
             'entry_timestamp': entry_ts_str,
             'entry_price': round(_utils.safe_float_convert(pos.get('entry_price'), 0.0), price_prec_summary),
             'margin_usdt': round(_utils.safe_float_convert(pos.get('margin_usdt'), 0.0), 4),
-            'size_contracts': round(size_contracts, getattr(_config, 'DEFAULT_QTY_PRECISION', 8)),
+            'size_contracts': round(size_contracts, _config.PRECISION_FALLBACKS["QTY_PRECISION"]),
             'stop_loss_price': round(_utils.safe_float_convert(pos.get('stop_loss_price'), 0.0), price_prec_summary) if pos.get('stop_loss_price') else None,
             'est_liq_price': est_liq_price_formatted, 
             'leverage': pos.get('leverage'), 
@@ -114,9 +116,9 @@ def calculate_and_round_quantity(
         min_order_qty = instrument_info.min_order_size
     else:
         # Fallback a la configuración si la llamada a la API falla
-        memory_logger.log(f"WARN [Helper Qty]: No se pudo obtener instrument info. Usando defaults de config.py.", level="WARN")
-        qty_precision = int(getattr(_config, 'DEFAULT_QTY_PRECISION', 3))
-        min_order_qty = float(getattr(_config, 'DEFAULT_MIN_ORDER_QTY', 0.001))
+        memory_logger.log(f"WARN [Helper Qty]: No se pudo obtener instrument info. Usando defaults de config.", level="WARN")
+        qty_precision = _config.PRECISION_FALLBACKS["QTY_PRECISION"]
+        min_order_qty = _config.PRECISION_FALLBACKS["MIN_ORDER_QTY"]
 
     result['precision'] = qty_precision
 
@@ -163,8 +165,8 @@ def format_quantity_for_api(
     if instrument_info:
         qty_precision = instrument_info.quantity_precision
     else:
-        memory_logger.log(f"WARN [Helper Format Qty]: No se pudo obtener instrument info. Usando default de config.py.", level="WARN")
-        qty_precision = int(getattr(_config, 'DEFAULT_QTY_PRECISION', 3))
+        memory_logger.log(f"WARN [Helper Format Qty]: No se pudo obtener instrument info. Usando default de config.", level="WARN")
+        qty_precision = _config.PRECISION_FALLBACKS["QTY_PRECISION"]
 
     result['precision'] = qty_precision
 

@@ -1,6 +1,10 @@
 """
 Módulo Gestor del Bot (BotController).
 
+v6.2 (Refactor de Configuración):
+- Adaptado para leer la configuración desde los nuevos diccionarios
+  anidados en `config.py`.
+
 v6.1 (Validación de Símbolo Centralizada):
 - Se añade el método `validate_and_update_ticker_symbol` para validar un
   nuevo símbolo de ticker en tiempo real usando el ExchangeAdapter.
@@ -74,7 +78,6 @@ class BotController:
         
         self._connections_initialized: bool = False
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def validate_and_update_ticker_symbol(self, new_symbol: str) -> Tuple[bool, str]:
         """
         Valida un nuevo símbolo de ticker contra el exchange y lo actualiza si es válido.
@@ -92,8 +95,14 @@ class BotController:
         is_valid = validation_adapter.initialize(symbol=new_symbol)
 
         if is_valid:
-            old_symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-            setattr(self._config, 'TICKER_SYMBOL', new_symbol)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO) ---
+            # old_symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
+            # setattr(self._config, 'TICKER_SYMBOL', new_symbol)
+            # --- (CORREGIDO) ---
+            old_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = new_symbol
+            # --- FIN DE LA MODIFICACIÓN ---
             msg = f"Símbolo del Ticker actualizado con éxito a '{new_symbol}'."
             self._memory_logger.log(f"BotController: {msg} (Anterior: '{old_symbol}')", "WARN")
             return True, msg
@@ -101,7 +110,6 @@ class BotController:
             msg = f"El símbolo '{new_symbol}' es inválido o no existe. El cambio ha sido rechazado."
             self._memory_logger.log(f"BotController: {msg}", "ERROR")
             return False, msg
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def are_connections_initialized(self) -> bool:
         """Indica si las conexiones API han sido inicializadas con éxito."""
@@ -165,9 +173,16 @@ class BotController:
             return False, "Las conexiones API deben ser inicializadas primero."
 
         try:
-            default_ticker = getattr(self._config, 'TICKER_SYMBOL', 'BTCUSDT')
-            default_size = getattr(self._config, 'POSITION_BASE_SIZE_USDT', 1.0)
-            default_leverage = getattr(self._config, 'POSITION_LEVERAGE', 10.0)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO) ---
+            # default_ticker = getattr(self._config, 'TICKER_SYMBOL', 'BTCUSDT')
+            # default_size = getattr(self._config, 'POSITION_BASE_SIZE_USDT', 1.0)
+            # default_leverage = getattr(self._config, 'POSITION_LEVERAGE', 10.0)
+            # --- (CORREGIDO) ---
+            default_ticker = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            default_size = self._config.OPERATION_DEFAULTS["CAPITAL"]["BASE_SIZE_USDT"]
+            default_leverage = self._config.OPERATION_DEFAULTS["CAPITAL"]["LEVERAGE"]
+            # --- FIN DE LA MODIFICACIÓN ---
 
             ticker = get_input("Introduce el Ticker a probar", str, default_ticker)
             ticker = ticker.upper()
@@ -179,12 +194,9 @@ class BotController:
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
         adapter = self._BybitAdapter(self._connection_manager)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se añade validación del ticker al inicio de la prueba
         if not adapter.initialize(symbol=ticker):
             print("FALLO.")
             return False, f"El símbolo '{ticker}' no es válido o no se pudo inicializar el adaptador."
-        # --- FIN DE LA MODIFICACIÓN ---
             
         ticker_info = adapter.get_ticker(ticker)
 
@@ -201,25 +213,49 @@ class BotController:
                 return False, "Fallo al establecer el apalancamiento."
             print(" -> Éxito.")
 
-            print(f"Abriendo posición LONG en '{self._config.ACCOUNT_LONGS}'...")
-            long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=self._config.ACCOUNT_LONGS)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO) ---
+            # print(f"Abriendo posición LONG en '{self._config.ACCOUNT_LONGS}'...")
+            # long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=self._config.ACCOUNT_LONGS)
+            # --- (CORREGIDO) ---
+            long_account = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
+            print(f"Abriendo posición LONG en '{long_account}'...")
+            long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             if not long_res or long_res.get('retCode') != 0:
                 return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
             print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
             time.sleep(1)
 
-            print(f"Abriendo posición SHORT en '{self._config.ACCOUNT_SHORTS}'...")
-            short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=self._config.ACCOUNT_SHORTS)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO) ---
+            # print(f"Abriendo posición SHORT en '{self._config.ACCOUNT_SHORTS}'...")
+            # short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=self._config.ACCOUNT_SHORTS)
+            # --- (CORREGIDO) ---
+            short_account = self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
+            print(f"Abriendo posición SHORT en '{short_account}'...")
+            short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
+            # --- FIN DE LA MODIFICACIÓN ---
+
             if not short_res or short_res.get('retCode') != 0:
                 return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
             print(f" -> Éxito. OrderID: {short_res.get('result', {}).get('orderId')}")
             time.sleep(2)
         finally:
             print("\n--- Fase de Limpieza ---")
-            print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_LONGS}'...")
-            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_LONGS)
-            print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_SHORTS}'...")
-            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_SHORTS)
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO) ---
+            # print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_LONGS}'...")
+            # self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_LONGS)
+            # print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_SHORTS}'...")
+            # self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_SHORTS)
+            # --- (CORREGIDO) ---
+            print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
+            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
+            print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
+            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
+            # --- FIN DE LA MODIFICACIÓN ---
             self._memory_logger.log("BotController[Test]: Limpieza completada.", "INFO")
 
         return True, f"Prueba de trading completada con éxito para {ticker}."
@@ -282,12 +318,22 @@ class BotController:
     def get_general_config(self) -> Dict[str, Any]:
         """Obtiene la configuración a nivel de aplicación."""
         if not self._config: return {}
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # --- (COMENTADO) ---
+        # return { 
+        #     'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
+        #     'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
+        #     'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False),
+        #     'Ticker Symbol': getattr(self._config, 'TICKER_SYMBOL', 'N/A')
+        # }
+        # --- (CORREGIDO) ---
         return { 
-            'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
-            'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
-            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False),
-            'Ticker Symbol': getattr(self._config, 'TICKER_SYMBOL', 'N/A')
+            'Exchange': self._config.BOT_CONFIG["EXCHANGE_NAME"],
+            'Modo Testnet': self._config.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"],
+            'Paper Trading': self._config.BOT_CONFIG["PAPER_TRADING_MODE"],
+            'Ticker Symbol': self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         }
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def update_general_config(self, params: Dict[str, Any]) -> bool:
         """Actualiza la configuración a nivel de aplicación."""

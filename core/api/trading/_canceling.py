@@ -1,3 +1,5 @@
+# core/api/trading/_canceling.py
+
 """
 Módulo para la Cancelación de Órdenes.
 
@@ -72,7 +74,7 @@ def cancel_order(
         return None
         
     # 2. Construir los parámetros
-    params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "symbol": symbol}
+    params = {"category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"], "symbol": symbol}
     id_type = ""
     if order_id:
         params["orderId"] = order_id

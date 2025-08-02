@@ -40,10 +40,10 @@ def create_client(account_name: str, api_creds: Dict[str, str]) -> Optional[HTTP
     memory_logger.log(f"Creando cliente API para '{account_name}'...", level="INFO")
     try:
         session = HTTP(
-            testnet=getattr(config, 'UNIVERSAL_TESTNET_MODE', True),
+            testnet=config.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"],
             api_key=api_creds["key"],
             api_secret=api_creds["secret"],
-            recv_window=getattr(config, 'DEFAULT_RECV_WINDOW', 10000)
+            recv_window=config.EXCHANGE_CONSTANTS["BYBIT"]["DEFAULT_RECV_WINDOW"]
         )
         # Verificar la conexión obteniendo la hora del servidor
         server_time = session.get_server_time()
@@ -74,12 +74,12 @@ def configure_account_mode(session: HTTP, account_name: str) -> bool:
     if getattr(config, 'POSITION_TRADING_MODE', None) != "LONG_SHORT":
         return True # No se necesita configuración si no es Hedge Mode
 
-    symbol = getattr(config, 'TICKER_SYMBOL', None)
+    symbol = config.BOT_CONFIG["TICKER"]["SYMBOL"]
     if not symbol:
         memory_logger.log("WARN [Account Mode]: Falta TICKER_SYMBOL en config para verificar modo.", level="WARN")
         return False
 
-    category = getattr(config, 'CATEGORY_LINEAR', 'linear')
+    category = config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"]
     target_mode = 3  # 3 para Hedge Mode
 
     memory_logger.log(f"Verificando/Estableciendo Hedge Mode para cuenta '{account_name}'...", level="INFO")

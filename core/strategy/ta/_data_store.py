@@ -36,7 +36,14 @@ class DataStore:
         Lee el tamaño de la ventana de la configuración y crea un DataFrame
         vacío con los tipos de datos correctos.
         """
-        self._window_size = getattr(config, 'TA_WINDOW_SIZE', 100)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Calcular dinámicamente el tamaño de la ventana necesario
+        self._window_size = max(
+            config.SESSION_CONFIG["TA"]["EMA_WINDOW"],
+            config.SESSION_CONFIG["TA"]["WEIGHTED_INC_WINDOW"],
+            config.SESSION_CONFIG["TA"]["WEIGHTED_DEC_WINDOW"]
+        ) * 2
+        # --- FIN DE LA MODIFICACIÓN ---
         self._raw_data_df = pd.DataFrame(columns=list(self._RAW_TABLE_DTYPES.keys())).astype(self._RAW_TABLE_DTYPES)
 
     def initialize(self):

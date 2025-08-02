@@ -1,6 +1,10 @@
 """
 Módulo para la pantalla "Visor de Logs" de la TUI.
 
+v6.0 (Refactor de Configuración):
+- Adaptado para leer el número máximo de líneas a mostrar desde
+  `config.BOT_CONFIG`.
+
 Esta pantalla muestra los últimos mensajes registrados por el `memory_logger`,
 permitiendo al usuario ver la actividad del bot en tiempo real sin
 interrumpir el menú principal.
@@ -31,7 +35,7 @@ try:
         print_tui_header,
         MENU_STYLE
     )
-    import config # <-- AÑADIDO SEGÚN TUS INSTRUCCIONES
+    import config
 except ImportError as e:
     print(f"ERROR [TUI Log Viewer]: Falló importación de dependencias: {e}")
     memory_logger = None
@@ -68,9 +72,12 @@ def show_log_viewer():
         if not all_logs:
             print("\n  (No hay logs para mostrar)")
         else:
-            # --- INICIO DE LA MODIFICACIÓN SEGÚN INSTRUCCIONES ---
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
             # Leer el límite desde el archivo de configuración centralizado.
-            max_lines_to_show = getattr(config, 'TUI_LOG_VIEWER_MAX_LINES', 100)
+            # --- (COMENTADO) ---
+            # max_lines_to_show = getattr(config, 'TUI_LOG_VIEWER_MAX_LINES', 100)
+            # --- (CORREGIDO) ---
+            max_lines_to_show = config.BOT_CONFIG["LOGGING"]["TUI_LOG_VIEWER_MAX_LINES"]
             
             # Aplicar el slicing para obtener solo las últimas N líneas.
             logs_to_show = all_logs[-max_lines_to_show:]

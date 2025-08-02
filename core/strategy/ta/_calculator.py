@@ -67,7 +67,7 @@ def calculate_all_indicators(raw_df: pd.DataFrame) -> Dict[str, any]:
         return latest_indicators
 
     # --- 1. Cálculo de la EMA (Exponential Moving Average) ---
-    ema_window = getattr(config, 'TA_EMA_WINDOW', 50)
+    ema_window = config.SESSION_CONFIG["TA"]["EMA_WINDOW"]
     if len(raw_df) >= ema_window:
         try:
             ema_series = raw_df['price'].ewm(span=ema_window, adjust=False, min_periods=ema_window).mean()
@@ -78,7 +78,7 @@ def calculate_all_indicators(raw_df: pd.DataFrame) -> Dict[str, any]:
             pass # Mantener NaN si el cálculo falla
 
     # --- 2. Cálculo del Incremento Ponderado y su Cambio de Precio ---
-    inc_window = getattr(config, 'TA_WEIGHTED_INC_WINDOW', 25)
+    inc_window = config.SESSION_CONFIG["TA"]["WEIGHTED_INC_WINDOW"]
     if len(raw_df) >= inc_window:
         inc_series = raw_df['increment'].iloc[-inc_window:].to_numpy()
         latest_indicators['weighted_increment'] = _calculate_weighted_moving_average(inc_series, inc_window)
@@ -94,7 +94,7 @@ def calculate_all_indicators(raw_df: pd.DataFrame) -> Dict[str, any]:
             latest_indicators['inc_price_change_pct'] = 0.0
 
     # --- 3. Cálculo del Decremento Ponderado y su Cambio de Precio ---
-    dec_window = getattr(config, 'TA_WEIGHTED_DEC_WINDOW', 25)
+    dec_window = config.SESSION_CONFIG["TA"]["WEIGHTED_DEC_WINDOW"]
     if len(raw_df) >= dec_window:
         dec_series = raw_df['decrement'].iloc[-dec_window:].to_numpy()
         latest_indicators['weighted_decrement'] = _calculate_weighted_moving_average(dec_series, dec_window)

@@ -1,6 +1,11 @@
 """
 Módulo para la Pantalla de Edición de Configuración General del Bot.
 
+v6.0 (Refactor de Configuración):
+- Completamente reescrito para leer y modificar valores dentro del
+  diccionario `config.BOT_CONFIG`.
+- Los cambios se aplican inmediatamente al objeto `config` en memoria.
+
 v5.1 (Validación de Símbolo en TUI):
 - La edición del `TICKER_SYMBOL` ahora llama al BotController para validar
   el símbolo en tiempo real contra el exchange.
@@ -40,35 +45,49 @@ def init(dependencies: Dict[str, Any]):
 
 def show_general_config_editor_screen(config_module: Any) -> bool:
     """
-    Muestra la pantalla de edición de configuración general y devuelve True si se guardaron cambios.
+    Muestra la pantalla de edición de configuración general.
     """
     logger = _deps.get("memory_logger_module")
     if not TerminalMenu:
         if logger: logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
         return False
-    # El menú ya no necesita devolver si se hicieron cambios, ya que se aplican al instante
+    
     _show_general_config_menu(config_module)
 
     # Devolvemos False porque no hay un "guardado" final, los cambios ya están aplicados.
     return False
 
-def _show_general_config_menu(config_module: Any) -> bool: # El tipo ahora es el config_module real
+def _show_general_config_menu(config_module: Any):
     """Muestra el menú interactivo para editar la configuración general."""
     while True:
         clear_screen()
         print_tui_header("Editor de Configuración General")
 
-        # Leemos directamente del config_module
-        modo_actual = "Paper Trading" if getattr(config_module, 'PAPER_TRADING_MODE', False) else "Live Trading"
-        testnet_actual = "ON" if getattr(config_module, 'UNIVERSAL_TESTNET_MODE', False) else "OFF"
+        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+        # --- (COMENTADO) ---
+        # # Leemos directamente del config_module
+        # modo_actual = "Paper Trading" if getattr(config_module, 'PAPER_TRADING_MODE', False) else "Live Trading"
+        # testnet_actual = "ON" if getattr(config_module, 'UNIVERSAL_TESTNET_MODE', False) else "OFF"
+        # 
+        # print("\nValores Actuales:")
+        # print("┌" + "─" * 40 + "┐")
+        # print(f"│ {'Exchange':<15}: {getattr(config_module, 'EXCHANGE_NAME', 'N/A').upper():<21} │")
+        # print(f"│ {'Modo':<15}: {modo_actual:<21} │")
+        # print(f"│ {'Testnet':<15}: {testnet_actual:<21} │")
+        # print(f"│ {'Símbolo Ticker':<15}: {getattr(config_module, 'TICKER_SYMBOL', 'N/A'):<21} │")
+        # print("└" + "─" * 40 + "┘")
+        # --- (CORREGIDO) ---
+        modo_actual = "Paper Trading" if config_module.BOT_CONFIG["PAPER_TRADING_MODE"] else "Live Trading"
+        testnet_actual = "ON" if config_module.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"] else "OFF"
         
         print("\nValores Actuales:")
         print("┌" + "─" * 40 + "┐")
-        print(f"│ {'Exchange':<15}: {getattr(config_module, 'EXCHANGE_NAME', 'N/A').upper():<21} │")
+        print(f"│ {'Exchange':<15}: {config_module.BOT_CONFIG['EXCHANGE_NAME'].upper():<21} │")
         print(f"│ {'Modo':<15}: {modo_actual:<21} │")
         print(f"│ {'Testnet':<15}: {testnet_actual:<21} │")
-        print(f"│ {'Símbolo Ticker':<15}: {getattr(config_module, 'TICKER_SYMBOL', 'N/A'):<21} │")
+        print(f"│ {'Símbolo Ticker':<15}: {config_module.BOT_CONFIG['TICKER']['SYMBOL']:<21} │")
         print("└" + "─" * 40 + "┘")
+        # --- FIN DE LA MODIFICACIÓN ---
 
         menu_items = [
             "[1] Exchange", 
@@ -76,7 +95,7 @@ def _show_general_config_menu(config_module: Any) -> bool: # El tipo ahora es el
             "[3] Testnet",
             "[4] Símbolo del Ticker",
             None,
-            "[b] Volver al Menú Principal" # Eliminamos las opciones de guardar/cancelar
+            "[b] Volver al Menú Principal"
         ]
         action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 3: 'ticker', 5: 'back'}
         
@@ -88,39 +107,50 @@ def _show_general_config_menu(config_module: Any) -> bool: # El tipo ahora es el
         action = action_map.get(menu.show())
 
         try:
+            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+            # --- (COMENTADO - Lógica antigua) ---
+            # if action == 'exchange':
+            #     sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
+            #     if sub_choice == 0: setattr(config_module, 'EXCHANGE_NAME', 'bybit')
+            # ... y así para los demás
+            
+            # --- (CORREGIDO - Nueva lógica) ---
             if action == 'exchange':
                 sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
-                if sub_choice == 0: setattr(config_module, 'EXCHANGE_NAME', 'bybit')
+                if sub_choice == 0:
+                    config_module.BOT_CONFIG['EXCHANGE_NAME'] = 'bybit'
             
             elif action == 'mode':
                 sub_choice = TerminalMenu(["Live Trading", "Paper Trading", None, "[c] Cancelar"], title="\nSelecciona el Modo de Trading:", **MENU_STYLE).show()
-                if sub_choice == 0: setattr(config_module, 'PAPER_TRADING_MODE', False)
-                elif sub_choice == 1: setattr(config_module, 'PAPER_TRADING_MODE', True)
+                if sub_choice == 0:
+                    config_module.BOT_CONFIG['PAPER_TRADING_MODE'] = False
+                elif sub_choice == 1:
+                    config_module.BOT_CONFIG['PAPER_TRADING_MODE'] = True
 
             elif action == 'testnet':
                 sub_choice = TerminalMenu(["ON", "OFF", None, "[c] Cancelar"], title="\nActivar Modo Testnet:", **MENU_STYLE).show()
-                if sub_choice == 0: setattr(config_module, 'UNIVERSAL_TESTNET_MODE', True)
-                elif sub_choice == 1: setattr(config_module, 'UNIVERSAL_TESTNET_MODE', False)
+                if sub_choice == 0:
+                    config_module.BOT_CONFIG['UNIVERSAL_TESTNET_MODE'] = True
+                elif sub_choice == 1:
+                    config_module.BOT_CONFIG['UNIVERSAL_TESTNET_MODE'] = False
             
-            # --- INICIO DE LA MODIFICACIÓN PRINCIPAL ---
             elif action == 'ticker':
-                current_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+                current_symbol = config_module.BOT_CONFIG['TICKER']['SYMBOL']
                 new_symbol = get_input(
                     "\nNuevo Símbolo (ej. ETHUSDT)", 
                     str, 
                     current_symbol
                 )
                 
-                # Delegamos la validación y actualización al BotController
                 print(f"Validando '{new_symbol.upper()}' con el exchange...")
                 success, message = bc_api.validate_and_update_ticker_symbol(new_symbol)
                 
                 print(f"\nResultado: {message}")
-                time.sleep(2.5) # Damos tiempo al usuario para leer el resultado
-            # --- FIN DE LA MODIFICACIÓN PRINCIPAL ---
+                time.sleep(2.5)
+            # --- FIN DE LA MODIFICACIÓN ---
                 
             elif action == 'back' or action is None:
-                return # Simplemente salimos, ya no hay estado que devolver
+                return # Salimos del bucle
         
         except UserInputCancelled:
             print("\n\nEdición cancelada."); time.sleep(1)

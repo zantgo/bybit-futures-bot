@@ -1,3 +1,5 @@
+# connection/_manager.py
+
 """
 Módulo Gestor de Sesiones API (Versión de Clase).
 
@@ -74,10 +76,11 @@ class ConnectionManager:
         print("INICIANDO GESTOR DE CONEXIONES Y VALIDANDO CUENTAS API...")
         print("="*80)
         
-        self._credentials.load_and_validate_uids()
+        # La función de carga de UIDs ahora se llama desde config.py al importar
+        # self._credentials.load_and_validate_uids() 
         api_credentials = self._credentials.load_api_credentials()
         
-        required_accounts = set(self._config.ACCOUNTS_TO_INITIALIZE)
+        required_accounts = set(self._config.BOT_CONFIG["ACCOUNTS"].values())
         
         if not required_accounts.issubset(set(api_credentials.keys())):
             missing_creds = required_accounts - set(api_credentials.keys())
@@ -136,15 +139,15 @@ class ConnectionManager:
         """
         Realiza una secuencia de micro-transferencias para validar la funcionalidad.
         """
-        main_session = self.get_client(self._config.ACCOUNT_MAIN)
+        main_session = self.get_client(self._config.BOT_CONFIG["ACCOUNTS"]["MAIN"])
         if not main_session:
             return False, "Fallo crítico: La cuenta principal no está disponible para iniciar la prueba."
 
         test_amount = "0.001"
         coin = "USDT"
         
-        accounts_to_test = [self._config.ACCOUNT_LONGS, self._config.ACCOUNT_SHORTS]
-        profit_account = self._config.ACCOUNT_PROFIT
+        accounts_to_test = [self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"], self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]]
+        profit_account = self._config.BOT_CONFIG["ACCOUNTS"]["PROFIT"]
         
         required_uids = accounts_to_test + [profit_account]
         for acc in required_uids:
@@ -209,11 +212,11 @@ class ConnectionManager:
                 return None, None
 
         target_map = {
-            'ticker': self._config.TICKER_SOURCE_ACCOUNT,
-            'trading_long': self._config.ACCOUNT_LONGS,
-            'trading_short': self._config.ACCOUNT_SHORTS,
-            'general': self._config.ACCOUNT_MAIN,
-            'market_data': self._config.ACCOUNT_MAIN
+            'ticker': self._config.BOT_CONFIG["TICKER"]["SOURCE_ACCOUNT"],
+            'trading_long': self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"],
+            'trading_short': self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"],
+            'general': self._config.BOT_CONFIG["ACCOUNTS"]["MAIN"],
+            'market_data': self._config.BOT_CONFIG["ACCOUNTS"]["MAIN"]
         }
         purpose_key = f"trading_{side}" if purpose == 'trading' and side else purpose
         target_account_name = target_map.get(purpose_key)

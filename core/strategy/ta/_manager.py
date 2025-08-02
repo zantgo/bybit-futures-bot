@@ -68,7 +68,7 @@ class TAManager:
 
         # 3. Calcular los nuevos indicadores si está habilitado
         calculated_indicators = {}
-        if getattr(config, 'TA_CALCULATE_PROCESSED_DATA', True):
+        if config.SESSION_CONFIG["TA"]["ENABLED"]:
             try:
                 # Utiliza el módulo _calculator para procesar el DataFrame
                 calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
@@ -97,8 +97,12 @@ class TAManager:
         self._latest_indicators = calculated_indicators.copy()
 
         # 5. Opcional: Imprimir datos para depuración si está activado en config
-        if getattr(config, 'PRINT_PROCESSED_DATA_ALWAYS', False):
-            print(f"DEBUG [TA Calculated]: {self._latest_indicators}")
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # La variable PRINT_PROCESSED_DATA_ALWAYS ya no existe.
+        # Esta lógica puede ser manejada por el nivel de LOG_LEVEL.
+        # if getattr(config, 'PRINT_PROCESSED_DATA_ALWAYS', False):
+        #     print(f"DEBUG [TA Calculated]: {self._latest_indicators}")
+        # --- FIN DE LA MODIFICACIÓN ---
 
         return self.get_latest_indicators()
 

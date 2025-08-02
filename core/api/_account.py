@@ -1,3 +1,5 @@
+# core/api/_account.py
+
 """
 Módulo para consultar información de la cuenta desde la API de Bybit.
 ...
@@ -160,7 +162,7 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         memory_logger.log(f"ERROR [Get Order Status]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
         
-    params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "limit": 1}
+    params = {"category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"], "limit": 1}
     id_type = ""
     if order_id:
         params["orderId"] = order_id
@@ -217,7 +219,7 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
         memory_logger.log(f"ERROR [Get Position]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
         
-    params = {"category": getattr(config, 'CATEGORY_LINEAR', 'linear'), "symbol": symbol}
+    params = {"category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"], "symbol": symbol}
     
     try:
         if not hasattr(session, 'get_positions'):

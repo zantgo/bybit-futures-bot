@@ -1,3 +1,5 @@
+# core/strategy/pm/_calculations.py
+
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
@@ -23,8 +25,7 @@ except ImportError as e:
     print(f"ERROR [Position Calculations Import]: No se pudo importar core.config o core.utils: {e}")
     # Definir stubs/dummies si las importaciones fallan, para que las funciones no fallen catastróficamente
     config_attrs = {
-        'POSITION_COMMISSION_RATE': 0.0,
-        'POSITION_REINVEST_PROFIT_PCT': 0.0
+        'OPERATION_DEFAULTS': {'PROFIT': {'COMMISSION_RATE': 0.0, 'REINVEST_PROFIT_PCT': 0.0}}
     }
     config = type('obj', (object,), config_attrs)()
     _utils = type('obj', (object,), {
@@ -118,8 +119,8 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     Calcula PNL bruto, comisión, PNL neto.
     Luego, calcula la porción del PNL NETO a reinvertir y la porción a transferir.
     """
-    commission_rate = getattr(config, 'POSITION_COMMISSION_RATE', 0.0)
-    reinvest_fraction = getattr(config, 'POSITION_REINVEST_PROFIT_PCT', 0.0) / 100.0
+    commission_rate = config.OPERATION_DEFAULTS["PROFIT"]["COMMISSION_RATE"]
+    reinvest_fraction = config.OPERATION_DEFAULTS["PROFIT"]["REINVEST_PROFIT_PCT"] / 100.0
 
     pnl_gross_usdt = 0.0
     commission_usdt = 0.0
