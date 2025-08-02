@@ -12,10 +12,12 @@ from core.logging import memory_logger
 # Importamos funciones de módulos "primos" y "hermanos"
 from .._account import get_active_position_details_api
 from ._placing import place_market_order
-# --- INICIO DE LA CORRECCIÓN: Usar importación absoluta ---
+
+# --- INICIO DE LA MODIFICACIÓN ---
+# Solo importar la función, no ejecutarla.
 from connection._manager import get_connection_manager_instance
-connection_manager = get_connection_manager_instance()
-# --- FIN DE LA CORRECCIÓN ---
+# connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
+# --- FIN DE LA MODIFICACIÓN ---
 
 def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) -> bool:
     """
@@ -29,7 +31,11 @@ def close_all_symbol_positions(symbol: str, account_name: Optional[str] = None) 
     Returns:
         bool: True si todas las órdenes de cierre se enviaron con éxito, False en caso contrario.
     """
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Obtenemos la instancia JUSTO cuando se necesita.
+    connection_manager = get_connection_manager_instance()
     if not (connection_manager and config and get_active_position_details_api):
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Close All Positions]: Dependencias no disponibles.", level="ERROR")
         return False
         
@@ -100,7 +106,11 @@ def close_position_by_side(symbol: str, side_to_close: str, account_name: Option
     Returns:
         bool: True si la orden de cierre se envió con éxito o no había posición, False si falló.
     """
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Obtenemos la instancia JUSTO cuando se necesita.
+    connection_manager = get_connection_manager_instance()
     if not (connection_manager and config and get_active_position_details_api):
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Close Position By Side]: Dependencias no disponibles.", level="ERROR")
         return False
     if side_to_close not in ["Buy", "Sell"]:

@@ -20,9 +20,9 @@ if __name__ != "__main__":
 
 try:
     import config
-    # --- MODIFICADO: Usar el accesor de instancia ---
+    # --- MODIFICADO: Solo importar la función, no ejecutarla ---
     from connection._manager import get_connection_manager_instance
-    connection_manager = get_connection_manager_instance()
+    # connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
     # --- FIN DE LA MODIFICACIÓN ---
     from core.logging import memory_logger
     from ._helpers import _handle_api_error_generic
@@ -31,7 +31,9 @@ except ImportError as e:
     # Este print se mantiene ya que el logger podría no estar disponible
     print(f"ERROR [Market Data API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
-    connection_manager = None
+    # --- INICIO DE LA MODIFICACIÓN (Fallback) ---
+    def get_connection_manager_instance(): return None
+    # --- FIN DE LA MODIFICACIÓN (Fallback) ---
     memory_logger = type('obj', (object,), {'log': print})()
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
@@ -47,7 +49,12 @@ _INSTRUMENT_INFO_CACHE_EXPIRY_SECONDS = 3600
 def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bool = False) -> Optional[Dict[str, Any]]:
     """Obtiene información del instrumento (precisión, mínimos) desde la API o caché."""
     global _instrument_info_cache
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Obtenemos la instancia JUSTO cuando se necesita.
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Instrument Info]: Dependencias no disponibles.", level="ERROR")
         return None
         
@@ -57,6 +64,7 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
         cached_data = _instrument_info_cache[cache_key]
         if (now - cached_data.get('timestamp', 0)) < _INSTRUMENT_INFO_CACHE_EXPIRY_SECONDS:
             return cached_data.get('data')
+            
     session, account_used = connection_manager.get_session_for_operation(
         purpose='market_data'
     )

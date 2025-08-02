@@ -91,3 +91,14 @@ def shutdown_bot():
     """
     if _bc_instance:
         _bc_instance.shutdown_bot()
+
+        # ... (código existente) ...
+
+# AÑADIR ESTA NUEVA FUNCIÓN AL FINAL DEL ARCHIVO
+def validate_and_update_ticker_symbol(new_symbol: str) -> Tuple[bool, str]:
+    """
+    Delega la llamada para validar y actualizar el símbolo del ticker global.
+    """
+    if not _bc_instance:
+        return False, "Error: BotController no instanciado."
+    return _bc_instance.validate_and_update_ticker_symbol(new_symbol)

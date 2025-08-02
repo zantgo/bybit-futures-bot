@@ -51,26 +51,37 @@ def _display_welcome_panel(bot_controller: Any):
         for name, info in balances.items() if info
     }
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Leer el modo de trading dinámicamente desde la configuración
-    is_paper_trading = general_config.get('Paper Trading', False) # Asumiendo que el BotController lo expone
+    is_paper_trading = general_config.get('Paper Trading', False)
     modo_trading_str = "Paper Trading" if is_paper_trading else "Live Trading"
 
     config_data = {
         "Exchange": general_config.get('Exchange', 'N/A').upper(),
         "Modo": modo_trading_str,
-        "Testnet": "ON" if general_config.get('Modo Testnet', False) else "OFF"
+        "Testnet": "ON" if general_config.get('Modo Testnet', False) else "OFF",
+        "Símbolo": general_config.get('Ticker Symbol', 'N/A')
     }
-    # --- FIN DE LA CORRECCIÓN ---
 
-    # Lógica de impresión en columnas (sin cambios)
+    # Lógica de impresión en columnas
     print("┌" + "─" * 38 + "┬" + "─" * 39 + "┐")
     print(f"│{'Balances de Cuentas':^38}│{'Configuración General':^39}│")
     print("├" + "─" * 38 + "┼" + "─" * 39 + "┤")
 
-    b_keys, c_keys = list(balance_data.keys()), list(config_data.keys())
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Define el orden explícito para la visualización de las cuentas.
+    account_order = ["MAIN", "LONGS", "SHORTS", "PROFIT"]
+    # Construye la lista de claves de balance (b_keys) respetando el orden definido.
+    # Se filtran solo las cuentas que existen en balance_data.
+    b_keys = [acc for acc in account_order if acc in balance_data]
+    
+    # La lógica para las claves de configuración (c_keys) no cambia.
+    c_keys = list(config_data.keys())
+    # --- FIN DE LA MODIFICACIÓN ---
+
     num_rows = max(len(b_keys), len(c_keys))
+    
+    # Ajustar para encontrar el ancho máximo de las claves en ambas columnas
     max_b_key = max(len(k) for k in b_keys) if b_keys else 0
+    max_c_key = max(len(k) for k in c_keys) if c_keys else 0
 
     for i in range(num_rows):
         left_col, right_col = "", ""
@@ -79,7 +90,7 @@ def _display_welcome_panel(bot_controller: Any):
             left_col = f"  {key:<{max_b_key}} : {value}"
         if i < len(c_keys):
             key, value = c_keys[i], config_data[c_keys[i]]
-            right_col = f"  {key:<10} : {value}"
+            right_col = f"  {key:<{max_c_key}} : {value}"
         
         print(f"│{left_col:<38}│{right_col:<39}│")
 
@@ -164,7 +175,7 @@ def show_welcome_screen(bot_controller: Any):
                 print("Sesión creada con éxito. Lanzando dashboard...")
                 time.sleep(2)
                 _dashboard.show_dashboard_screen(session_manager)
-                session_manager.stop()
+                # session_manager.stop() # Comentado, el dashboard ya gestiona la parada
             else:
                 print("\nERROR: No se pudo crear la sesión. Revisa los logs.")
                 press_enter_to_continue()

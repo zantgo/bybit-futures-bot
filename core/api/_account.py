@@ -17,9 +17,9 @@ if __name__ != "__main__":
 try:
     import config
     from core import utils
-    # --- MODIFICADO: Usar el accesor de instancia ---
+    # --- MODIFICADO: Solo importar la función, no ejecutarla ---
     from connection._manager import get_connection_manager_instance
-    connection_manager = get_connection_manager_instance()
+    # connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
     # --- FIN DE LA MODIFICACIÓN ---
     from core.logging import memory_logger
     from ._helpers import _handle_api_error_generic
@@ -28,18 +28,24 @@ except ImportError as e:
     # Este print se mantiene ya que el logger podría no estar disponible
     print(f"ERROR [Account API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
-    utils = None; connection_manager = None
+    utils = None
+    # --- INICIO DE LA MODIFICACIÓN (Fallback) ---
+    def get_connection_manager_instance(): return None
+    # --- FIN DE LA MODIFICACIÓN (Fallback) ---
     memory_logger = type('obj', (object,), {'log': print})()
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
     class FailedRequestError(Exception): pass
 
-# ... (El resto del archivo no necesita cambios) ...
 # --- Funciones para Obtener Balances ---
 
 def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
     """Obtiene detalles del balance de la Cuenta Unificada (UTA)."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Obtenemos la instancia JUSTO cuando se necesita.
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config or not utils:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Unified Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
@@ -91,7 +97,10 @@ def get_unified_account_balance_info(account_name: str) -> Optional[dict]:
 
 def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Dict[str, float]]]:
     """Obtiene detalles del balance de la Cuenta de Fondos (FUND)."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config or not utils:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Funding Balance]: Dependencias no disponibles.", level="ERROR")
         return None
         
@@ -131,9 +140,13 @@ def get_funding_account_balance_info(account_name: str) -> Optional[Dict[str, Di
         memory_logger.log(f"ERROR Inesperado [Get Funding Balance] para '{account_used}': {e}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
+
 def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None, account_name: Optional[str] = None) -> Optional[dict]:
     """Obtiene el estado de una orden específica usando get_order_history (v5 API)."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Order Status]: Dependencias no disponibles.", level="ERROR")
         return None
     if not order_id and not order_link_id:
@@ -190,7 +203,10 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
 
 def get_active_position_details_api(symbol: str, account_name: Optional[str] = None) -> Optional[List[dict]]:
     """Obtiene detalles de la(s) posición(es) activas para un símbolo (v5 API)."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config or not utils:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Position]: Dependencias no disponibles.", level="ERROR")
         return None
         
@@ -238,7 +254,10 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
     """
     Obtiene el historial de ejecuciones (trades) para una orden específica (v5 API).
     """
+    # --- INICIO DE LA MODIFICACIÓN ---
+    connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Executions]: Dependencias no disponibles.", level="ERROR")
         return None
         

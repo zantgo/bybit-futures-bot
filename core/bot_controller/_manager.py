@@ -1,9 +1,10 @@
 """
 Módulo Gestor del Bot (BotController).
 
-v6.0 (Capital Lógico por Operación):
-- Se elimina la dependencia e instanciación de la clase `BalanceManager`, ya que
-  la gestión de capital ahora reside en cada objeto `Operacion`.
+v6.1 (Validación de Símbolo Centralizada):
+- Se añade el método `validate_and_update_ticker_symbol` para validar un
+  nuevo símbolo de ticker en tiempo real usando el ExchangeAdapter.
+- La TUI de Configuración General ahora delega la validación a este método.
 """
 import sys
 import time
@@ -16,10 +17,7 @@ try:
     from core.strategy.sm._manager import SessionManager
     from core.strategy.om._manager import OperationManager
     from core.strategy.pm.manager import PositionManager
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se elimina la importación de BalanceManager
-    # from core.strategy.pm._balance import BalanceManager
-    # --- FIN DE LA MODIFICACIÓN ---
+    # from core.strategy.pm._balance import BalanceManager # Comentado
     from core.strategy.pm._position_state import PositionState
     from core.strategy.pm._executor import PositionExecutor
     from core.exchange._bybit_adapter import BybitAdapter
@@ -33,7 +31,7 @@ try:
 
 except ImportError:
     # Fallbacks para análisis estático y resiliencia
-    SessionManager = OperationManager = PositionManager = None # BalanceManager quitado
+    SessionManager = OperationManager = PositionManager = None
     PositionState = PositionExecutor = BybitAdapter = ConnectionManager = None
     memory_logger_module = type('obj', (object,), {'log': print})()
     trading_api = None
@@ -70,15 +68,40 @@ class BotController:
         self._SessionManager = dependencies.get('SessionManager')
         self._OperationManager = dependencies.get('OperationManager')
         self._PositionManager = dependencies.get('PositionManager')
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la dependencia de la clase BalanceManager.
-        # self._BalanceManager = dependencies.get('BalanceManager')
-        # --- FIN DE LA MODIFICACIÓN ---
         self._PositionState = dependencies.get('PositionState')
         self._PositionExecutor = dependencies.get('PositionExecutor')
         self._BybitAdapter = dependencies.get('BybitAdapter')
         
         self._connections_initialized: bool = False
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def validate_and_update_ticker_symbol(self, new_symbol: str) -> Tuple[bool, str]:
+        """
+        Valida un nuevo símbolo de ticker contra el exchange y lo actualiza si es válido.
+        """
+        if not self._connections_initialized:
+            return False, "Las conexiones no están inicializadas para validar el símbolo."
+
+        new_symbol = new_symbol.upper()
+        self._memory_logger.log(f"BotController: Solicitud para validar y cambiar Ticker a '{new_symbol}'...", "INFO")
+
+        # Usamos una instancia temporal del adaptador solo para la validación
+        validation_adapter = self._BybitAdapter(self._connection_manager)
+        
+        # El método initialize del adaptador ya contiene la lógica de validación
+        is_valid = validation_adapter.initialize(symbol=new_symbol)
+
+        if is_valid:
+            old_symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
+            setattr(self._config, 'TICKER_SYMBOL', new_symbol)
+            msg = f"Símbolo del Ticker actualizado con éxito a '{new_symbol}'."
+            self._memory_logger.log(f"BotController: {msg} (Anterior: '{old_symbol}')", "WARN")
+            return True, msg
+        else:
+            msg = f"El símbolo '{new_symbol}' es inválido o no existe. El cambio ha sido rechazado."
+            self._memory_logger.log(f"BotController: {msg}", "ERROR")
+            return False, msg
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def are_connections_initialized(self) -> bool:
         """Indica si las conexiones API han sido inicializadas con éxito."""
@@ -155,7 +178,14 @@ class BotController:
         
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
         adapter = self._BybitAdapter(self._connection_manager)
-        adapter.initialize(symbol=ticker)
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añade validación del ticker al inicio de la prueba
+        if not adapter.initialize(symbol=ticker):
+            print("FALLO.")
+            return False, f"El símbolo '{ticker}' no es válido o no se pudo inicializar el adaptador."
+        # --- FIN DE LA MODIFICACIÓN ---
+            
         ticker_info = adapter.get_ticker(ticker)
 
         if not ticker_info or not ticker_info.price > 0:
@@ -207,17 +237,9 @@ class BotController:
             om_instance = self._OperationManager(config=self._config, memory_logger_instance=self._memory_logger)
             self._om_api.init_om_api(om_instance)
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se elimina toda la creación y configuración del BalanceManager.
-            # balance_manager = self._BalanceManager(...)
-            # --- FIN DE LA MODIFICACIÓN ---
-            
             position_state = self._PositionState(config=self._config, utils=self._utils, exchange_adapter=exchange_adapter)
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # El PositionManager ya no necesita `balance_manager` en su constructor.
             pm_instance = self._PositionManager(
-                # balance_manager=balance_manager, # <-- COMENTADO/ELIMINADO
                 position_state=position_state, 
                 exchange_adapter=exchange_adapter, 
                 config=self._config, 
@@ -227,11 +249,9 @@ class BotController:
                 operation_manager_api=self._om_api
             )
             
-            # El PositionExecutor tampoco necesita ya `balance_manager`.
             executor = self._PositionExecutor(
                 config=self._config, 
                 utils=self._utils, 
-                # balance_manager=balance_manager, # <-- COMENTADO/ELIMINADO
                 position_state=position_state, 
                 exchange_adapter=exchange_adapter, 
                 calculations=self._pm_calculations, 
@@ -239,7 +259,6 @@ class BotController:
                 closed_position_logger=self._logging_package.closed_position_logger, 
                 state_manager=pm_instance
             )
-            # --- FIN DE LA MODIFICACIÓN ---
 
             pm_instance.set_executor(executor)
             self._pm_helpers.set_dependencies(self._config, self._utils)
@@ -266,7 +285,8 @@ class BotController:
         return { 
             'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
             'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
-            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False)
+            'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False),
+            'Ticker Symbol': getattr(self._config, 'TICKER_SYMBOL', 'N/A')
         }
 
     def update_general_config(self, params: Dict[str, Any]) -> bool:

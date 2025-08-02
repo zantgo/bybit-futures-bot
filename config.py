@@ -56,10 +56,10 @@ TICKER_INTERVAL_SECONDS = 1
 TICKER_SOURCE_ACCOUNT = ACCOUNT_PROFIT
 
 # --- Technical Analysis Configuration (Estrategia de Bajo Nivel) ---
-TA_WINDOW_SIZE = 100
 TA_EMA_WINDOW = 50
 TA_WEIGHTED_INC_WINDOW = 25
 TA_WEIGHTED_DEC_WINDOW = 25
+TA_WINDOW_SIZE = TA_EMA_WINDOW * 2  # <- NO modificar manualmente este valor
 TA_CALCULATE_PROCESSED_DATA = True
 
 # --- Signal Generation Configuration (Estrategia de Bajo Nivel) ---

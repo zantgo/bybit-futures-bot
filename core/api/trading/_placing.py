@@ -10,10 +10,13 @@ from typing import Optional, Union, Dict
 # --- Dependencias del Proyecto ---
 import config
 from core.logging import memory_logger
-# --- INICIO DE LA CORRECCIÓN: Usar importación absoluta ---
+
+# --- INICIO DE LA MODIFICACIÓN ---
+# Solo importar la función, no ejecutarla.
 from connection._manager import get_connection_manager_instance
-connection_manager = get_connection_manager_instance()
-# --- FIN DE LA CORRECCIÓN ---
+# connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
+# --- FIN DE LA MODIFICACIÓN ---
+
 # Importar excepciones específicas con fallbacks
 try:
     from pybit.exceptions import InvalidRequestError, FailedRequestError
@@ -53,7 +56,11 @@ def place_market_order(
     Returns:
         Optional[dict]: La respuesta de la API si la orden es aceptada, o None si hay un error previo.
     """
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Obtenemos la instancia JUSTO cuando se necesita.
+    connection_manager = get_connection_manager_instance()
     if not (connection_manager and config):
+    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Place Order]: Dependencias no disponibles.", level="ERROR")
         return None
     if side not in ["Buy", "Sell"]:

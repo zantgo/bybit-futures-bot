@@ -1,7 +1,9 @@
-# core/exchange/_bybit_adapter.py
-
 """
 Implementación del Adaptador de Exchange para Bybit.
+
+v2.2 (Validación de Símbolo):
+- El método `initialize` ahora valida activamente que el símbolo proporcionado
+  exista en el exchange llamando a `get_instrument_info`.
 
 v2.1 (Refactor Connection Layer):
 - El constructor __init__ ahora recibe una instancia de ConnectionManager.
@@ -22,14 +24,9 @@ import config
 from ._interface import AbstractExchange
 from ._models import StandardOrder, StandardPosition, StandardBalance, StandardInstrumentInfo, StandardTicker
 
-# --- CAMBIO: Se elimina la importación del módulo global ---
-# from connection import manager as connection_manager
-
-# --- CAMBIO: Se añade importación para type hinting ---
 if TYPE_CHECKING:
     from connection import ConnectionManager
 
-# Importamos las excepciones que vamos a manejar
 try:
     from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError:
@@ -39,7 +36,6 @@ except ImportError:
 class BybitAdapter(AbstractExchange):
     """Implementación del protocolo de Exchange para Bybit."""
 
-    # --- CAMBIO: El constructor ahora recibe el ConnectionManager ---
     def __init__(self, connection_manager: 'ConnectionManager'):
         """
         Inicializa el adaptador con una instancia del gestor de conexiones.
@@ -57,9 +53,10 @@ class BybitAdapter(AbstractExchange):
         }
 
     def initialize(self, symbol: str) -> bool:
-        """Verifica que las cuentas necesarias están disponibles."""
-        self._symbol = symbol
-        # --- CAMBIO: Usar la instancia de ConnectionManager ---
+        """
+        Inicializa el adaptador, verifica la conexión a las cuentas necesarias y
+        valida que el símbolo de trading exista en el exchange.
+        """
         initialized_accounts = self._connection_manager.get_initialized_accounts()
         required_accounts = set(self._purpose_to_account_name_map.values())
         
@@ -67,7 +64,17 @@ class BybitAdapter(AbstractExchange):
             missing = required_accounts - set(initialized_accounts)
             memory_logger.log(f"[BybitAdapter] ERROR: Faltan cuentas requeridas en la conexión: {missing}", "ERROR")
             return False
-        
+
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Validación activa del símbolo.
+        memory_logger.log(f"[BybitAdapter] Validando existencia del símbolo '{symbol}'...", "INFO")
+        instrument_info = self.get_instrument_info(symbol)
+        if instrument_info is None:
+            memory_logger.log(f"[BybitAdapter] ERROR: El símbolo '{symbol}' no es válido o no se pudo obtener su información.", "ERROR")
+            return False
+        # --- FIN DE LA MODIFICACIÓN ---
+
+        self._symbol = symbol
         memory_logger.log(f"[BybitAdapter] Inicializado con éxito para el símbolo '{symbol}'.", "INFO")
         return True
 
@@ -78,7 +85,9 @@ class BybitAdapter(AbstractExchange):
             qty_step = utils.safe_float_convert(bybit_info.get('qtyStep'), 0.001)
             qty_precision = 0
             if '.' in str(qty_step):
-                qty_precision = len(str(qty_step).split('.')[1])
+                # Usar Decimal para un cálculo de precisión más robusto
+                from decimal import Decimal
+                qty_precision = abs(Decimal(str(qty_step)).as_tuple().exponent)
 
             return StandardInstrumentInfo(
                 symbol=bybit_info.get('symbol'),
@@ -127,7 +136,6 @@ class BybitAdapter(AbstractExchange):
         
     def get_ticker(self, symbol: str) -> Optional[StandardTicker]:
         account_name = self._purpose_to_account_name_map.get('ticker')
-        # --- CAMBIO: Usar la instancia de ConnectionManager ---
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=account_name)
         if not session: return None
         
@@ -143,7 +151,11 @@ class BybitAdapter(AbstractExchange):
                     memory_logger.log(f"[BybitAdapter get_ticker] Error API para '{symbol}': {msg} (Code: {code})", "WARN")
                 return None
             
-            ticker_data = response.get('result', {}).get('list', [])[0]
+            ticker_data_list = response.get('result', {}).get('list', [])
+            if not ticker_data_list:
+                return None
+                
+            ticker_data = ticker_data_list[0]
             price = utils.safe_float_convert(ticker_data.get('lastPrice'))
             
             if price and price > 0:
@@ -209,7 +221,6 @@ class BybitAdapter(AbstractExchange):
             memory_logger.log(f"Error de transferencia: UID no encontrado para '{from_acc_name}' o '{to_acc_name}'", "ERROR")
             return False
 
-        # --- CAMBIO: Usar la instancia de ConnectionManager ---
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=config.ACCOUNT_MAIN)
         if not session: 
             memory_logger.log("Error de transferencia: No se pudo obtener sesión para la cuenta principal.", "ERROR")

@@ -1,10 +1,9 @@
 """
 Módulo para la Pantalla de Edición de Configuración de la Sesión.
 
-v9.0 (Recarga en Caliente):
-- Se modifica el submenú de Ticker para impedir la modificación de `TICKER_SYMBOL`
-  y `TICKER_INTERVAL_SECONDS` mientras una sesión está activa, ya que estos
-  parámetros no pueden cambiarse dinámicamente sin reiniciar el Ticker.
+v5.0 (Refactor Ticker Symbol):
+- Se elimina la opción para editar el `TICKER_SYMBOL` de esta pantalla.
+  Ahora se gestiona en la Configuración General.
 """
 from typing import Any, Dict
 import time
@@ -107,69 +106,93 @@ def _show_session_config_menu(temp_cfg: Any) -> bool:
 def _show_ticker_config_menu(cfg: Any):
     """Muestra el menú para editar los parámetros del Ticker."""
     # --- INICIO DE LA MODIFICACIÓN ---
-    # Verificar si la sesión ya está corriendo para deshabilitar opciones.
-    from core.strategy.sm import api as sm_api
-    is_session_running = sm_api.is_running() if sm_api else False
+    # Se elimina la lógica que comprobaba si la sesión estaba activa.
+    # El SessionManager se encargará de reiniciar el Ticker si es necesario.
+    # from core.strategy.sm import api as sm_api
+    # is_session_running = sm_api.is_running() if sm_api else False
     # --- FIN DE LA MODIFICACIÓN ---
     
     try:
         while True:
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina la opción para editar el Ticker Symbol del menú.
             menu_items = [
-                f"[1] Símbolo del Ticker (Actual: {getattr(cfg, 'TICKER_SYMBOL', 'N/A')})",
-                f"[2] Intervalo (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
+                # f"[1] Símbolo del Ticker (Actual: {getattr(cfg, 'TICKER_SYMBOL', 'N/A')})", # <-- COMENTADO/ELIMINADO
+                f"[1] Intervalo (segundos) (Actual: {getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1)})",
                 None, "[b] Volver"
             ]
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Añadir mensaje informativo si la sesión está activa
+            # Se elimina el mensaje condicional del título.
             title = "Configuración del Ticker"
-            if is_session_running:
-                title += "\n(Símbolo e Intervalo no se pueden cambiar durante una sesión activa)"
+            # if is_session_running:
+            #     title += "\n(Símbolo e Intervalo no se pueden cambiar durante una sesión activa)"
             # --- FIN DE LA MODIFICACIÓN ---
 
             submenu = TerminalMenu(menu_items, title=title, **MENU_STYLE)
             choice = submenu.show()
 
             # --- INICIO DE LA MODIFICACIÓN ---
-            # Bloquear la edición si la sesión está activa
-            if is_session_running and choice in [0, 1]:
-                print("\nEste parámetro no puede ser modificado mientras la sesión está en ejecución.")
-                time.sleep(2)
-                continue
-            # --- FIN DE LA MODIFICACIÓN ---
-
+            # Se elimina el bloqueo de la edición.
+            # if is_session_running and choice in [0, 1]:
+            #     print("\nEste parámetro no puede ser modificado mientras la sesión está en ejecución.")
+            #     time.sleep(2)
+            #     continue
+            
+            # Se ajusta la lógica de selección para el nuevo menú.
             if choice == 0:
-                new_val = get_input("\nNuevo Símbolo (ej. ETHUSDT)", str, getattr(cfg, 'TICKER_SYMBOL', 'N/A'))
-                setattr(cfg, 'TICKER_SYMBOL', new_val.upper())
-            elif choice == 1:
                 new_val = get_input("\nNuevo Intervalo (segundos)", float, getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1), min_val=0.1)
                 setattr(cfg, 'TICKER_INTERVAL_SECONDS', new_val)
-            else: break
-    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
+            # elif choice == 1: # <-- COMENTADO/ELIMINADO
+            #     new_val = get_input("\nNuevo Intervalo (segundos)", float, getattr(cfg, 'TICKER_INTERVAL_SECONDS', 1), min_val=0.1)
+            #     setattr(cfg, 'TICKER_INTERVAL_SECONDS', new_val)
+            else: 
+                break
+            # --- FIN DE LA MODIFICACIÓN ---
 
+    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
 def _show_strategy_config_menu(cfg: Any):
     """Muestra el menú para editar los parámetros de la estrategia."""
     try:
         while True:
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Añadimos las dos nuevas opciones al menú
             menu_items = [
                 f"[1] Margen de Compra (%) (Actual: {getattr(cfg, 'STRATEGY_MARGIN_BUY', 0.0)})",
                 f"[2] Margen de Venta (%) (Actual: {getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)})",
                 f"[3] Umbral de Decremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0)})",
                 f"[4] Umbral de Incremento Ponderado (Actual: {getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0)})",
+                None,
                 f"[5] Período EMA (TA_EMA_WINDOW) (Actual: {getattr(cfg, 'TA_EMA_WINDOW', 0)})",
-                None, "[b] Volver"
+                f"[6] Período WMA Incremento (TA_WEIGHTED_INC_WINDOW) (Actual: {getattr(cfg, 'TA_WEIGHTED_INC_WINDOW', 0)})",
+                f"[7] Período WMA Decremento (TA_WEIGHTED_DEC_WINDOW) (Actual: {getattr(cfg, 'TA_WEIGHTED_DEC_WINDOW', 0)})",
+                None, 
+                "[b] Volver"
             ]
             submenu = TerminalMenu(menu_items, title="Parámetros de la Estrategia (TA y Señal)", **MENU_STYLE)
             choice = submenu.show()
-            if choice == 0: setattr(cfg, 'STRATEGY_MARGIN_BUY', get_input("\nNuevo Margen de Compra (ej. -0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_BUY', 0.0)))
-            elif choice == 1: setattr(cfg, 'STRATEGY_MARGIN_SELL', get_input("\nNuevo Margen de Venta (ej. 0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)))
-            elif choice == 2: setattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', get_input("\nNuevo Umbral de Decremento (0-1)", float, getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
-            elif choice == 3: setattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', get_input("\nNuevo Umbral de Incremento (0-1)", float, getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
-            elif choice == 4: setattr(cfg, 'TA_EMA_WINDOW', get_input("\nNuevo Período para la EMA", int, getattr(cfg, 'TA_EMA_WINDOW', 0), min_val=1))
-            else: break
-    except UserInputCancelled: print("\n\nEdición cancelada."); time.sleep(1)
 
+            # Actualizamos la lógica de selección para incluir las nuevas opciones
+            if choice == 0: 
+                setattr(cfg, 'STRATEGY_MARGIN_BUY', get_input("\nNuevo Margen de Compra (ej. -0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_BUY', 0.0)))
+            elif choice == 1: 
+                setattr(cfg, 'STRATEGY_MARGIN_SELL', get_input("\nNuevo Margen de Venta (ej. 0.1)", float, getattr(cfg, 'STRATEGY_MARGIN_SELL', 0.0)))
+            elif choice == 2: 
+                setattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', get_input("\nNuevo Umbral de Decremento (0-1)", float, getattr(cfg, 'STRATEGY_DECREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
+            elif choice == 3: 
+                setattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', get_input("\nNuevo Umbral de Incremento (0-1)", float, getattr(cfg, 'STRATEGY_INCREMENT_THRESHOLD', 0.0), min_val=0.0, max_val=1.0))
+            elif choice == 5: # El índice ahora es 5
+                setattr(cfg, 'TA_EMA_WINDOW', get_input("\nNuevo Período para la EMA", int, getattr(cfg, 'TA_EMA_WINDOW', 0), min_val=1))
+            elif choice == 6: # Nueva opción
+                setattr(cfg, 'TA_WEIGHTED_INC_WINDOW', get_input("\nNuevo Período para WMA de Incremento", int, getattr(cfg, 'TA_WEIGHTED_INC_WINDOW', 0), min_val=1))
+            elif choice == 7: # Nueva opción
+                setattr(cfg, 'TA_WEIGHTED_DEC_WINDOW', get_input("\nNuevo Período para WMA de Decremento", int, getattr(cfg, 'TA_WEIGHTED_DEC_WINDOW', 0), min_val=1))
+            else: 
+                break
+            # --- FIN DE LA MODIFICACIÓN ---
+    except UserInputCancelled: 
+        print("\n\nEdición cancelada."); time.sleep(1)
+        
 def _show_pm_capital_config_menu(cfg: Any):
     """Muestra el menú para editar los parámetros de capital por defecto."""
     try:

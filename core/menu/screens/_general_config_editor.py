@@ -1,5 +1,14 @@
 """
 Módulo para la Pantalla de Edición de Configuración General del Bot.
+
+v5.1 (Validación de Símbolo en TUI):
+- La edición del `TICKER_SYMBOL` ahora llama al BotController para validar
+  el símbolo en tiempo real contra el exchange.
+- El usuario recibe feedback inmediato si el símbolo es inválido.
+
+v5.0 (Refactor Ticker Symbol):
+- Se añade la opción para editar el `TICKER_SYMBOL` en esta pantalla, ya que
+  es un parámetro global del bot.
 """
 from typing import Any, Dict
 import time
@@ -15,9 +24,11 @@ from .._helpers import (
     print_tui_header,
     get_input,
     MENU_STYLE,
-    show_help_popup,
     UserInputCancelled
 )
+
+# Importamos la API del BotController para poder llamarla
+from core.bot_controller import api as bc_api
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -27,8 +38,6 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- LÓGICA PRINCIPAL ---
-
 def show_general_config_editor_screen(config_module: Any) -> bool:
     """
     Muestra la pantalla de edición de configuración general y devuelve True si se guardaron cambios.
@@ -37,84 +46,81 @@ def show_general_config_editor_screen(config_module: Any) -> bool:
     if not TerminalMenu:
         if logger: logger.log("Error: 'simple-term-menu' no está instalado.", level="ERROR")
         return False
+    # El menú ya no necesita devolver si se hicieron cambios, ya que se aplican al instante
+    _show_general_config_menu(config_module)
 
-    class TempConfig: pass
-    temp_config = TempConfig()
-    for attr in dir(config_module):
-        if attr.isupper() and not attr.startswith('_'):
-            setattr(temp_config, attr, copy.deepcopy(getattr(config_module, attr)))
-
-    changes_made = _show_general_config_menu(temp_config)
-
-    if changes_made:
-        _apply_changes_to_real_config(temp_config, config_module, logger)
-        return True
-    
+    # Devolvemos False porque no hay un "guardado" final, los cambios ya están aplicados.
     return False
 
-# --- Lógica de Aplicación de Cambios ---
-
-def _apply_changes_to_real_config(temp_cfg: Any, real_cfg: Any, logger: Any):
-    """Compara la config temporal con la real, aplica los cambios y los loguea."""
-    if not logger: return
-    logger.log("Aplicando cambios de configuración general...", "WARN")
-    for attr in dir(temp_cfg):
-        if attr.isupper() and not attr.startswith('_'):
-            new_value = getattr(temp_cfg, attr)
-            if hasattr(real_cfg, attr) and new_value != getattr(real_cfg, attr):
-                logger.log(f"  -> {attr}: '{getattr(real_cfg, attr)}' -> '{new_value}'", "WARN")
-                setattr(real_cfg, attr, new_value)
-
-# --- MENÚ DE EDICIÓN ---
-
-def _show_general_config_menu(temp_cfg: Any) -> bool:
+def _show_general_config_menu(config_module: Any) -> bool: # El tipo ahora es el config_module real
     """Muestra el menú interactivo para editar la configuración general."""
     while True:
         clear_screen()
         print_tui_header("Editor de Configuración General")
 
-        modo_actual = "Paper Trading" if getattr(temp_cfg, 'PAPER_TRADING_MODE', False) else "Live Trading"
-        testnet_actual = "ON" if getattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False) else "OFF"
+        # Leemos directamente del config_module
+        modo_actual = "Paper Trading" if getattr(config_module, 'PAPER_TRADING_MODE', False) else "Live Trading"
+        testnet_actual = "ON" if getattr(config_module, 'UNIVERSAL_TESTNET_MODE', False) else "OFF"
         
         print("\nValores Actuales:")
         print("┌" + "─" * 40 + "┐")
-        print(f"│ {'Exchange':<15}: {getattr(temp_cfg, 'EXCHANGE_NAME', 'N/A').upper():<21} │")
+        print(f"│ {'Exchange':<15}: {getattr(config_module, 'EXCHANGE_NAME', 'N/A').upper():<21} │")
         print(f"│ {'Modo':<15}: {modo_actual:<21} │")
         print(f"│ {'Testnet':<15}: {testnet_actual:<21} │")
+        print(f"│ {'Símbolo Ticker':<15}: {getattr(config_module, 'TICKER_SYMBOL', 'N/A'):<21} │")
         print("└" + "─" * 40 + "┘")
 
         menu_items = [
-            "[1] Exchange", "[2] Modo", "[3] Testnet", None,
-            "[s] Guardar y Volver", "[c] Cancelar (Descartar Cambios)"
+            "[1] Exchange", 
+            "[2] Modo", 
+            "[3] Testnet",
+            "[4] Símbolo del Ticker",
+            None,
+            "[b] Volver al Menú Principal" # Eliminamos las opciones de guardar/cancelar
         ]
-        action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 4: 'save', 5: 'cancel'}
+        action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 3: 'ticker', 5: 'back'}
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
         
         menu = TerminalMenu(menu_items, title="\nSelecciona una opción para editar:", **menu_options)
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # La variable debe llamarse 'action' para que el bloque if/elif funcione.
         action = action_map.get(menu.show())
-        # --- FIN DE LA CORRECCIÓN ---
 
-        if action == 'exchange':
-            sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
-            if sub_choice == 0: setattr(temp_cfg, 'EXCHANGE_NAME', 'bybit')
-        
-        elif action == 'mode':
-            sub_choice = TerminalMenu(["Live Trading", "Paper Trading", None, "[c] Cancelar"], title="\nSelecciona el Modo de Trading:", **MENU_STYLE).show()
-            if sub_choice == 0: setattr(temp_cfg, 'PAPER_TRADING_MODE', False)
-            elif sub_choice == 1: setattr(temp_cfg, 'PAPER_TRADING_MODE', True)
-
-        elif action == 'testnet':
-            sub_choice = TerminalMenu(["ON", "OFF", None, "[c] Cancelar"], title="\nActivar Modo Testnet:", **MENU_STYLE).show()
-            if sub_choice == 0: setattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', True)
-            elif sub_choice == 1: setattr(temp_cfg, 'UNIVERSAL_TESTNET_MODE', False)
-
-        elif action == 'save':
-            print("\nCambios guardados."); time.sleep(1.5); return True
+        try:
+            if action == 'exchange':
+                sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
+                if sub_choice == 0: setattr(config_module, 'EXCHANGE_NAME', 'bybit')
             
-        elif action == 'cancel' or action is None:
-            print("\nCambios descartados."); time.sleep(1.5); return False
+            elif action == 'mode':
+                sub_choice = TerminalMenu(["Live Trading", "Paper Trading", None, "[c] Cancelar"], title="\nSelecciona el Modo de Trading:", **MENU_STYLE).show()
+                if sub_choice == 0: setattr(config_module, 'PAPER_TRADING_MODE', False)
+                elif sub_choice == 1: setattr(config_module, 'PAPER_TRADING_MODE', True)
+
+            elif action == 'testnet':
+                sub_choice = TerminalMenu(["ON", "OFF", None, "[c] Cancelar"], title="\nActivar Modo Testnet:", **MENU_STYLE).show()
+                if sub_choice == 0: setattr(config_module, 'UNIVERSAL_TESTNET_MODE', True)
+                elif sub_choice == 1: setattr(config_module, 'UNIVERSAL_TESTNET_MODE', False)
+            
+            # --- INICIO DE LA MODIFICACIÓN PRINCIPAL ---
+            elif action == 'ticker':
+                current_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A')
+                new_symbol = get_input(
+                    "\nNuevo Símbolo (ej. ETHUSDT)", 
+                    str, 
+                    current_symbol
+                )
+                
+                # Delegamos la validación y actualización al BotController
+                print(f"Validando '{new_symbol.upper()}' con el exchange...")
+                success, message = bc_api.validate_and_update_ticker_symbol(new_symbol)
+                
+                print(f"\nResultado: {message}")
+                time.sleep(2.5) # Damos tiempo al usuario para leer el resultado
+            # --- FIN DE LA MODIFICACIÓN PRINCIPAL ---
+                
+            elif action == 'back' or action is None:
+                return # Simplemente salimos, ya no hay estado que devolver
+        
+        except UserInputCancelled:
+            print("\n\nEdición cancelada."); time.sleep(1)
