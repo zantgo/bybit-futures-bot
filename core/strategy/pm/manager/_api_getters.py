@@ -38,7 +38,10 @@ class _ApiGetters:
         if not long_op or not short_op:
             return {"error": "Operaciones Long/Short no disponibles en el OM"}
 
-        ticker_data = self._exchange.get_ticker(getattr(self._config, 'TICKER_SYMBOL', 'N/A'))
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se corrige la forma de obtener el símbolo del ticker desde la configuración.
+        ticker_data = self._exchange.get_ticker(self._config.BOT_CONFIG["TICKER"]["SYMBOL"])
+        # --- FIN DE LA MODIFICACIÓN ---
         current_market_price = ticker_data.price if ticker_data else (self.get_current_market_price() or 0.0)
 
         open_longs = long_op.posiciones_activas.get('long', [])
@@ -46,13 +49,8 @@ class _ApiGetters:
         
         unrealized_pnl_long = sum((current_market_price - pos.entry_price) * pos.size_contracts for pos in open_longs)
         unrealized_pnl_short = sum((pos.entry_price - current_market_price) * pos.size_contracts for pos in open_shorts)
-        # total_unrealized_pnl = unrealized_pnl_long + unrealized_pnl_short # Comentado, no se usa directamente
-        
-        # total_realized_pnl_ops = long_op.pnl_realizado_usdt + short_op.pnl_realizado_usdt # Comentado, se usa get_total_pnl_realized()
-        # total_pnl_ops = total_realized_pnl_ops + total_unrealized_pnl # Comentado, no se usa directamente
         
         initial_capital_ops = long_op.capital_inicial_usdt + short_op.capital_inicial_usdt
-        # operation_roi = self._utils.safe_division(total_pnl_ops, initial_capital_ops) * 100 if initial_capital_ops > 0 else 0.0 # Comentado, no se usa
 
         operation_long_pnl = long_op.pnl_realizado_usdt + unrealized_pnl_long
         operation_short_pnl = short_op.pnl_realizado_usdt + unrealized_pnl_short
@@ -94,8 +92,6 @@ class _ApiGetters:
             'tiempo_ejecucion_str': "N/A"
         }
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la referencia a `self._balance_manager` y se exponen los balances lógicos.
         logical_balances_summary = {
             'long': asdict(long_op.balances),
             'short': asdict(short_op.balances)
@@ -106,30 +102,20 @@ class _ApiGetters:
             "operation_mode": display_tendencia,
             "operation_status": op_status_summary,
             "operations_info": operations_info,
-            # "operation_pnl": total_pnl_ops, # Comentado: el PNL total ahora es de la sesión
-            # "operation_roi": operation_roi, # Comentado: el ROI total ahora es de la sesión
             "operation_long_pnl": operation_long_pnl,
             "operation_short_pnl": operation_short_pnl,
             "operation_long_roi": operation_long_roi,
             "operation_short_roi": operation_short_roi,
-            
-            # "bm_balances": self._balance_manager.get_balances_summary(), # Comentado/Eliminado
-            "logical_balances": logical_balances_summary, # Nueva clave con los balances lógicos
-            
+            "logical_balances": logical_balances_summary,
             "open_long_positions_count": len(open_longs),
             "open_short_positions_count": len(open_shorts),
             "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs],
             "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts],
             "total_realized_pnl_session": self.get_total_pnl_realized(),
-
-            # El capital inicial de la sesión es la suma de los capitales de las operaciones.
             "initial_total_capital": initial_capital_ops,
-            # "real_account_balances": self._balance_manager.get_real_balances_cache(), # Comentado/Eliminado
-            
             "session_limits": { "time_limit": self.get_session_time_limit() },
             "current_market_price": current_market_price,
         }
-        # --- FIN DE LA MODIFICACIÓN ---
         return summary_data
 
     def get_unrealized_pnl(self, current_price: float) -> float:

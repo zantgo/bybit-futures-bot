@@ -11,26 +11,21 @@ v23.0 (Capital Lógico por Operación):
 import datetime
 import uuid
 import traceback
-# import json # Comentado, no usado en esta versión.
 from typing import Optional, Dict, Any
 
 try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
-    # --- INICIO DE LA MODIFICACIÓN ---
-    from .._entities import LogicalPosition # Se importa la clase LogicalPosition
-    from dataclasses import asdict # Para convertir LogicalPosition a dict si es necesario
-    # --- FIN DE LA MODIFICACIÓN ---
+    from .._entities import LogicalPosition
+    from dataclasses import asdict
 except ImportError:
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
     class AbstractExchange: pass
     class StandardOrder: pass
-    # --- INICIO DE LA MODIFICACIÓN ---
-    class LogicalPosition: pass # Fallback para LogicalPosition
-    def asdict(obj): return obj.__dict__ # Fallback básico para asdict
-    # --- FIN DE LA MODIFICACIÓN ---
+    class LogicalPosition: pass
+    def asdict(obj): return obj.__dict__
 
 class PositionExecutor:
     """
@@ -40,11 +35,8 @@ class PositionExecutor:
     def __init__(self,
                  config: Any,
                  utils: Any,
-                 # --- INICIO DE LA MODIFICACIÓN ---
-                 # balance_manager: Any, # Comentado/Eliminado: la dependencia del balance_manager
-                 # --- FIN DE LA MODIFICACIÓN ---
                  position_state: Any,
-                 state_manager: Any, # Es la instancia de PositionManager
+                 state_manager: Any,
                  exchange_adapter: AbstractExchange,
                  calculations: Any,
                  helpers: Any,
@@ -53,45 +45,35 @@ class PositionExecutor:
         """
         Inicializa el ejecutor con todas sus dependencias inyectadas.
         """
-        # --- Inyección de Dependencias ---
         self._config = config
         self._utils = utils
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # self._balance_manager = balance_manager # Comentado/Eliminado
-        # --- FIN DE LA MODIFICACIÓN ---
         self._position_state = position_state
-        self._state_manager = state_manager # PositionManager, que ahora gestiona el balance lógico a través de Operacion
+        self._state_manager = state_manager
         self._exchange = exchange_adapter
         self._calculations = calculations
         self._helpers = helpers
         self._closed_position_logger = closed_position_logger
         
-        # --- Cacheo de configuraciones para acceso rápido ---
-        self._symbol = getattr(config, 'TICKER_SYMBOL', 'N/A')
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se corrige la forma de obtener el símbolo del ticker desde la configuración.
+        self._symbol = config.BOT_CONFIG["TICKER"]["SYMBOL"]
+        # --- FIN DE LA MODIFICACIÓN ---
         self._price_prec = int(getattr(config, 'PRICE_PRECISION', 4))
         self._pnl_prec = int(getattr(config, 'PNL_PRECISION', 2))
         
         memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se añaden tsl_activation_pct y tsl_distance_pct a la firma para crear el objeto LogicalPosition.
     def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float, tsl_activation_pct: float, tsl_distance_pct: float) -> Dict[str, Any]:
-    # --- FIN DE LA MODIFICACIÓN ---
         """Orquesta la apertura de una posición a través de la interfaz de exchange."""
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # `logical_position_id` se usará para el objeto, `logical_position_object` para el retorno.
         result = {'success': False, 'api_order_id': None, 'logical_position_object': None, 'message': 'Error no especificado'}
-        # Obtenemos el apalancamiento desde la operación activa a través del PositionManager
         operacion = self._state_manager._om_api.get_operation_by_side(side)
         if not operacion:
             result['message'] = f"Error: No se pudo obtener la operación para el lado '{side}'."
             return result
         leverage = operacion.apalancamiento
-        # --- FIN DE LA MODIFICACIÓN ---
 
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
 
-        # --- 1. Calcular Tamaño y Validar ---
         try:
             calc_qty_result = self._helpers.calculate_and_round_quantity(
                 margin_usdt=margin_to_use, 
@@ -117,14 +99,11 @@ class PositionExecutor:
             memory_logger.log(traceback.format_exc(), level="ERROR")
             return result
         
-        # --- 2. Crear Objeto de la Posición Lógica ---
         logical_position_id = str(uuid.uuid4())
         
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Crear un objeto `LogicalPosition` con todos los parámetros.
         new_position_obj = LogicalPosition(
             id=logical_position_id, 
             entry_timestamp=timestamp, 
@@ -138,13 +117,11 @@ class PositionExecutor:
             ts_peak_price=None, 
             ts_stop_price=None, 
             api_order_id=None,
-            tsl_activation_pct_at_open=tsl_activation_pct, # Añadido
-            tsl_distance_pct_at_open=tsl_distance_pct # Añadido
+            tsl_activation_pct_at_open=tsl_activation_pct,
+            tsl_distance_pct_at_open=tsl_distance_pct
         )
-        result['logical_position_object'] = new_position_obj # Se devuelve el objeto completo
-        # --- FIN DE LA MODIFICACIÓN ---
+        result['logical_position_object'] = new_position_obj
 
-        # --- 3. Ejecutar Orden en el Exchange ---
         execution_success = False
         api_order_id = None
         try:
@@ -163,45 +140,28 @@ class PositionExecutor:
                 execution_success = True
                 api_order_id = order_id_or_error
                 memory_logger.log(f"  -> ÉXITO EXCHANGE: Orden Market aceptada. OrderID: {api_order_id}")
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Eliminada la llamada a self._balance_manager.decrease_used_margin()
-                # self._balance_manager.decrease_used_margin(side, margin_to_use)
-                # --- FIN DE LA MODIFICACIÓN ---
             else:
                 result['message'] = f"Fallo en Exchange al colocar orden Market: {order_id_or_error}"
                 memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
         except Exception as exec_err:
             result['message'] = f"Excepción durante ejecución de orden: {exec_err}"
-            # memory_logger.log(f"ERROR [Exec Open]: {result['message']}", level="ERROR") # Comentada, ya logueada en `result['message']`
-            # memory_logger.log(traceback.format_exc(), level="ERROR") # Comentada, ya logueada en `result['message']`
 
-        # --- 4. Actualizar Estado Interno ---
         if execution_success:
-            new_position_obj.api_order_id = api_order_id # Actualizar el objeto con el ID de la API
-            # El estado lógico (tabla de posiciones) y físico se actualizan AHORA en _private_logic.py
+            new_position_obj.api_order_id = api_order_id
             result['success'] = True
             result['message'] = f"Apertura {side.upper()} exitosa."
         
         result['api_order_id'] = api_order_id
         return result
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # La firma del método `execute_close` cambia para recibir un objeto `LogicalPosition`
     def execute_close(self, position_to_close: LogicalPosition, side: str, exit_price: float, timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
-    # --- FIN DE LA MODIFICACIÓN ---
         """Orquesta el cierre de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se obtiene el ID acortado directamente del objeto.
         pos_id_short = str(position_to_close.id)[-6:]
         memory_logger.log(f"CLOSE [{side.upper()} ID:{pos_id_short}] -> Solicitud para cerrar @ {exit_price:.{self._price_prec}f} (Razón: {exit_reason})", level="INFO")
-        # --- FIN DE LA MODIFICACIÓN ---
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # `size_to_close_float` se obtiene directamente del objeto `position_to_close`.
         size_to_close_float = self._utils.safe_float_convert(position_to_close.size_contracts, 0.0)
-        # --- FIN DE LA MODIFICACIÓN ---
         
         format_qty_result = self._helpers.format_quantity_for_api(size_to_close_float, self._symbol, is_live=True, exchange_adapter=self._exchange)
         if not format_qty_result['success']:
@@ -225,9 +185,8 @@ class PositionExecutor:
             if success:
                 execution_success = True
             else:
-                # Comprobar si el error es porque la posición ya no existe
                 if "position does not exist" in response_msg.lower() or "110001" in response_msg:
-                    execution_success = True # Consideramos éxito si la posición ya está cerrada.
+                    execution_success = True
                     memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
                 else:
                     result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
@@ -235,45 +194,19 @@ class PositionExecutor:
             result['message'] = f"Excepción durante ejecución de cierre: {e}"
 
         if execution_success:
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se usa el objeto `position_to_close` directamente.
-            # Convertimos el objeto `LogicalPosition` a un diccionario para compatibilidad con `calc_res`.
             removed_pos_dict = asdict(position_to_close)
-
-            # Ya no removemos la posición lógica ni actualizamos el balance desde aquí.
-            # Eso lo hace _private_logic.py
-            # removed_pos = self._position_state.remove_logical_position(side, position_index)
-            # if not removed_pos:
-            #     result['message'] = "Ejecución en Exchange OK pero falló al remover posición lógica."
-            #     memory_logger.log(f"ERROR SEVERE [Exec Close]: {result['message']}", level="ERROR")
-            #     return result
 
             calc_res = self._calculations.calculate_pnl_commission_reinvestment(
                 side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
             )
             result.update(calc_res)
             
-            # Eliminada la llamada a self._balance_manager.increase_available_margin()
-            # margin_to_return = removed_pos_dict['margin_usdt'] + calc_res.get('amount_reinvested_in_operational_margin', 0.0)
-            # self._balance_manager.increase_available_margin(side, margin_to_return)
-
-            # La actualización del estado físico y el logging de la posición cerrada se manejan en _private_logic.py
-            # open_positions_now = self._position_state.get_open_logical_positions(side)
-            # if open_positions_now:
-            #     aggs = self._calculations.calculate_physical_aggregates(open_positions_now)
-            #     leverage = self._state_manager.get_leverage()
-            #     liq = self._calculations.calculate_liquidation_price(side, aggs['avg_entry_price'], leverage)
-            #     self._position_state.update_physical_position_state(side, **aggs, liq_price=liq, timestamp=timestamp)
-            # else:
-            #     self._position_state.reset_physical_position_state(side)
-            
-            if self._closed_position_logger and removed_pos_dict: # Usamos el dict local
+            if self._closed_position_logger and removed_pos_dict:
                 log_data = {**removed_pos_dict, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
                 self._closed_position_logger.log_closed_position(log_data)
             
             result['success'] = True
             result['message'] = f"Cierre {side.upper()} ID {pos_id_short} exitoso."
-            # --- FIN DE LA MODIFICACIÓN ---
         
         return result
 

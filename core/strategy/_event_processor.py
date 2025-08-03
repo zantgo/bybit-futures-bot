@@ -151,8 +151,10 @@ class EventProcessor:
             # 4. Comprobar Límites de Sesión (Disyuntores Globales)
             self._check_session_limits(current_price, current_timestamp)
             
-            # 5. Imprimir estado en consola (ahora no hace nada, delegado al Dashboard)
-            self._print_tick_status_to_console(signal_data, current_timestamp, current_price)
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # 5. Se elimina la llamada a la función de impresión que ya no existe.
+            # self._print_tick_status_to_console(signal_data, current_timestamp, current_price)
+            # --- FIN DE LA MODIFICACIÓN ---
 
         except GlobalStopLossException as e:
             self._memory_logger.log(f"GlobalStopLossException capturada en Event Processor: {e}", level="ERROR")
