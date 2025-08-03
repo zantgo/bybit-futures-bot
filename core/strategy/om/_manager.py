@@ -11,20 +11,15 @@ v8.3 (Corrección de Deadlock en Detener Operación - Flujo Síncrono para TUI):
 """
 import datetime
 import uuid
-# --- INICIO DE LA MODIFICACIÓN ---
-import threading # Se mantiene la importación de threading
-# --- FIN DE LA MODIFICACIÓN ---
+import threading
 from typing import Optional, Dict, Any, Tuple
 
 # --- Dependencias del Proyecto ---
 try:
-    # La entidad principal que este manager gestiona.
     from ._entities import Operacion, LogicalBalances
-    # Dependencias inyectadas para logging y configuración
     from core.logging import memory_logger
     import config as config_module
 except ImportError:
-    # Fallbacks para análisis estático y resiliencia
     class Operacion: pass
     class LogicalBalances: pass
     class MemoryLoggerFallback:
@@ -49,14 +44,10 @@ class OperationManager:
         self._memory_logger = memory_logger_instance
         self._initialized: bool = False
         
-        # Atributos principales que almacenan el estado de las operaciones
         self.long_operation: Optional[Operacion] = None
         self.short_operation: Optional[Operacion] = None
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se reemplaza Lock por RLock para permitir llamadas reentrantes desde el mismo hilo.
         self._lock = threading.RLock()
-        # --- FIN DE LA MODIFICACIÓN ---
 
         self.initialize()
 
@@ -101,7 +92,10 @@ class OperationManager:
         Crea o actualiza una operación. Gestiona las transiciones de estado y el ajuste
         dinámico del capital lógico para operaciones activas.
         """
-        from core.strategy.pm import api as pm_api
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Cambiamos la API a la que llamamos. Ahora usamos sm_api.
+        from core.strategy.sm import api as sm_api
+        # --- FIN DE LA MODIFICACIÓN ---
         
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
@@ -147,7 +141,10 @@ class OperationManager:
                         self._memory_logger.log(f"CAPITAL LÓGICO AJUSTADO ({side.upper()}): {diferencia_capital:+.2f}$. Nuevo capital base ROI: {target_operation.capital_inicial_usdt:.2f}$", "WARN")
 
                 if estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
-                    summary = pm_api.get_session_summary()
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Usamos la API correcta (sm_api) para obtener el resumen.
+                    summary = sm_api.get_session_summary()
+                    # --- FIN DE LA MODIFICACIÓN ---
                     current_price = summary.get('current_market_price', 0.0)
                     cond_type = target_operation.tipo_cond_entrada
                     cond_value = target_operation.valor_cond_entrada
@@ -251,7 +248,6 @@ class OperationManager:
             if hasattr(target_operation, 'reset'):
                  target_operation.reset()
             else:
-                 # Fallback por si la entidad no tuviera el método reset
                  self.initialize()
                  target_operation = self._get_operation_by_side_internal(side)
         

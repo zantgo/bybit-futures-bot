@@ -1,5 +1,3 @@
-# core/strategy/_event_processor.py
-
 """
 Orquestador Principal del Procesamiento de Eventos.
 
@@ -30,10 +28,9 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.strategy.pm import PositionManager
     from core.strategy.ta import TAManager
-    from core.strategy.signal import SignalGenerator # <-- INICIO DEL CAMBIO: Tipado para SignalGenerator
+    from core.strategy.signal import SignalGenerator
 
 # --- Importaciones de Módulos del Proyecto ---
-# Se elimina la importación directa de 'signal', ya que se recibirá por inyección.
 try:
     import config
     from core import utils
@@ -62,7 +59,6 @@ class EventProcessor:
         """
         Inicializa el EventProcessor inyectando todas sus dependencias.
         """
-        # Inyección de dependencias a través del constructor
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
         self._memory_logger = dependencies.get('memory_logger_module')
@@ -70,16 +66,11 @@ class EventProcessor:
         self._pm_api = dependencies.get('position_manager_api_module')
         self._om_api = dependencies.get('operation_manager_api_module')
         
-        # Se reciben INSTANCIAS de TAManager y SignalGenerator
         self._ta_manager: 'TAManager' = dependencies.get('ta_manager') 
         self._signal_generator: 'SignalGenerator' = dependencies.get('signal_generator')
-        # <-- FIN DEL CAMBIO
 
-        # Atributos de estado que antes eran globales, ahora son de instancia
         self._operation_mode: str = "unknown"
-        # --- INICIO DE LA MODIFICACIÓN ---
         self._latest_signal_data: Dict[str, Any] = {}
-        # --- FIN DE LA MODIFICACIÓN ---
         self._global_stop_loss_event: Optional[threading.Event] = None
         self._pm_instance: Optional['PositionManager'] = None
         self._global_stop_loss_triggered: bool = False
@@ -97,14 +88,11 @@ class EventProcessor:
         """
         self._memory_logger.log("Event Processor: Inicializando orquestador...", level="INFO")
 
-        # Asignar dependencias específicas de la sesión
         self._operation_mode = operation_mode
         self._global_stop_loss_event = global_stop_loss_event
         self._pm_instance = pm_instance
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        self._latest_signal_data = {} # Resetear al iniciar sesión
-        # --- FIN DE LA MODIFICACIÓN ---
+        self._latest_signal_data = {}
         self._previous_raw_event_price = np.nan
         self._is_first_event = True
         self._global_stop_loss_triggered = False
@@ -112,15 +100,14 @@ class EventProcessor:
         if self._ta_manager:
             self._ta_manager.initialize()
         
-        # (El SignalGenerator no requiere inicialización por ahora, pero el patrón está listo si se necesitara)
+        if self._signal_generator:
+            self._signal_generator.initialize()
         
         self._memory_logger.log("Event Processor: Orquestador inicializado.", level="INFO")
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def get_latest_signal_data(self) -> Dict[str, Any]:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def has_global_stop_loss_triggered(self) -> bool:
         """
@@ -164,7 +151,7 @@ class EventProcessor:
             # 4. Comprobar Límites de Sesión (Disyuntores Globales)
             self._check_session_limits(current_price, current_timestamp)
             
-            # 5. Imprimir estado en consola
+            # 5. Imprimir estado en consola (ahora no hace nada, delegado al Dashboard)
             self._print_tick_status_to_console(signal_data, current_timestamp, current_price)
 
         except GlobalStopLossException as e:
@@ -265,22 +252,15 @@ class EventProcessor:
         raw_event = {'timestamp': timestamp, 'price': price, 'increment': increment, 'decrement': decrement}
         
         processed_data = None
-        # La variable TA_CALCULATE_PROCESSED_DATA ahora es SESSION_CONFIG["TA"]["ENABLED"]
         if self._ta_manager and self._config.SESSION_CONFIG["TA"]["ENABLED"]:
             processed_data = self._ta_manager.process_raw_price_event(raw_event)
         
-        # INICIO DEL CAMBIO: Usar la instancia self._signal_generator
         signal_data = {"signal": "HOLD_NO_TA"}
         if self._signal_generator and processed_data:
              signal_data = self._signal_generator.generate_signal(processed_data)
-        # FIN DEL CAMBIO
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Almacenar la señal generada para que sea accesible
         self._latest_signal_data = signal_data
-        # --- FIN DE LA MODIFICACIÓN ---
         
-        # La variable LOG_SIGNAL_OUTPUT ahora es BOT_CONFIG["LOGGING"]["LOG_SIGNAL_OUTPUT"]
         if self._signal_logger and self._config.BOT_CONFIG["LOGGING"]["LOG_SIGNAL_OUTPUT"]:
             self._signal_logger.log_signal_event(signal_data.copy())
         
@@ -290,7 +270,6 @@ class EventProcessor:
     def _check_session_limits(self, current_price: float, timestamp: datetime.datetime):
         if not (self._pm_api and self._pm_api.is_initialized()) or self._global_stop_loss_triggered: return
 
-        # La configuración de límites de tiempo ahora está en SESSION_CONFIG
         time_limit_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]["MAX_DURATION"]
         max_minutes, action = time_limit_cfg.get("MINUTES", 0), time_limit_cfg.get("ACTION", "NEUTRAL").upper()
         
@@ -330,37 +309,3 @@ class EventProcessor:
                 self._pm_api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
                 if self._global_stop_loss_event: self._global_stop_loss_event.set()
                 raise GlobalStopLossException(msg)
-
-    def _print_tick_status_to_console(self, signal_data: Dict, timestamp: datetime.datetime, price: float):
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se comenta toda la lógica de impresión para que el EventProcessor ya no
-        # escriba en la consola. La responsabilidad ahora es 100% del Dashboard.
-        
-        # if self._operation_mode.startswith(('live')):
-        #     try:
-        #         ts_str = self._utils.format_datetime(timestamp)
-        #         price_prec = self._config.PRECISION_FALLBACKS["PRICE_PRECISION"]
-        #         price_str = f"{price:.{price_prec}f}"
-        #         summary = self._pm_api.get_position_summary()
-        #         op_long = self._om_api.get_operation_by_side('long')
-        #         op_short = self._om_api.get_operation_by_side('short')
-        #         if not op_long or not op_short: return
-        # 
-        #         def get_op_display(op): return f"{op.tendencia}" if op.estado == 'ACTIVA' else op.estado.upper()
-        #         status_long, status_short = f"L: {get_op_display(op_long)}", f"S: {get_op_display(op_short)}"
-        #         hdr = f" TICK @ {ts_str} | Precio: {price_str} | Ops: {status_long}, {status_short} "
-        #         print("\n" + f"{hdr:=^80}")
-        #         print(f"  TA:  EMA={signal_data.get('ema', 'N/A'):<15} W.Inc={signal_data.get('weighted_increment', 'N/A'):<8} W.Dec={signal_data.get('weighted_decrement', 'N/A'):<8}")
-        #         print(f"  SIG: {signal_data.get('signal', 'N/A'):<15} | Razón: {signal_data.get('signal_reason', 'N/A')}")
-        #         if summary and 'error' not in summary:
-        #             max_pos_l = op_long.max_posiciones_logicas if op_long.estado != 'DETENIDA' else 'N/A'
-        #             max_pos_s = op_short.max_posiciones_logicas if op_short.estado != 'DETENIDA' else 'N/A'
-        #             print(f"  POS: Longs={summary.get('open_long_positions_count', 0)}/{max_pos_l} | Shorts={summary.get('open_short_positions_count', 0)}/{max_pos_s} | PNL Sesión: {summary.get('total_realized_pnl_session', 0.0):+.4f} USDT")
-        #         else: print(f"  POS: Error obteniendo resumen del PM: {summary.get('error', 'N/A')}")
-        #         print("=" * 80)
-        #     except Exception as e:
-        #         print(f"ERROR [Print Tick Status]: {e}")
-        
-        # La función ahora no hace nada para evitar la impresión conflictiva.
-        pass
-        # --- FIN DE LA MODIFICACIÓN ---

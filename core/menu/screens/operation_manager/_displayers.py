@@ -15,20 +15,11 @@ v2.0 (Fallback Robusto):
 from typing import Any, Dict
 import datetime
 
-# --- INICIO DE LA MODIFICACIÓN: Clase de Fallback Robusta ---
 try:
     from core.strategy.om._entities import Operacion
 except ImportError:
-    # (Línea antigua comentada)
-    # class Operacion: pass
-
-    # Se reemplaza la clase vacía con una que simula la estructura de la
-    # entidad 'Operacion' real. Esto previene un AttributeError si la
-    # importación principal falla, permitiendo que la TUI muestre un
-    # estado por defecto en lugar de fallar catastróficamente.
     class Operacion:
         def __init__(self):
-            # Atributos usados en _display_operation_details
             self.estado = 'DESCONOCIDO'
             self.tendencia = 'N/A'
             self.tamaño_posicion_base_usdt = 0.0
@@ -39,14 +30,10 @@ except ImportError:
             self.tsl_distancia_pct = 0.0
             self.sl_posicion_individual_pct = 0.0
             self.accion_al_finalizar = 'N/A'
-            
-            # Atributos usados en _display_capital_stats
             self.pnl_realizado_usdt = 0.0
             self.capital_inicial_usdt = 0.0
             self.comercios_cerrados_contador = 0
-            self.comisiones_totales_usdt = 0.0 # Atributo clave que faltaba
-            
-            # Atributos usados en _display_operation_conditions
+            self.comisiones_totales_usdt = 0.0
             self.tipo_cond_entrada = 'N/A'
             self.valor_cond_entrada = 0.0
             self.tipo_cond_salida = None
@@ -58,8 +45,6 @@ except ImportError:
             self.sl_roi_pct = None
             self.tiempo_maximo_min = None
             self.max_comercios = None
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -69,7 +54,7 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- Funciones de Visualización (sin cambios, se mantiene el código original) ---
+# --- Funciones de Visualización ---
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     """Muestra la sección de parámetros de la operación para un lado específico."""
@@ -145,7 +130,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     trades_abiertos = summary.get(f'open_{side}_positions_count', 0)
     trades_cerrados = operacion.comercios_cerrados_contador
     
-    # Esta línea ahora es segura gracias a la clase de fallback robusta.
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
 
     ganancias_netas = total_pnl - comisiones_totales
@@ -235,3 +219,9 @@ def _display_operation_conditions(operacion: Operacion):
     else: 
         for cond in exit_conditions:
             print(f"    - {cond}")
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Añadimos la línea que muestra la acción final de la operación.
+    if operacion.estado != 'DETENIDA':
+        print(f"  Acción de Salida Automática: {operacion.accion_al_finalizar.upper()}")
+    # --- FIN DE LA MODIFICACIÓN ---

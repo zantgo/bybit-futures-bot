@@ -35,8 +35,11 @@ class _Workflow:
 
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """Revisa SL, TS y solicitudes de cierre forzoso para todas las posiciones abiertas en cada tick."""
-        if not self._initialized or not self._executor or not self._private_logic:
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la comprobación 'or not self._private_logic' que causaba el AttributeError.
+        if not self._initialized or not self._executor:
             return
+        # --- FIN DE LA MODIFICACIÓN ---
 
         for side in ['long', 'short']:
             # Obtenemos la operación específica para el lado que estamos revisando
@@ -78,7 +81,9 @@ class _Workflow:
                     continue # Si salta SL, no necesitamos comprobar TS
                 
                 # Actualización y comprobación de Trailing Stop
-                self._private_logic._update_trailing_stop(side, pos, i, current_price)
+                # La siguiente línea asume que la instancia 'self' tiene acceso a '_private_logic'
+                # lo cual es correcto debido a la herencia múltiple en PositionManager.
+                self._update_trailing_stop(side, pos, i, current_price)
                 
                 # Leemos la posición actualizada del estado del manager
                 operacion_actualizada = self._om_api.get_operation_by_side(side)
@@ -95,7 +100,7 @@ class _Workflow:
 
             # Cerramos las posiciones marcadas, iterando en orden inverso para no alterar los índices
             for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
-                trade_result = self._private_logic._close_logical_position(
+                trade_result = self._close_logical_position(
                     side, 
                     close_info['index'], 
                     current_price, 
