@@ -1,5 +1,3 @@
-# core/strategy/pm/_calculations.py
-
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
@@ -141,8 +139,14 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
 
             entry_nominal_value = entry_price * size_contracts
             exit_nominal_value = exit_price * size_contracts
+            
+            # --- INICIO DE LA MODIFICACIÓN: Aplicar comisión a entrada y salida ---
+            # La fórmula anterior podía estar calculando la comisión incorrectamente.
+            # Se corrige para que la comisión se aplique al valor nominal de la entrada MÁS el de la salida.
             if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
+                # commission_usdt = (abs(exit_nominal_value)) * commission_rate # (Línea antigua comentada conceptualmente)
                 commission_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * commission_rate
+            # --- FIN DE LA MODIFICACIÓN ---
 
             pnl_net_usdt = pnl_gross_usdt - commission_usdt
 

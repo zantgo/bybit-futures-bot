@@ -53,9 +53,6 @@ def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool,
         return False, "OM no instanciado"
     return _om_instance.create_or_update_operation(side, params)
 
-# --- INICIO DE LA SOLUCIÓN ---
-# AÑADIR ESTE BLOQUE COMPLETO AL FINAL DEL ARCHIVO
-
 def pausar_operacion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para pausar la operación."""
     if not _om_instance:
@@ -78,8 +75,6 @@ def activar_por_condicion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para activar la operación cuando se cumple una condición."""
     if not _om_instance:
         return False, "OM no instanciado"
-    # Este método podría no necesitar ser público, pero lo añadimos por completitud.
-    # Si solo lo llama el EventProcessor, podría ser un método privado.
     return _om_instance.activar_por_condicion(side)
 
 def detener_operacion(side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
@@ -87,6 +82,18 @@ def detener_operacion(side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, 
     if not _om_instance:
         return False, "OM no instanciado"
     return _om_instance.detener_operacion(side, forzar_cierre_posiciones)
+
+def actualizar_pnl_realizado(side: str, pnl_amount: float):
+    """Delega la llamada para actualizar el PNL realizado de una operación."""
+    if _om_instance:
+        _om_instance.actualizar_pnl_realizado(side, pnl_amount)
+
+# --- INICIO DE LA MODIFICACIÓN: Añadir nueva función para comisiones ---
+def actualizar_comisiones_totales(side: str, fee_amount: float):
+    """Delega la llamada para actualizar las comisiones totales de una operación."""
+    if _om_instance:
+        _om_instance.actualizar_comisiones_totales(side, fee_amount)
+# --- FIN DE LA MODIFICACIÓN ---
 
 def revisar_y_transicionar_a_detenida(side: str):
     """Delega la llamada para revisar si una operación pausada debe detenerse."""

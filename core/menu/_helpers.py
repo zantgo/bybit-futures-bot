@@ -22,6 +22,9 @@ MENU_STYLE = {
     "clear_screen": True,
 }
 
+# La constante RESET_COLOR ya fue añadida en la corrección anterior, se mantiene.
+RESET_COLOR = "\033[0m"
+
 # --- Sistema de Ayuda en Pantalla ---
 HELP_TEXTS = {
     "dashboard_main": textwrap.dedent("""
@@ -62,18 +65,35 @@ def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%
     except (ValueError, TypeError):
         return "Invalid DateTime"
 
-def print_tui_header(title: str, width: int = 80):
-    timestamp_str = format_datetime_utc(datetime.datetime.now())
+# --- INICIO DE LA MODIFICACIÓN: Actualizar la firma de la función ---
+# def print_tui_header(title: str, width: int = 80): (LÍNEA ANTIGUA COMENTADA CONCEPTUALMENTE)
+#     # La versión del código que me proporcionaste tiene una implementación de cabecera con timestamp. La mantengo intacta.
+#     timestamp_str = format_datetime_utc(datetime.datetime.now())
+#     print("=" * width)
+#     print(f"|{title.center(width - 2)}|")
+#     if timestamp_str: print(f"|{timestamp_str.center(width - 2)}|")
+#     print("=" * width)
+
+def print_tui_header(title: str, subtitle: Optional[str] = None, width: int = 90):
+    """
+    Imprime una cabecera TUI estandarizada, ahora con soporte para subtítulo.
+    - Se añade 'subtitle' como argumento opcional para solucionar el TypeError.
+    - Se ajusta el 'width' por defecto a 90 para mayor consistencia.
+    - Se simplifica el formato para evitar el uso de '|' y centrar el texto directamente.
+    """
     print("=" * width)
-    print(f"|{title.center(width - 2)}|")
-    if timestamp_str: print(f"|{timestamp_str.center(width - 2)}|")
+    print(f"{title.center(width)}")
+    # Solo imprime el subtítulo si se proporciona uno.
+    if subtitle:
+        print(f"{subtitle.center(width)}")
     print("=" * width)
+# --- FIN DE LA MODIFICACIÓN ---
 
 class UserInputCancelled(Exception):
     """Excepción para ser lanzada cuando el usuario cancela un wizard de entrada."""
     pass
 
-# --- INICIO DE LA VERSIÓN CORREGIDA Y DEFINITIVA ---
+# --- El resto del código permanece intacto ---
 def get_input(
     prompt: str,
     type_func: Callable,
@@ -137,7 +157,6 @@ def get_input(
             print(f"Error: Entrada inválida. Introduce un valor de tipo '{type_func.__name__}'.")
         except Exception as e:
             print(f"Error inesperado: {e}")
-# --- FIN DE LA VERSIÓN CORREGIDA Y DEFINITIVA ---
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):
     print(f"\n--- {title} {'-' * (76 - len(title))}")

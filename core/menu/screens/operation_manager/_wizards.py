@@ -1,15 +1,10 @@
 """
 Módulo de Asistentes del Panel de Control de Operación.
 
-v9.1 (Refactor de Configuración):
-- El asistente ahora lee los valores por defecto para nuevas operaciones
-  desde el diccionario `config.OPERATION_DEFAULTS`.
-
-v9.0 (Capital Lógico):
-- El `_operation_setup_wizard` ahora solicita explícitamente al usuario que defina
-  el "Capital Lógico Operativo" al configurar o modificar una operación.
-- Este valor se pasa al OperationManager para inicializar o ajustar el `LogicalBalances`
-  de la operación.
+v9.3 (UX Mejora en Detener Operación):
+- Se añade `_stop_operation_wizard` para manejar la acción de detener una
+  operación, proporcionando feedback visual durante la llamada bloqueante
+  y evitando que la TUI se congele.
 """
 import time
 from typing import Any, Dict, Optional
@@ -24,6 +19,7 @@ from ..._helpers import (
     clear_screen,
     print_tui_header,
     get_input,
+    press_enter_to_continue, # Importado para la nueva UX
     MENU_STYLE,
     UserInputCancelled
 )
@@ -114,13 +110,7 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
              print(f"  -> Capital Lógico establecido en: {new_capital:.2f} USDT")
 
         # --- SECCIÓN 3: PARÁMETROS DE TRADING ---
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
         use_config_defaults = not is_modification
-        # --- (COMENTADO) ---
-        # default_base_size = getattr(config_module, 'POSITION_BASE_SIZE_USDT', 1.0) if use_config_defaults else current_op.tamaño_posicion_base_usdt
-        # default_max_pos = getattr(config_module, 'POSITION_MAX_LOGICAL_POSITIONS', 5) if use_config_defaults else current_op.max_posiciones_logicas
-        # default_leverage = getattr(config_module, 'POSITION_LEVERAGE', 10.0) if use_config_defaults else current_op.apalancamiento
-        # --- (CORREGIDO) ---
         default_base_size = config_module.OPERATION_DEFAULTS["CAPITAL"]["BASE_SIZE_USDT"] if use_config_defaults else current_op.tamaño_posicion_base_usdt
         default_max_pos = config_module.OPERATION_DEFAULTS["CAPITAL"]["MAX_POSITIONS"] if use_config_defaults else current_op.max_posiciones_logicas
         default_leverage = config_module.OPERATION_DEFAULTS["CAPITAL"]["LEVERAGE"] if use_config_defaults else current_op.apalancamiento
@@ -131,15 +121,13 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         params_to_update['apalancamiento'] = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
 
         print(f"\n--- 4. Riesgo por Posición (Opcional, Enter para desactivar) ---")
-        # --- (CORREGIDO) ---
         default_sl_pct = config_module.OPERATION_DEFAULTS["RISK"]["INDIVIDUAL_SL_PCT"] if use_config_defaults else current_op.sl_posicion_individual_pct
         default_tsl_act = config_module.OPERATION_DEFAULTS["RISK"]["TSL_ACTIVATION_PCT"] if use_config_defaults else current_op.tsl_activacion_pct
         default_tsl_dist = config_module.OPERATION_DEFAULTS["RISK"]["TSL_DISTANCE_PCT"] if use_config_defaults else current_op.tsl_distancia_pct
         
-        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=default_sl_pct, min_val=0.0, is_optional=True) or 0.0
-        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=default_tsl_act, min_val=0.0, is_optional=True) or 0.0
-        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=default_tsl_dist, min_val=0.0, is_optional=True) or 0.0
-        # --- FIN DE LA MODIFICACIÓN ---
+        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=default_sl_pct, min_val=0.0, is_optional=True)
+        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=default_tsl_act, min_val=0.0, is_optional=True)
+        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=default_tsl_dist, min_val=0.0, is_optional=True)
 
         # --- SECCIÓN 5: CONDICIONES DE SALIDA DE LA OPERACIÓN ---
         print(f"\n--- 5. Condiciones de Salida de la Operación (Opcional) ---")
@@ -206,38 +194,18 @@ def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = Fals
         print(f"\n{msg}"); time.sleep(2)
 
 
-def _force_stop_wizard(om_api: Any, pm_api: Any, side: str):
-    """
-    Asistente para forzar la finalización de la operación para un lado específico.
-    """
-    WIZARD_MENU_STYLE = MENU_STYLE.copy()
-    WIZARD_MENU_STYLE['clear_screen'] = False
-
-    title = f"¿Cómo deseas finalizar la operación {side.upper()}?"
-    end_menu_items = [
-        "[1] Mantener posiciones abiertas y finalizar operación", 
-        f"[2] Cerrar todas las posiciones {side.upper()} y finalizar operación", 
-        None, 
-        "[c] Cancelar"
-    ]
-    
-    choice_menu = TerminalMenu(
-        end_menu_items,
-        title=title,
-        **WIZARD_MENU_STYLE
-    )
-    choice = choice_menu.show()
-
-    if choice in [0, 1]:
-        success, msg = om_api.detener_operacion(side, forzar_cierre_posiciones=(choice == 1))
-        print(f"\n{msg}")
-        time.sleep(2.5)
+# --- INICIO DE LA MODIFICACIÓN: La función _stop_operation_wizard ha sido eliminada ---
+# --- FIN DE LA MODIFICACIÓN ---
 
 
 def _force_close_all_wizard(pm_api: Any, side: str):
     """
-    Asistente simplificado para el cierre de pánico de posiciones para un lado específico.
+    Asistente mejorado para el cierre de pánico de posiciones.
+    Proporciona feedback visual durante y después de la operación bloqueante.
     """
+    if not TerminalMenu:
+        print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
+        
     summary = pm_api.get_position_summary()
     position_count = summary.get(f'open_{side}_positions_count', 0)
 
@@ -257,13 +225,24 @@ def _force_close_all_wizard(pm_api: Any, side: str):
         title=title,
         **WIZARD_MENU_STYLE
     )
+
     if confirm_menu.show() == 0:
-        print(f"\nEnviando órdenes de cierre para posiciones {side.upper()}, por favor espera...")
-        closed_successfully = pm_api.close_all_logical_positions(side, reason="PANIC_CLOSE_ALL")
-        
-        if closed_successfully:
-            print(f"\nÉXITO: Todas las posiciones {side.upper()} han sido enviadas a cerrar.")
+        clear_screen()
+        print_tui_header(f"CIERRE DE PÁNICO ({side.upper()})")
+        print("\n\033[93mENVIANDO ÓRDENES DE CIERRE... POR FAVOR, ESPERE.\033[0m")
+        print("Esta operación puede tardar unos segundos y la pantalla no responderá.")
+
+        try:
+            success, message = pm_api.close_all_logical_positions(side, reason="PANIC_CLOSE_ALL")
+        except Exception as e:
+            success = False
+            message = f"Ocurrió una excepción inesperada al llamar a la API: {e}"
+
+        clear_screen()
+        print_tui_header(f"CIERRE DE PÁNICO ({side.upper()}) - RESULTADO")
+        if success:
+            print(f"\n\033[92mÉXITO:\033[0m {message}")
         else:
-            print(f"\nFALLO: No se pudieron enviar las órdenes de cierre para {side.upper()}. Revisa los logs.")
-        
-        time.sleep(3)
+            print(f"\n\033[91mERROR:\033[0m {message}")
+            
+        press_enter_to_continue()

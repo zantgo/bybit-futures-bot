@@ -44,35 +44,49 @@ class _ApiActions:
         """Cierra una posición lógica específica por su índice."""
         price = self.get_current_market_price()
         if not price: return False, "No se pudo obtener el precio de mercado actual."
-        success = self._close_logical_position(side, index, price, datetime.datetime.now(timezone.utc), reason="MANUAL")
+        # _close_logical_position devuelve un dict, debemos comprobar el éxito
+        result = self._close_logical_position(side, index, price, datetime.datetime.now(timezone.utc), reason="MANUAL")
+        success = result and result.get('success', False)
         return (True, f"Orden de cierre para {side.upper()} #{index} enviada.") if success else (False, f"Fallo al enviar orden de cierre.")
 
-    def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> bool:
-        """Cierra TODAS las posiciones lógicas de un lado."""
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
+        """
+        Cierra TODAS las posiciones lógicas de un lado.
+        Ahora devuelve una tupla (bool, str) con el resultado.
+        """
         price = self.get_current_market_price()
         if not price: 
-            self._memory_logger.log(f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}.", level="ERROR")
-            return False
+            msg = f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}."
+            self._memory_logger.log(msg, level="ERROR")
+            return False, msg
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Se obtiene la operación específica del lado que se está cerrando.
         operacion = self._om_api.get_operation_by_side(side)
-        # --- FIN DE LA CORRECCIÓN ---
         
         if not operacion:
-            self._memory_logger.log(f"CIERRE TOTAL FALLIDO: No se encontró la operación para el lado {side.upper()}.", level="ERROR")
-            return False
+            msg = f"CIERRE TOTAL FALLIDO: No se encontró la operación para el lado {side.upper()}."
+            self._memory_logger.log(msg, level="ERROR")
+            return False, msg
         
-        # El resto de la lógica no cambia, ya que opera sobre el 'side' correcto.
-        # Se accede a .get() para evitar un KeyError si no hay posiciones de ese lado en el diccionario.
-        count = len(operacion.posiciones_activas.get(side, []))
+        positions_to_close = list(operacion.posiciones_activas.get(side, []))
+        count = len(positions_to_close)
+        
         if count == 0:
-            return True
+            return True, f"No hay posiciones {side.upper()} para cerrar."
         
         self._memory_logger.log(f"Iniciando cierre de {count} posiciones del lado {side.upper()}...", "INFO")
         
+        success_count = 0
         # Iterar en orden inverso para evitar problemas de índice al eliminar elementos.
         for i in range(count - 1, -1, -1):
-            self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
+            result = self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
+            if result and result.get('success', False):
+                success_count += 1
         
-        return True
+        if success_count == count:
+            return True, f"Éxito: Se enviaron órdenes de cierre para las {count} posiciones {side.upper()}."
+        else:
+            msg = f"Advertencia: Solo se pudieron cerrar {success_count} de {count} posiciones {side.upper()}."
+            self._memory_logger.log(msg, level="WARN")
+            return False, msg
+    # --- FIN DE LA MODIFICACIÓN ---

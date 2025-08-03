@@ -5,13 +5,61 @@ Contiene todas las funciones auxiliares cuya única responsabilidad es
 mostrar (imprimir en la consola) secciones de información específicas, como
 los detalles de la operación, las estadísticas de capital o las tablas de posiciones.
 Estas funciones son "vistas puras": solo renderizan los datos que reciben.
+
+v2.0 (Fallback Robusto):
+- La clase de fallback para 'Operacion' ahora incluye todos los atributos
+  necesarios con valores por defecto. Esto previene un `AttributeError` si
+  la importación principal falla y asegura que la TUI pueda renderizar un
+  estado vacío en lugar de crashear.
 """
 from typing import Any, Dict
+import datetime
 
+# --- INICIO DE LA MODIFICACIÓN: Clase de Fallback Robusta ---
 try:
     from core.strategy.om._entities import Operacion
 except ImportError:
-    class Operacion: pass
+    # (Línea antigua comentada)
+    # class Operacion: pass
+
+    # Se reemplaza la clase vacía con una que simula la estructura de la
+    # entidad 'Operacion' real. Esto previene un AttributeError si la
+    # importación principal falla, permitiendo que la TUI muestre un
+    # estado por defecto en lugar de fallar catastróficamente.
+    class Operacion:
+        def __init__(self):
+            # Atributos usados en _display_operation_details
+            self.estado = 'DESCONOCIDO'
+            self.tendencia = 'N/A'
+            self.tamaño_posicion_base_usdt = 0.0
+            self.apalancamiento = 0.0
+            self.max_posiciones_logicas = 0
+            self.tiempo_inicio_ejecucion = None
+            self.tsl_activacion_pct = 0.0
+            self.tsl_distancia_pct = 0.0
+            self.sl_posicion_individual_pct = 0.0
+            self.accion_al_finalizar = 'N/A'
+            
+            # Atributos usados en _display_capital_stats
+            self.pnl_realizado_usdt = 0.0
+            self.capital_inicial_usdt = 0.0
+            self.comercios_cerrados_contador = 0
+            self.comisiones_totales_usdt = 0.0 # Atributo clave que faltaba
+            
+            # Atributos usados en _display_operation_conditions
+            self.tipo_cond_entrada = 'N/A'
+            self.valor_cond_entrada = 0.0
+            self.tipo_cond_salida = None
+            self.valor_cond_salida = None
+            self.tsl_roi_activacion_pct = None
+            self.tsl_roi_distancia_pct = None
+            self.tsl_roi_activo = False
+            self.tsl_roi_peak_pct = 0.0
+            self.sl_roi_pct = None
+            self.tiempo_maximo_min = None
+            self.max_comercios = None
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -21,7 +69,7 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- Funciones de Visualización ---
+# --- Funciones de Visualización (sin cambios, se mantiene el código original) ---
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     """Muestra la sección de parámetros de la operación para un lado específico."""
@@ -37,24 +85,38 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     
     pos_abiertas = summary.get(f'open_{side}_positions_count', 0)
     pos_total = operacion.max_posiciones_logicas
+
+    fecha_activacion_str = "N/A"
+    tiempo_ejecucion_str = "N/A"
+    if operacion.tiempo_inicio_ejecucion:
+        fecha_activacion_str = operacion.tiempo_inicio_ejecucion.strftime('%Y-%m-%d %H:%M:%S')
+        duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
+        total_seconds = int(duration.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
     
     col1 = {
         "Tendencia": f"{color}{tendencia}{reset}",
         "Tamaño Base": f"{operacion.tamaño_posicion_base_usdt:.2f}$",
         "Apalancamiento": f"{operacion.apalancamiento:.1f}x",
-        "Posiciones": f"{pos_abiertas} / {pos_total}"
+        "Posiciones": f"{pos_abiertas} / {pos_total}",
+        "Fecha Activacion": fecha_activacion_str
     }
     col2 = {
         "TSL Activación": f"{operacion.tsl_activacion_pct}%",
         "TSL Distancia": f"{operacion.tsl_distancia_pct}%",
         "SL Individual": f"{operacion.sl_posicion_individual_pct}%",
-        "Acción Final": operacion.accion_al_finalizar
+        "Acción Final": operacion.accion_al_finalizar,
+        "Tiempo Activa": tiempo_ejecucion_str
     }
+
     max_key_len1 = max(len(k) for k in col1.keys())
     max_key_len2 = max(len(k) for k in col2.keys())
     keys1, keys2 = list(col1.keys()), list(col2.keys())
     for i in range(len(keys1)):
-        k1, v1, k2, v2 = keys1[i], col1[keys1[i]], keys2[i], col2[keys2[i]]
+        k1, v1 = keys1[i], col1[keys1[i]]
+        k2, v2 = (keys2[i], col2[keys2[i]]) if i < len(keys2) else ("", "")
         print(f"  {k1:<{max_key_len1}}: {v1:<22} |  {k2:<{max_key_len2}}: {v2}")
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
@@ -65,7 +127,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print(f"  (La operación {side.upper()} está DETENIDA y no tiene capital asignado)")
         return
 
-    # Calcular PNL y ROI específicos para esta operación
     unrealized_pnl = 0.0
     for pos_data in summary.get(f'open_{side}_positions', []):
         entry = pos_data.get('entry_price', 0.0)
@@ -77,32 +138,41 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     total_pnl = realized_pnl + unrealized_pnl
     initial_capital = operacion.capital_inicial_usdt
     roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
-
+    
     pnl_color, reset = ("\033[92m" if total_pnl >= 0 else "\033[91m"), "\033[0m"
     capital_actual = initial_capital + realized_pnl
+
+    trades_abiertos = summary.get(f'open_{side}_positions_count', 0)
+    trades_cerrados = operacion.comercios_cerrados_contador
     
-    # Manejar el tiempo de ejecución
-    tiempo_ejecucion_str = "N/A"
-    if operacion.tiempo_inicio_ejecucion:
-        import datetime
-        duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
-        total_seconds = int(duration.total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+    # Esta línea ahora es segura gracias a la clase de fallback robusta.
+    comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
 
-    col1 = {"Capital Inicial": f"{initial_capital:.2f}$", "Capital Actual": f"{capital_actual:.2f}$", "Tiempo Activa": tiempo_ejecucion_str}
-    col2 = {"PNL Total Op.": f"{pnl_color}{total_pnl:+.4f}${reset}", "ROI Op.": f"{pnl_color}{roi:+.2f}%{reset}", "Comercios Cerrados": operacion.comercios_cerrados_contador}
-    max_key_len = max(len(k) for k in col1.keys())
-    for (k1, v1), (k2, v2) in zip(col1.items(), col2.items()):
-        print(f"  {k1:<{max_key_len}}: {v1:<20} |  {k2:<18}: {v2}")
+    ganancias_netas = total_pnl - comisiones_totales
+    netas_color = "\033[92m" if ganancias_netas >= 0 else "\033[91m"
+    
+    avg_entry_price = summary.get(f'avg_entry_price_{side}', 'N/A')
+    avg_liq_price = summary.get(f'avg_liq_price_{side}', 'N/A')
 
-def _display_positions_tables(summary: Dict[str, Any], current_price: float, side: str):
+    avg_entry_str = f"{avg_entry_price:.4f}" if isinstance(avg_entry_price, (int, float)) else "N/A"
+    avg_liq_str = f"{avg_liq_price:.4f}" if isinstance(avg_liq_price, (int, float)) else "N/A"
+    
+    print(f"  {'Capital Inicial':<20}: {initial_capital:<19.2f}$ |  {'Capital Actual':<20}: {capital_actual:<.2f}$")
+    print(f"  {'PNL Total Op.':<20}: {pnl_color}{total_pnl:<+18.4f}${reset} |  {'ROI Op.':<20}: {pnl_color}{roi:<+.2f}%{reset}")
+    print(f"  {'Trades Abiertos':<20}: {trades_abiertos:<22} |  {'Trades Cerrados':<20}: {trades_cerrados}")
+    print(f"  {'Comisiones Totales':<20}: ${comisiones_totales:<20.4f} |  {'Ganancias Netas':<20}: {netas_color}${ganancias_netas:<.4f}{reset}")
+    print(f"  {'Avg Ent Price':<20}: {avg_entry_str:<22} |  {'Avg Liq Price':<20}: {avg_liq_str}")
+
+def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     """Muestra la tabla de posiciones abiertas para un lado específico."""
-    print("\n--- Posiciones Abiertas " + "-"*61)
-    
     positions = summary.get(f'open_{side}_positions', [])
+    max_pos = operacion.max_posiciones_logicas if operacion else 'N/A'
+    
+    header_title = f"--- Posiciones ({len(positions)}/{max_pos}) "
+    print("\n" + header_title + "-"*(80 - len(header_title)))
+    
     print(f"  Tabla {side.upper()} ({len(positions)})")
+    
     if not positions: 
         print("    (No hay posiciones abiertas)")
         return
@@ -122,10 +192,7 @@ def _display_operation_conditions(operacion: Operacion):
     print("\n--- Condiciones de la Operación " + "-"*54)
     
     status_color_map = {
-        'ACTIVA': "\033[92m",    # Verde
-        'PAUSADA': "\033[93m",   # Amarillo
-        'DETENIDA': "\033[90m",  # Gris
-        'EN_ESPERA': "\033[96m"  # Cian
+        'ACTIVA': "\033[92m", 'PAUSADA': "\033[93m", 'DETENIDA': "\033[90m", 'EN_ESPERA': "\033[96m"
     }
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
@@ -147,17 +214,14 @@ def _display_operation_conditions(operacion: Operacion):
         op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
         exit_conditions.append(f"Precio {op} {operacion.valor_cond_salida:.4f}")
     
-    # --- INICIO DE LA MODIFICACIÓN: Mostrar TSL por ROI ---
     if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
         tsl_config_str = (f"TSL-ROI: Activa a {operacion.tsl_roi_activacion_pct}%, "
                           f"Distancia {operacion.tsl_roi_distancia_pct}%")
         
-        # Añadir estado dinámico si ya está activo
         if operacion.tsl_roi_activo:
             tsl_config_str += f" (ACTIVO | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         
         exit_conditions.append(tsl_config_str)
-    # --- FIN DE LA MODIFICACIÓN ---
 
     if operacion.sl_roi_pct is not None: 
         exit_conditions.append(f"SL-ROI <= {operacion.sl_roi_pct}%")

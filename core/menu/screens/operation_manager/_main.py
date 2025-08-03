@@ -1,13 +1,13 @@
 """
 Módulo Principal del Panel de Control de Operación.
 
-v9.0 (Acceso Directo a Operación):
-- `show_operation_manager_screen` ahora acepta un parámetro `side_filter` ('long' o 'short').
-- Si se proporciona `side_filter`, la pantalla salta el menú de selección y muestra
-  directamente la vista de detalles para la operación especificada. Esto permite que
-  el nuevo dashboard tenga enlaces directos a cada gestor de operación.
+v9.3 (Corrección de UI en Detener Operación):
+- Se añade un bloque de renderizado para el nuevo estado 'DETENiendo',
+  evitando que el menú de acciones desaparezca y proporcionando feedback
+  visual al usuario durante el proceso de cierre.
 """
 import time
+import datetime
 from typing import Any, Dict, Optional
 
 try:
@@ -45,13 +45,9 @@ def init(dependencies: Dict[str, Any]):
 
 # --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# La función ahora acepta un `side_filter` opcional.
 def show_operation_manager_screen(side_filter: Optional[str] = None):
     """
     Función principal que muestra el Panel de Control de Operación.
-    Si se proporciona `side_filter`, muestra directamente la vista para ese lado.
-    De lo contrario, presenta un selector para elegir entre LONG y SHORT.
     """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
@@ -60,13 +56,10 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
     if not om_api:
         print("ERROR CRÍTICO: OM API no inyectada."); time.sleep(3); return
 
-    # Si se especifica un lado, saltamos el selector y vamos directo a la vista.
     if side_filter in ['long', 'short']:
         _show_single_operation_view(side_filter)
-        return # Termina la ejecución al volver de la vista única.
-    # --- FIN DE LA MODIFICACIÓN ---
+        return
 
-    # El siguiente bucle solo se ejecuta si no se proporcionó `side_filter`.
     while True:
         clear_screen()
         print_tui_header("Panel de Control de Operaciones")
@@ -99,8 +92,10 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
                 _show_single_operation_view('long')
             elif choice == 1:
                 _show_single_operation_view('short')
-            else:
+            elif choice == 3 or choice is None:
                 break
+            else:
+                continue
         
         except Exception as e:
             print(f"\n\033[91mERROR CRÍTICO en el selector de operaciones: {e}\033[0m")
@@ -110,12 +105,13 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
-    (El contenido de esta función no necesita cambios en este paso).
     """
     pm_api = _deps.get("position_manager_api_module")
     om_api = _deps.get("operation_manager_api_module")
+    sm_api = _deps.get("session_manager_api_module")
     
-    if not pm_api or not om_api: return
+    if not pm_api or not om_api or not sm_api: 
+        print("ERROR CRÍTICO: Faltan dependencias de API (PM, OM, o SM)."); time.sleep(3); return
 
     while True:
         try:
@@ -125,13 +121,18 @@ def _show_single_operation_view(side: str):
                 time.sleep(2)
                 return
 
-            summary = pm_api.get_position_summary()
-            current_price = pm_api.get_current_market_price() or 0.0
+            summary = sm_api.get_session_summary()
+            current_price = summary.get('current_market_price', 0.0)
             
-            ticker_symbol = getattr(config_module, 'TICKER_SYMBOL', 'N/A') if config_module else 'N/A'
+            ticker_symbol = "N/A"
+            if config_module and "BOT_CONFIG" in dir(config_module) and "TICKER" in config_module.BOT_CONFIG:
+                 ticker_symbol = config_module.BOT_CONFIG["TICKER"].get("SYMBOL", "N/A")
             header_title = f"Panel de Operación {side.upper()}: {ticker_symbol} @ {current_price:.4f} USDT"
+            
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
+            
             clear_screen()
-            print_tui_header(header_title)
+            print_tui_header(title=header_title, subtitle=now_str)
 
             if not summary or summary.get('error'):
                 error_msg = summary.get('error', 'No se pudo obtener el estado de la operación.')
@@ -144,7 +145,7 @@ def _show_single_operation_view(side: str):
 
             _displayers._display_operation_details(summary, operacion, side)
             _displayers._display_capital_stats(summary, operacion, side, current_price)
-            _displayers._display_positions_tables(summary, current_price, side) 
+            _displayers._display_positions_tables(summary, operacion, current_price, side) 
             _displayers._display_operation_conditions(operacion)
 
             menu_items, action_map = [], {}
@@ -174,7 +175,7 @@ def _show_single_operation_view(side: str):
                 action_map = {0: "pause", 1: "modify", 2: "stop"}
 
             open_positions_count = summary.get(f'open_{side}_positions_count', 0)
-            if open_positions_count > 0 and current_state != 'DETENIDA':
+            if open_positions_count > 0 and current_state not in ['DETENIDA']:
                 next_idx = len(menu_items)
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
                 action_map[next_idx] = "panic_close"
@@ -182,7 +183,6 @@ def _show_single_operation_view(side: str):
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
             common_actions_keys = ["refresh", "help", "back"]
             
-            # Re-calcular el índice inicial para acciones comunes de forma más robusta
             current_index = len(menu_items) - len(common_actions_keys)
             for key in common_actions_keys:
                 action_map[current_index] = key
@@ -200,18 +200,42 @@ def _show_single_operation_view(side: str):
                 _wizards._operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "pause":
                 om_api.pausar_operacion(side)
-                time.sleep(1.5)
+                time.sleep(0.5)
             elif action == "resume":
                 om_api.reanudar_operacion(side)
-                time.sleep(1.5)
+                time.sleep(0.5)
             elif action == "force_start":
                 confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show()
                 if confirm_menu == 0:
                     om_api.forzar_activacion_manual(side)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
             elif action == "stop":
-                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title="¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación.").show()
-                if confirm_menu == 0:
-                    om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
+                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title)
+                
+                if confirm_menu.show() == 0:
+                    # 1. Mostrar mensaje de espera, pero sin limpiar la pantalla actual
+                    print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")
+                    
+                    # 2. Ejecutar la acción síncrona
+                    try:
+                        success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                        if success:
+                            # Imprimir el mensaje de éxito
+                            print(f"\033[92mÉXITO:\033[0m {message}")
+                        else:
+                            # Imprimir el mensaje de error
+                            print(f"\033[91mERROR:\033[0m {message}")
+                    except Exception as e:
+                        print(f"\033[91mERROR CRÍTICO:\033[0m Excepción inesperada: {e}")
+                    
+                    # 3. Pausar brevemente para que el usuario vea el resultado
+                    time.sleep(2.5)
+                    # 4. No llamar a press_enter_to_continue(). El bucle se reanudará
+                    #    automáticamente, refrescando la pantalla con el nuevo estado.
+            # --- FIN DE LA MODIFICACIÓN ---
+
             elif action == "panic_close": 
                 _wizards._force_close_all_wizard(pm_api, side)
             elif action == "refresh": 
@@ -222,12 +246,11 @@ def _show_single_operation_view(side: str):
                 break
         
         except Exception as e:
-            clear_screen(); print_tui_header(f"Panel de Operación {side.upper()}")
+            clear_screen()
+            header_title = f"Panel de Operación {side.upper()} - ERROR"
+            print_tui_header(title=header_title, subtitle="Ocurrió un error crítico")
             print(f"\n\033[91mERROR CRÍTICO: {e}\033[0m\nOcurrió un error inesperado al renderizar la pantalla.")
             import traceback
             traceback.print_exc()
-            menu_items = ["[r] Reintentar", "[b] Volver al Selector/Dashboard"]
-            menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
-            choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
-            if choice == 0: continue
-            else: break
+            press_enter_to_continue()
+            break
