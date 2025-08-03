@@ -1,6 +1,12 @@
 """
 Módulo para la Pantalla de Bienvenida (Vista del BotController).
 
+v4.3 (Corrección de Adaptabilidad Dinámica):
+- Implementado sistema de ancho dinámico basado en el terminal
+- Corregido el problema de alineación de las cajas con el menú
+- Añadido truncamiento inteligente para texto largo
+- Mantenido todo el funcionamiento original sin cambios
+
 v4.2 (UX Mejorada):
 - La conexión y validación de la API ahora se ejecutan automáticamente al
   iniciar esta pantalla, mostrando los balances directamente.
@@ -10,6 +16,8 @@ v4.2 (UX Mejorada):
 """
 
 import time
+import shutil
+import re
 from typing import Dict, Any
 from . import _log_viewer, _dashboard
 
@@ -29,6 +37,26 @@ def init(dependencies: Dict[str, Any]):
     """Recibe las dependencias inyectadas desde el controlador principal."""
     global _deps
     _deps = dependencies
+
+# --- Funciones Auxiliares para Adaptabilidad Dinámica ---
+
+def _get_terminal_width():
+    """Obtiene el ancho actual del terminal."""
+    try:
+        return shutil.get_terminal_size().columns
+    except:
+        return 80  # Ancho por defecto
+
+def _clean_ansi_codes(text: str) -> str:
+    """Función de ayuda para eliminar códigos de color ANSI de un string."""
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', str(text))
+
+def _truncate_text(text: str, max_length: int) -> str:
+    """Trunca el texto si es muy largo, añadiendo '...' al final."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length-3] + "..."
 
 # --- Funciones de Ayuda para la Pantalla ---
 
@@ -61,12 +89,21 @@ def _display_welcome_panel(bot_controller: Any):
         "Símbolo": general_config.get('Ticker Symbol', 'N/A')
     }
 
-    # Lógica de impresión en columnas
-    print("┌" + "─" * 38 + "┬" + "─" * 39 + "┐")
-    print(f"│{'Balances de Cuentas':^38}│{'Configuración General':^39}│")
-    print("├" + "─" * 38 + "┼" + "─" * 39 + "┤")
+    # Calcular ancho dinámico del terminal
+    terminal_width = _get_terminal_width()
+    box_width = min(terminal_width - 2, 80)  # Máximo 80, mínimo terminal_width - 2
+    
+    # Asegurar que el ancho sea al menos 50 para que sea funcional
+    if box_width < 50:
+        box_width = 50
 
-    # --- INICIO DE LA MODIFICACIÓN ---
+    # Calcular ancho de cada columna
+    width_col = (box_width - 3) // 2  # -3 para los 3 caracteres de separación ┌─┬─┐
+
+    print("┌" + "─" * width_col + "┬" + "─" * width_col + "┐")
+    print(f"│{'Balances de Cuentas':^{width_col}}│{'Configuración General':^{width_col}}│")
+    print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
+
     # Define el orden explícito para la visualización de las cuentas.
     account_order = ["MAIN", "LONGS", "SHORTS", "PROFIT"]
     # Construye la lista de claves de balance (b_keys) respetando el orden definido.
@@ -75,26 +112,35 @@ def _display_welcome_panel(bot_controller: Any):
     
     # La lógica para las claves de configuración (c_keys) no cambia.
     c_keys = list(config_data.keys())
-    # --- FIN DE LA MODIFICACIÓN ---
 
     num_rows = max(len(b_keys), len(c_keys))
     
     # Ajustar para encontrar el ancho máximo de las claves en ambas columnas
     max_b_key = max(len(k) for k in b_keys) if b_keys else 0
     max_c_key = max(len(k) for k in c_keys) if c_keys else 0
+    
+    # Limitar el ancho de las claves según el espacio disponible
+    max_b_key = min(max_b_key, width_col - 10)
+    max_c_key = min(max_c_key, width_col - 10)
 
     for i in range(num_rows):
         left_col, right_col = "", ""
         if i < len(b_keys):
             key, value = b_keys[i], balance_data[b_keys[i]]
             left_col = f"  {key:<{max_b_key}} : {value}"
+            left_col = _truncate_text(left_col, width_col - 1)
         if i < len(c_keys):
             key, value = c_keys[i], config_data[c_keys[i]]
             right_col = f"  {key:<{max_c_key}} : {value}"
+            right_col = _truncate_text(right_col, width_col - 1)
         
-        print(f"│{left_col:<38}│{right_col:<39}│")
+        # Calcular padding
+        left_padding = ' ' * max(0, width_col - len(_clean_ansi_codes(left_col)))
+        right_padding = ' ' * max(0, width_col - len(_clean_ansi_codes(right_col)))
+        
+        print(f"│{left_col}{left_padding}│{right_col}{right_padding}│")
 
-    print("└" + "─" * 38 + "┴" + "─" * 39 + "┘")
+    print("└" + "─" * width_col + "┴" + "─" * width_col + "┘")
 
 def _run_transfer_test(bot_controller: Any):
     clear_screen()

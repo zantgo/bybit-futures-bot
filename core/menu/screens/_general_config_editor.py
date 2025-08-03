@@ -1,6 +1,12 @@
 """
 Módulo para la Pantalla de Edición de Configuración General del Bot.
 
+v6.1 (Corrección de Adaptabilidad Dinámica):
+- Implementado sistema de ancho dinámico basado en el terminal
+- Corregido el problema de alineación de la caja de configuración con el menú
+- Añadido truncamiento inteligente para valores largos de configuración
+- Mantenido todo el funcionamiento original sin cambios
+
 v6.0 (Refactor de Configuración):
 - Completamente reescrito para leer y modificar valores dentro del
   diccionario `config.BOT_CONFIG`.
@@ -18,6 +24,8 @@ v5.0 (Refactor Ticker Symbol):
 from typing import Any, Dict
 import time
 import copy
+import shutil
+import re
 
 try:
     from simple_term_menu import TerminalMenu
@@ -43,6 +51,38 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
+# --- Funciones Auxiliares para Adaptabilidad Dinámica ---
+
+def _get_terminal_width():
+    """Obtiene el ancho actual del terminal."""
+    try:
+        return shutil.get_terminal_size().columns
+    except:
+        return 80  # Ancho por defecto
+
+def _clean_ansi_codes(text: str) -> str:
+    """Función de ayuda para eliminar códigos de color ANSI de un string."""
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', str(text))
+
+def _truncate_text(text: str, max_length: int) -> str:
+    """Trunca el texto si es muy largo, añadiendo '...' al final."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length-3] + "..."
+
+def _create_config_box_line(content: str, width: int) -> str:
+    """Crea una línea de caja de configuración con el contenido alineado correctamente."""
+    clean_content = _clean_ansi_codes(content)
+    content_len = len(clean_content)
+    
+    if content_len > width - 2:  # -2 para los bordes │ │
+        content = _truncate_text(clean_content, width - 5) # -5 para bordes y ...
+        content_len = len(content)
+    
+    padding = width - content_len - 2
+    return f"│ {content}{' ' * (padding - 1)}│"
+
 def show_general_config_editor_screen(config_module: Any) -> bool:
     """
     Muestra la pantalla de edición de configuración general.
@@ -63,31 +103,38 @@ def _show_general_config_menu(config_module: Any):
         clear_screen()
         print_tui_header("Editor de Configuración General")
 
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # # Leemos directamente del config_module
-        # modo_actual = "Paper Trading" if getattr(config_module, 'PAPER_TRADING_MODE', False) else "Live Trading"
-        # testnet_actual = "ON" if getattr(config_module, 'UNIVERSAL_TESTNET_MODE', False) else "OFF"
-        # 
-        # print("\nValores Actuales:")
-        # print("┌" + "─" * 40 + "┐")
-        # print(f"│ {'Exchange':<15}: {getattr(config_module, 'EXCHANGE_NAME', 'N/A').upper():<21} │")
-        # print(f"│ {'Modo':<15}: {modo_actual:<21} │")
-        # print(f"│ {'Testnet':<15}: {testnet_actual:<21} │")
-        # print(f"│ {'Símbolo Ticker':<15}: {getattr(config_module, 'TICKER_SYMBOL', 'N/A'):<21} │")
-        # print("└" + "─" * 40 + "┘")
-        # --- (CORREGIDO) ---
+        # Obtener valores actuales
         modo_actual = "Paper Trading" if config_module.BOT_CONFIG["PAPER_TRADING_MODE"] else "Live Trading"
         testnet_actual = "ON" if config_module.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"] else "OFF"
         
+        # Calcular ancho dinámico
+        terminal_width = _get_terminal_width()
+        box_width = min(terminal_width - 2, 80)  # Máximo 80, mínimo terminal_width - 2
+        
+        # Asegurar que el ancho sea al menos 30 para que sea funcional
+        if box_width < 30:
+            box_width = 30
+
         print("\nValores Actuales:")
-        print("┌" + "─" * 40 + "┐")
-        print(f"│ {'Exchange':<15}: {config_module.BOT_CONFIG['EXCHANGE_NAME'].upper():<21} │")
-        print(f"│ {'Modo':<15}: {modo_actual:<21} │")
-        print(f"│ {'Testnet':<15}: {testnet_actual:<21} │")
-        print(f"│ {'Símbolo Ticker':<15}: {config_module.BOT_CONFIG['TICKER']['SYMBOL']:<21} │")
-        print("└" + "─" * 40 + "┘")
-        # --- FIN DE LA MODIFICACIÓN ---
+        print("┌" + "─" * (box_width - 2) + "┐")
+        
+        # Preparar datos de configuración
+        config_items = [
+            ("Exchange", config_module.BOT_CONFIG['EXCHANGE_NAME'].upper()),
+            ("Modo", modo_actual),
+            ("Testnet", testnet_actual),
+            ("Símbolo Ticker", config_module.BOT_CONFIG['TICKER']['SYMBOL'])
+        ]
+        
+        # Calcular ancho máximo para las claves
+        max_key_len = max(len(item[0]) for item in config_items)
+        max_key_len = min(max_key_len, box_width - 15)  # Limitar según espacio disponible
+        
+        for key, value in config_items:
+            content = f"{key:<{max_key_len}}: {value}"
+            print(_create_config_box_line(content, box_width))
+        
+        print("└" + "─" * (box_width - 2) + "┘")
 
         menu_items = [
             "[1] Exchange", 
@@ -107,14 +154,6 @@ def _show_general_config_menu(config_module: Any):
         action = action_map.get(menu.show())
 
         try:
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO - Lógica antigua) ---
-            # if action == 'exchange':
-            #     sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
-            #     if sub_choice == 0: setattr(config_module, 'EXCHANGE_NAME', 'bybit')
-            # ... y así para los demás
-            
-            # --- (CORREGIDO - Nueva lógica) ---
             if action == 'exchange':
                 sub_choice = TerminalMenu(["Bybit", None, "[c] Cancelar"], title="\nSelecciona el Exchange:", **MENU_STYLE).show()
                 if sub_choice == 0:
@@ -147,7 +186,6 @@ def _show_general_config_menu(config_module: Any):
                 
                 print(f"\nResultado: {message}")
                 time.sleep(2.5)
-            # --- FIN DE LA MODIFICACIÓN ---
                 
             elif action == 'back' or action is None:
                 return # Salimos del bucle
