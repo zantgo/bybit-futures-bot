@@ -1,10 +1,19 @@
+# ./core/menu/screens/_dashboard.py
+
 """
 Módulo para la Pantalla del Dashboard de Sesión.
 
-v8.2 (Corrección de Alineación):
-- Corregido el problema de alineación de las cajas del dashboard
-- Implementado sistema de ancho dinámico basado en el terminal
-- Mejorado el truncamiento de texto largo para mantener la estructura
+v8.3 (Reordenamiento de UI):
+- Reorganizada la UI para dar prioridad al panel de Señal.
+- Mejorado el panel de Señal con separadores internos.
+- Ajustado el panel de Operaciones para ser más conciso.
+
+v8.2 (Corrección de Alineación y Títulos):
+- Restaurados los títulos de cada bloque de información.
+- Corregido el problema de alineación de las cajas del dashboard.
+- Implementado sistema de ancho dinámico basado en el terminal.
+- Mejorado el truncamiento de texto largo para mantener la estructura.
+- Solucionado TypeError en print_tui_header cuando el subtítulo es None.
 
 v8.1 (Refactor de Configuración):
 - Adaptado para leer el `TICKER_SYMBOL` desde la nueva estructura de `config.py`.
@@ -21,9 +30,10 @@ import time
 import datetime
 from datetime import timezone
 from typing import Dict, Any
-import re # Importar el módulo de expresiones regulares para limpiar colores
+import re 
 import os
 import shutil
+import numpy as np
 
 try:
     from simple_term_menu import TerminalMenu
@@ -39,7 +49,7 @@ from .. import _helpers as helpers_module
 from . import _log_viewer, operation_manager
 try:
     from core.strategy.sm import api as sm_api
-    from core.strategy.pm import api as pm_api # Aún necesario para algunos datos como el start time
+    from core.strategy.pm import api as pm_api
 except ImportError:
     sm_api = pm_api = None
 
@@ -58,14 +68,47 @@ def _get_terminal_width():
     try:
         return shutil.get_terminal_size().columns
     except:
-        return 80  # Ancho por defecto
+        return 90  # Ancho por defecto
+
+
+def _clean_ansi_codes(text: str) -> str:
+    """Función de ayuda para eliminar códigos de color ANSI de un string."""
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', str(text))
 
 
 def _truncate_text(text: str, max_length: int) -> str:
     """Trunca el texto si es muy largo, añadiendo '...' al final."""
-    if len(text) <= max_length:
+    clean_text = _clean_ansi_codes(text)
+    if len(clean_text) <= max_length:
         return text
-    return text[:max_length-3] + "..."
+    
+    truncated_clean = clean_text[:max_length-3] + "..."
+    
+    color_codes = re.findall(r'(\x1B\[[0-?]*[ -/]*[@-~])', text)
+    if color_codes:
+        return color_codes[0] + truncated_clean + "\033[0m"
+    return truncated_clean
+
+
+def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
+    """Crea una línea de caja con el contenido alineado correctamente."""
+    clean_content = _clean_ansi_codes(content)
+    padding_needed = width - 2 - len(clean_content)
+
+    if padding_needed < 0:
+        content = _truncate_text(content, width - 2)
+        clean_content = _clean_ansi_codes(content)
+        padding_needed = width - 2 - len(clean_content)
+    
+    if alignment == 'center':
+        left_pad = padding_needed // 2
+        right_pad = padding_needed - left_pad
+        return f"│{' ' * left_pad}{content}{' ' * right_pad}│"
+    elif alignment == 'right':
+        return f"│{' ' * padding_needed}{content} │"
+    else: # left
+        return f"│ {content}{' ' * (padding_needed - 1)}│"
 
 
 def _display_final_summary(summary: Dict[str, Any]):
@@ -110,35 +153,6 @@ def _display_final_summary(summary: Dict[str, Any]):
 
     press_enter_to_continue()
 
-# --- INICIO DE LAS FUNCIONES DE RENDERIZADO CORREGIDAS ---
-
-def _clean_ansi_codes(text: str) -> str:
-    """Función de ayuda para eliminar códigos de color ANSI de un string."""
-    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-    return ansi_escape.sub('', str(text))
-
-
-def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
-    """Crea una línea de caja con el contenido alineado correctamente."""
-    clean_content = _clean_ansi_codes(content)
-    content_len = len(clean_content)
-    
-    if content_len > width - 2:  # -2 para los bordes │ │
-        content = _truncate_text(clean_content, width - 5) # -5 para bordes y ...
-        content_len = len(content)
-    
-    if alignment == 'center':
-        padding_total = width - content_len - 2
-        padding_left = padding_total // 2
-        padding_right = padding_total - padding_left
-        return f"│{' ' * padding_left}{content}{' ' * padding_right}│"
-    elif alignment == 'right':
-        padding = width - content_len - 2
-        return f"│{' ' * padding}{content} │"
-    else:  # left
-        padding = width - content_len - 2
-        return f"│ {content}{' ' * (padding - 1)}│"
-
 
 def _render_session_status_block(summary: Dict[str, Any], box_width: int):
     """Imprime el bloque de Estado de Sesión con el estilo y formato correctos."""
@@ -164,12 +178,10 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         "Total Transferido a PROFIT": f"{transferido_val:+.4f} USDT"
     }
     
-    # Crear caja
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Estado de Sesión", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
     
-    # Calcular ancho máximo para las claves
     max_key_len = max(len(k) for k in data.keys()) if data else 0
     
     for key, value in data.items():
@@ -180,7 +192,7 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
 
 
 def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box_width: int):
-    """Imprime el bloque de Estado de Señal con el estilo y formato correctos."""
+    """Imprime el bloque de Estado de Señal con el nuevo formato."""
     ticker_symbol = config_module.BOT_CONFIG["TICKER"]["SYMBOL"]
     latest_signal_info = summary.get('latest_signal', {})
     
@@ -193,29 +205,24 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
     dec_pct_str = latest_signal_info.get('dec_price_change_pct', 'N/A')
     w_dec_str = latest_signal_info.get('weighted_decrement', 'N/A')
 
-    # Crear caja
     print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line("Estado de Señal", box_width, 'center'))
+    print(_create_box_line("Señal", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
 
-    # Parte superior
     data_top = {"Ticker": ticker_symbol, "Precio Actual": price_str}
     max_key_top = max(len(k) for k in data_top.keys())
     for key, value in data_top.items():
         content = f"{key:<{max_key_top}} : {value}"
         print(_create_box_line(content, box_width))
     
-    print(_create_box_line("", box_width))  # Línea vacía
-    
-    # Indicadores TA
+    print("├" + "─" * (box_width - 2) + "┤")
     print(_create_box_line("Indicadores TA", box_width))
     print(_create_box_line(f"  EMA: {_truncate_text(str(ema_str), box_width-10)}", box_width))
-    print(_create_box_line(f"  W.Inc/W.Dec: {_truncate_text(f'{w_inc_str}/{w_dec_str}', box_width-20)}", box_width))
+    print(_create_box_line(f"  W.Inc / W.Dec: {_truncate_text(f'{w_inc_str} / {w_dec_str}', box_width-20)}", box_width))
     print(_create_box_line(f"  Price Inc.(%)/ Price Dec.(%): {_truncate_text(f'{inc_pct_str} / {dec_pct_str}', box_width-35)}", box_width))
 
-    print(_create_box_line("", box_width))  # Línea vacía
+    print("├" + "─" * (box_width - 2) + "┤")
     
-    # Parte inferior
     signal_val = latest_signal_info.get('signal', 'N/A')
     reason_val = latest_signal_info.get('signal_reason', '')
     
@@ -226,7 +233,7 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
 
 
 def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
-    """Imprime el bloque de Estado de Operaciones con el estilo y formato correctos."""
+    """Imprime el bloque de Estado de Operaciones con el nuevo formato conciso."""
     sides = ['long', 'short']
     data = {side: {} for side in sides}
 
@@ -235,8 +242,7 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         balance_info = summary.get('logical_balances', {}).get(side, {})
         pnl = summary.get(f'operation_{side}_pnl', 0.0)
         roi = summary.get(f'operation_{side}_roi', 0.0)
-        comisiones = summary.get(f'comisiones_totales_usdt_{side}', 0.0)
-        ganancias_netas = pnl - comisiones
+        ganancias_netas = pnl - summary.get(f'comisiones_totales_usdt_{side}', 0.0)
         capital_usado = balance_info.get('used_margin', 0.0)
         capital_operativo = balance_info.get('operational_margin', 0.0)
         max_pos_logicas = 0
@@ -247,49 +253,37 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             'Estado': op_info.get('estado', 'DETENIDA').upper(),
             'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)} / {max_pos_logicas}",
             'Capital (Usado/Total)': f"${capital_usado:.2f} / ${capital_operativo:.2f}",
-            'Comisiones Totales': f"${comisiones:.4f}",
             'Ganancias Netas': f"${ganancias_netas:.4f}",
             'PNL': f"{pnl:.4f}",
             'ROI': f"{roi:+.2f}%",
-            'Avg Ent Price': f"{summary.get(f'avg_entry_price_{side}', 'N/A')}",
-            'Avg Liq Price': f"{summary.get(f'avg_liq_price_{side}', 'N/A')}",
         }
 
-    # Calcular ancho de cada columna
-    width_col = (box_width - 3) // 2  # -3 para los 3 caracteres de separación ┌─┬─┐
+    width_col = (box_width - 3) // 2
     
     print("┌" + "─" * width_col + "┬" + "─" * width_col + "┐")
     print(f"│{'Operación LONG':^{width_col}}│{'Operación SHORT':^{width_col}}│")
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
     
     labels = [
-        'Estado', 'Posiciones', 'Capital (Usado/Total)', 'Comisiones Totales',
-        'Ganancias Netas', 'PNL', 'ROI', 'Avg Ent Price', 'Avg Liq Price'
+        'Estado', 'Posiciones', 'Capital (Usado/Total)',
+        'Ganancias Netas', 'PNL', 'ROI'
     ]
-    max_label_len = min(max(len(k) for k in labels), width_col - 10)  # Limitar longitud de etiqueta
+    max_label_len = min(max(len(k) for k in labels), width_col - 10) 
     
     for label in labels:
         long_val = data['long'].get(label, 'N/A')
         short_val = data['short'].get(label, 'N/A')
         
-        if label.startswith("Avg") and isinstance(long_val, (int, float)): 
-            long_val = f"{long_val:.4f}"
-        if label.startswith("Avg") and isinstance(short_val, (int, float)): 
-            short_val = f"{short_val:.4f}"
-        
-        # Truncar etiqueta si es necesaria
         display_label = _truncate_text(label, max_label_len)
         
         content_left = f"{display_label:<{max_label_len}} : {long_val}"
         content_right = f"{display_label:<{max_label_len}} : {short_val}"
 
-        # Truncar contenido si es muy largo
         content_left = _truncate_text(content_left, width_col - 2)
         content_right = _truncate_text(content_right, width_col - 2)
 
-        # Calcular padding
-        padding_left = ' ' * max(0, width_col - len(content_left) - 1)
-        padding_right = ' ' * max(0, width_col - len(content_right) - 1)
+        padding_left = ' ' * max(0, width_col - len(_clean_ansi_codes(content_left)) - 1)
+        padding_right = ' ' * max(0, width_col - len(_clean_ansi_codes(content_right)) - 1)
         
         print(f"│ {content_left}{padding_left}│ {content_right}{padding_right}│")
 
@@ -297,31 +291,28 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
 
 
 def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
-    """Función dedicada a imprimir el layout completo del dashboard."""
-    # Obtener ancho del terminal y ajustar
+    """Función dedicada a imprimir el layout completo del dashboard con el nuevo orden."""
     terminal_width = _get_terminal_width()
-    box_width = min(terminal_width - 2, 90)  # Máximo 90, mínimo terminal_width - 2
+    box_width = min(terminal_width - 2, 90)
     
-    # Asegurar que el ancho sea al menos 60 para que sea funcional
     if box_width < 60:
         box_width = 60
     
     header_line = "=" * box_width
     print(header_line)
     
-    # Centrar título y fecha
     now_str = datetime.datetime.now(timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
     title = "Dashboard de la Sesión"
     
-    title_padding = (box_width - len(title)) // 2
-    date_padding = (box_width - len(now_str)) // 2
-    
-    print(" " * title_padding + title)
-    print(" " * date_padding + now_str)
+    print(f"{title:^{box_width}}")
+    print(f"{now_str:^{box_width}}")
     print(header_line)
     
-    _render_session_status_block(summary, box_width)
+     
     _render_signal_status_block(summary, config_module, box_width)
+     
+    _render_session_status_block(summary, box_width)
+    
     _render_operations_status_block(summary, box_width)
     
 
@@ -373,6 +364,7 @@ def show_dashboard_screen(session_manager: Any):
         menu_items = [
             "[1] Gestionar Operación LONG", 
             "[2] Gestionar Operación SHORT",
+            None,  # Separador añadido
             "[3] Editar Configuración de Sesión", 
             "[4] Ver Logs en Tiempo Real",
             None,
@@ -380,9 +372,18 @@ def show_dashboard_screen(session_manager: Any):
             "[h] Ayuda", 
             "[q] Finalizar Sesión y Volver al Menú Principal"
         ]
+        
+        # El action_map se actualiza para reflejar los nuevos índices
         action_map = {
-            0: 'manage_long', 1: 'manage_short', 2: 'edit_config', 3: 'view_logs',
-            5: 'refresh', 6: 'help', 7: 'exit_session'
+            0: 'manage_long', 
+            1: 'manage_short', 
+            # El índice 2 es ahora el separador (None)
+            3: 'edit_config', 
+            4: 'view_logs',
+            # El índice 5 es el otro separador (None)
+            6: 'refresh', 
+            7: 'help', 
+            8: 'exit_session'
         }
         
         menu_options = helpers_module.MENU_STYLE.copy()

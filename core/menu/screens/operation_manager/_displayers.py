@@ -118,7 +118,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     terminal_width = _get_terminal_width()
     box_width = min(terminal_width - 2, 90)
 
-    print()
+    
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
@@ -167,7 +167,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     terminal_width = _get_terminal_width()
     box_width = min(terminal_width - 2, 90)
 
-    print()
+    
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
@@ -238,7 +238,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
     positions = summary.get(f'open_{side}_positions', [])
     max_pos = operacion.max_posiciones_logicas if operacion else 'N/A'
     
-    print()
+    
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line(f"Posiciones ({len(positions)}/{max_pos})", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
@@ -293,7 +293,7 @@ def _display_operation_conditions(operacion: Operacion):
     terminal_width = _get_terminal_width()
     box_width = min(terminal_width - 2, 90)
 
-    print()
+    
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Condiciones de la Operación", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
