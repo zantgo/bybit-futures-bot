@@ -293,11 +293,15 @@ class SessionManager:
             memory_logger.log("SessionManager: Parámetros del Ticker actualizados. Reiniciando el hilo del Ticker...", "WARN")
             self.stop()
             self.start()
-        sl_enabled = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["ENABLED"]
-        sl_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["PERCENTAGE"] if sl_enabled else 0
+
+        # Actualizar límites globales en el PM
+        limits_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]
+        sl_enabled = limits_cfg["ROI_SL"]["ENABLED"]
+        sl_pct = limits_cfg["ROI_SL"]["PERCENTAGE"] if sl_enabled else 0.0
         self._pm_api.set_global_stop_loss_pct(sl_pct)
-        tp_enabled = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["ENABLED"]
-        tp_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["PERCENTAGE"] if tp_enabled else 0
+
+        tp_enabled = limits_cfg["ROI_TP"]["ENABLED"]
+        tp_pct = limits_cfg["ROI_TP"]["PERCENTAGE"] if tp_enabled else 0.0
         self._pm_api.set_global_take_profit_pct(tp_pct)
 
     def is_running(self) -> bool:

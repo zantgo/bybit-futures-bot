@@ -272,21 +272,21 @@ class EventProcessor:
     def _check_session_limits(self, current_price: float, timestamp: datetime.datetime):
         if not (self._pm_api and self._pm_api.is_initialized()) or self._global_stop_loss_triggered: return
 
-        time_limit_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]["MAX_DURATION"]
-        max_minutes, action = time_limit_cfg.get("MINUTES", 0), time_limit_cfg.get("ACTION", "NEUTRAL").upper()
-        
-        start_time = self._pm_api.get_session_start_time()
-        if start_time and max_minutes > 0 and (timestamp - start_time).total_seconds() / 60.0 >= max_minutes:
-            if action == "STOP":
+        limits_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]
+
+        # Límite de Duración
+        duration_cfg = limits_cfg["MAX_DURATION"]
+        if duration_cfg["ENABLED"]:
+            max_minutes = duration_cfg["MINUTES"]
+            start_time = self._pm_api.get_session_start_time()
+            if start_time and max_minutes > 0 and (timestamp - start_time).total_seconds() / 60.0 >= max_minutes:
                 self._global_stop_loss_triggered = True
-                msg = f"LÍMITE DE TIEMPO DE SESIÓN (STOP) ALCANZADO"
+                msg = f"LÍMITE DE DURACIÓN DE SESIÓN ({max_minutes} min) ALCANZADO"
                 self._memory_logger.log(msg, "ERROR")
-                self._pm_api.close_all_logical_positions('long', "TIME_LIMIT_STOP")
-                self._pm_api.close_all_logical_positions('short', "TIME_LIMIT_STOP")
+                self._pm_api.close_all_logical_positions('long', "SESSION_DURATION_LIMIT")
+                self._pm_api.close_all_logical_positions('short', "SESSION_DURATION_LIMIT")
                 if self._global_stop_loss_event: self._global_stop_loss_event.set()
                 raise GlobalStopLossException(msg)
-            elif not self._pm_api.is_session_tp_hit():
-                self._memory_logger.log(f"LÍMITE DE TIEMPO DE SESIÓN (NEUTRAL) ALCANZADO", "INFO")
 
         summary = self._pm_api.get_position_summary()
         initial_capital = summary.get('initial_total_capital', 0.0)
@@ -296,18 +296,24 @@ class EventProcessor:
         realized_pnl = summary.get('total_realized_pnl_session', 0.0)
         current_roi = self._utils.safe_division(realized_pnl + unrealized_pnl, initial_capital) * 100.0
 
-        if self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["ENABLED"] and not self._pm_api.is_session_tp_hit():
-            tp_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_TP"]["PERCENTAGE"]
-            if tp_pct and tp_pct > 0 and current_roi >= tp_pct:
+        # Límite de Take Profit por ROI
+        tp_cfg = limits_cfg["ROI_TP"]
+        if tp_cfg["ENABLED"] and not self._pm_api.is_session_tp_hit():
+            tp_pct = tp_cfg["PERCENTAGE"]
+            if tp_pct > 0 and current_roi >= tp_pct:
                 self._memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
+                # Aquí podrías añadir lógica adicional si TP finaliza la sesión
+                self._pm_api.set_session_tp_hit(True) # Marcar como alcanzado
 
-        if self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["ENABLED"]:
-            sl_pct = self._config.SESSION_CONFIG["SESSION_LIMITS"]["ROI_SL"]["PERCENTAGE"]
-            if sl_pct and sl_pct > 0 and current_roi <= -abs(sl_pct):
+        # Límite de Stop Loss por ROI
+        sl_cfg = limits_cfg["ROI_SL"]
+        if sl_cfg["ENABLED"]:
+            sl_pct = sl_cfg["PERCENTAGE"]
+            if sl_pct > 0 and current_roi <= -abs(sl_pct):
                 self._global_stop_loss_triggered = True
                 msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
                 self._memory_logger.log(msg, "ERROR")
-                self._pm_api.close_all_logical_positions('long', "GLOBAL_SL_ROI")
-                self._pm_api.close_all_logical_positions('short', "GLOBAL_SL_ROI")
+                self._pm_api.close_all_logical_positions('long', "SESSION_SL_ROI")
+                self._pm_api.close_all_logical_positions('short', "SESSION_SL_ROI")
                 if self._global_stop_loss_event: self._global_stop_loss_event.set()
                 raise GlobalStopLossException(msg)

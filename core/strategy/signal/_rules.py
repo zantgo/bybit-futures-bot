@@ -1,5 +1,3 @@
-# core/strategy/signal/_rules.py
-
 """
 Módulo de Reglas de Estrategia para la Generación de Señales.
 
@@ -23,10 +21,10 @@ def check_buy_condition(
     """
     Evalúa si se cumplen todas las condiciones para una señal de COMPRA.
     """
-    # Usar pd.notna y np.isfinite para una validación robusta de los indicadores
+    signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     return (
-        pd.notna(dec_pct) and np.isfinite(dec_pct) and dec_pct <= config.SESSION_CONFIG["STRATEGY"]["MARGIN_BUY"] and
-        pd.notna(w_dec) and w_dec >= config.SESSION_CONFIG["STRATEGY"]["DECREMENT_THRESHOLD"] and
+        pd.notna(dec_pct) and np.isfinite(dec_pct) and dec_pct <= signal_cfg["PRICE_CHANGE_BUY_PERCENTAGE"] and
+        pd.notna(w_dec) and w_dec >= signal_cfg["WEIGHTED_DECREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price < ema
     )
 
@@ -39,9 +37,10 @@ def check_sell_condition(
     """
     Evalúa si se cumplen todas las condiciones para una señal de VENTA.
     """
+    signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     return (
-        pd.notna(inc_pct) and np.isfinite(inc_pct) and inc_pct >= config.SESSION_CONFIG["STRATEGY"]["MARGIN_SELL"] and
-        pd.notna(w_inc) and w_inc >= config.SESSION_CONFIG["STRATEGY"]["INCREMENT_THRESHOLD"] and
+        pd.notna(inc_pct) and np.isfinite(inc_pct) and inc_pct >= signal_cfg["PRICE_CHANGE_SELL_PERCENTAGE"] and
+        pd.notna(w_inc) and w_inc >= signal_cfg["WEIGHTED_INCREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price > ema
     )
 
@@ -55,18 +54,18 @@ def evaluate_strategy(
 ) -> Tuple[str, str]:
     """
     Evalúa todas las reglas de la estrategia y devuelve la señal y la razón.
-
-    Returns:
-        Tuple[str, str]: Una tupla conteniendo (señal, razón de la señal).
     """
+    signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     if check_buy_condition(price, ema, dec_pct, w_dec):
         signal = "BUY"
-        reason = f"dec_pct({dec_pct:.2f}%) <= {config.SESSION_CONFIG['STRATEGY']['MARGIN_BUY']}%, w_dec({w_dec:.2f}) >= {config.SESSION_CONFIG['STRATEGY']['DECREMENT_THRESHOLD']}, price < EMA"
+        reason = (f"dec_pct({dec_pct:.2f}%) <= {signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']}%, "
+                  f"w_dec({w_dec:.2f}) >= {signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']}, price < EMA")
         return signal, reason
     
     if check_sell_condition(price, ema, inc_pct, w_inc):
         signal = "SELL"
-        reason = f"inc_pct({inc_pct:.2f}%) >= {config.SESSION_CONFIG['STRATEGY']['MARGIN_SELL']}%, w_inc({w_inc:.2f}) >= {config.SESSION_CONFIG['STRATEGY']['INCREMENT_THRESHOLD']}, price > EMA"
+        reason = (f"inc_pct({inc_pct:.2f}%) >= {signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']}%, "
+                  f"w_inc({w_inc:.2f}) >= {signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']}, price > EMA")
         return signal, reason
 
     return "HOLD", "Condiciones BUY/SELL no cumplidas"

@@ -117,8 +117,9 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     Calcula PNL bruto, comisión, PNL neto.
     Luego, calcula la porción del PNL NETO a reinvertir y la porción a transferir.
     """
-    commission_rate = config.OPERATION_DEFAULTS["PROFIT"]["COMMISSION_RATE"]
-    reinvest_fraction = config.OPERATION_DEFAULTS["PROFIT"]["REINVEST_PROFIT_PCT"] / 100.0
+    profit_cfg = config.SESSION_CONFIG["PROFIT"]
+    commission_rate = profit_cfg["COMMISSION_RATE"]
+    reinvest_fraction = profit_cfg["REINVEST_PROFIT_PCT"] / 100.0
 
     pnl_gross_usdt = 0.0
     commission_usdt = 0.0

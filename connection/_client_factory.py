@@ -63,16 +63,10 @@ def create_client(account_name: str, api_creds: Dict[str, str]) -> Optional[HTTP
 def configure_account_mode(session: HTTP, account_name: str) -> bool:
     """
     Configura el modo de la cuenta (ej. Hedge Mode) si es necesario.
-
-    Args:
-        session (HTTP): La sesión de cliente a configurar.
-        account_name (str): El nombre de la cuenta para logging.
-
-    Returns:
-        True si la configuración es exitosa o no es necesaria, False si falla.
     """
-    if getattr(config, 'POSITION_TRADING_MODE', None) != "LONG_SHORT":
-        return True # No se necesita configuración si no es Hedge Mode
+    # El modo Hedge ahora se controla desde EXCHANGE_CONSTANTS, que es más robusto
+    if not config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]:
+        return True # No se necesita configuración si Hedge Mode está desactivado
 
     symbol = config.BOT_CONFIG["TICKER"]["SYMBOL"]
     if not symbol:

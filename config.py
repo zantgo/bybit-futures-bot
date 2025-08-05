@@ -62,33 +62,55 @@ SESSION_CONFIG = {
     # Parámetros de Análisis Técnico (TA)
     "TA": {
         "ENABLED": True,
-        "EMA_WINDOW": 50,
-        "WEIGHTED_INC_WINDOW": 25,
-        "WEIGHTED_DEC_WINDOW": 25,
+        
+        # Ventana (en número de velas) utilizada para calcular la Media Móvil Exponencial (EMA).
+        # Un valor más alto suaviza más la curva, pero responde más lento a cambios de tendencia.
+        "EMA_WINDOW": 50,  
+
+        # Número de velas consideradas para calcular el momentum ponderado de incrementos.
+        # Se usa para detectar consistencia en movimientos alcistas.
+
+        "WEIGHTED_INC_WINDOW": 25, 
+
+        # Número de velas consideradas para calcular el momentum ponderado de decrementos.
+        # Se usa para detectar consistencia en movimientos bajistas. 
+        "WEIGHTED_DEC_WINDOW": 25,  
     },
 
     # Parámetros de Generación de Señales
-    "STRATEGY": {
+    "SIGNAL": {
         "ENABLED": True,
-        "MARGIN_BUY": -0.1,
-        "MARGIN_SELL": 0.1,
-        "DECREMENT_THRESHOLD": 0.45,
-        "INCREMENT_THRESHOLD": 0.45,
+
+        # Umbrales de cambio porcentual respecto al primer precio en la ventana
+        "PRICE_CHANGE_BUY_PERCENTAGE": -0.1,
+        "PRICE_CHANGE_SELL_PERCENTAGE": 0.1,
+
+        # Umbrales de momentum ponderado entre precios sucesivos
+        "WEIGHTED_DECREMENT_THRESHOLD": 0.45,
+        "WEIGHTED_INCREMENT_THRESHOLD": 0.45,
+    },
+
+    # Parámetros de Ganancias
+    "PROFIT": {
+        "COMMISSION_RATE": 0.001,
+        "REINVEST_PROFIT_PCT": 10.0,
+        "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
     },
 
     # Límites Globales de la Sesión (Disyuntores)
     "SESSION_LIMITS": {
+        # Al alcanzar estos limites la sesion debe cerrar todas las posiciones abiertas y finalizar
         "ROI_SL": {
             "ENABLED": True,
-            "PERCENTAGE": 20.0  # Siempre positivo, el código lo hará negativo
+            "PERCENTAGE": 50.0,  # Siempre positivo, el código lo hará negativo
         },
         "ROI_TP": {
-            "ENABLED": True,
-            "PERCENTAGE": 10.0
+            "ENABLED": False,
+            "PERCENTAGE": 100.0,
         },
         "MAX_DURATION": {
-            "MINUTES": 0,  # 0 para ilimitado
-            "ACTION": "NEUTRAL"  # "NEUTRAL" o "STOP"
+            "ENABLED": False,
+            "MINUTES": 10080,
         }
     }
 }
@@ -101,22 +123,35 @@ OPERATION_DEFAULTS = {
     "CAPITAL": {
         "BASE_SIZE_USDT": 1.0,
         "MAX_POSITIONS": 5,
-        "LEVERAGE": 100.0,
+        "LEVERAGE": 10.0,
     },
     "RISK": {
         "INDIVIDUAL_SL_PCT": 10.0,
-        "TSL_ACTIVATION_PCT": 0.4,
-        "TSL_DISTANCE_PCT": 0.1,
+        "TSL_ACTIVATION_PCT": 0.5,
+        "TSL_DISTANCE_PCT": 0.05,
+        "AVERAGING_DISTANCE_PCT_LONG": 0.5, # Para un LONG, el precio debe CAER este % para volver a comprar.
+        "AVERAGING_DISTANCE_PCT_SHORT": 0.5, # Para un SHORT, el precio debe SUBIR este % para volver a vender.
     },
-    "PROFIT": {
-        "REINVEST_PROFIT_PCT": 10.0,
-        "COMMISSION_RATE": 0.001,
-    },
-    "LIMITS": {
-        "MAX_TRADES": 0,            # 0 para ilimitado
-        "DURATION_MINUTES": 0,      # 0 para ilimitado
-        "TP_ROI_PCT": 2.5,          # 0 para desactivado
-        "SL_ROI_PCT": 1.5,          # Siempre positivo, el código lo hará negativo
+    "OPERATION_LIMITS": {
+        "ENABLED": False,
+        "AFTER_STATE": 'PAUSADO', # PAUSADO O DETENIDO 
+        "MAX_TRADES": {
+            "ENABLED": False,
+            "VALUE": 1000,  # debe ser mayor a cero.
+        },
+        "MAX_DURATION": {
+            "ENABLED": False,
+            "MINUTES": 10080, # ~7 días. 0 para ilimitado.
+        },
+        "ROI_SL_PCT": {
+            "ENABLED": True, 
+            "PERCENTAGE": 5.0, 
+        },
+        "ROI_TSL": {
+            "ENABLED": True,
+            "ACTIVATION_PCT": 10.0,
+            "DISTANCE_PCT": 1.0,
+        },
     }
 }
 

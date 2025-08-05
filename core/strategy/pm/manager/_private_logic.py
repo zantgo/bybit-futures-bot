@@ -181,8 +181,7 @@ class _PrivateLogic:
             self._position_state.remove_logical_position(side, index)
 
             # La llamada al transfer_executor ya no necesita balance_manager y usa el monto del resultado.
-            if _transfer_executor and transferable_amount >= getattr(self._config, 'POSITION_MIN_TRANSFER_AMOUNT_USDT', 0.1):
-                # transferred = _transfer_executor.execute_transfer(amount=transferable_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config, balance_manager=None)
+            if _transfer_executor and transferable_amount >= self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]:
                 _transfer_executor.execute_transfer(amount=transferable_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
                 # La lógica de `record_real_profit_transfer` fue movida al objeto de balances.
             
