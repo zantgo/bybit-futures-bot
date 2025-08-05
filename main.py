@@ -15,7 +15,7 @@ import traceback
 # --- Importaciones de Componentes y Dependencias ---
 try:
     # Paquete del Menú (TUI)
-    from core.menu import launch_bot
+    from core.menu import launch_bot, clear_screen
     
     # Paquete de Logging
     from core import logging as logging_package
@@ -36,6 +36,9 @@ if __name__ == "__main__":
     """
     Ensambla las dependencias, instancia el BotController y lanza la TUI.
     """
+
+    # Limpiar la pantalla al iniciar el programa
+    clear_screen()
     
     # 1. Inicializar el sistema de logging asíncrono de archivos PRIMERO.
     logging_package.initialize_loggers()
