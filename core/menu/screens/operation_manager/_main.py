@@ -140,9 +140,8 @@ def _show_single_operation_view(side: str):
             if not summary or summary.get('error'):
                 error_msg = summary.get('error', 'No se pudo obtener el estado de la operación.')
                 print(f"\n\033[91mADVERTENCIA: {error_msg}\033[0m")
-                menu_items = ["[r] Reintentar", "[b] Volver al Selector/Dashboard"]
-                menu_options = MENU_STYLE.copy()
-                menu_options['clear_screen'] = False
+                menu_items = ["[r] Reintentar", "[b] Volver"]
+                menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
                 choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
                 if choice == 0: continue
                 else: break
@@ -151,33 +150,39 @@ def _show_single_operation_view(side: str):
             _displayers._display_capital_stats(summary, operacion, side, current_price)
             _displayers._display_positions_tables(summary, operacion, current_price, side) 
             _displayers._display_operation_conditions(operacion)
-
-            menu_items, action_map = [], {}
+            
+            # --- INICIO DE LA MODIFICACIÓN: Lógica de construcción de menú y acciones simplificada y corregida ---
+            
+            menu_items = []
+            actions = []  # Lista paralela a menu_items que contendrá las claves de acción
             current_state = operacion.estado
 
             if current_state == 'DETENIDA':
                 menu_items.append("[1] Configurar e Iniciar Nueva Operación")
-                action_map = {0: "start_new"}
-            
+                actions.append("start_new")
             elif current_state == 'PAUSADA':
                 menu_items.append("[1] Reanudar Operación")
+                actions.append("resume")
                 menu_items.append("[2] Modificar Parámetros")
+                actions.append("modify")
                 menu_items.append("[3] Detener Operación (Cierre Forzoso)")
-                action_map = {0: "resume", 1: "modify", 2: "stop"}
-
+                actions.append("stop")
             elif current_state == 'EN_ESPERA':
                 menu_items.append("[1] Pausar Operación")
+                actions.append("pause")
                 menu_items.append("[2] Forzar Inicio (Activar Manualmente)")
+                actions.append("force_start")
                 menu_items.append("[3] Modificar Parámetros")
+                actions.append("modify")
                 menu_items.append("[4] Detener Operación (Cierre Forzoso)")
-                action_map = {0: "pause", 1: "force_start", 2: "modify", 3: "stop"}
-
+                actions.append("stop")
             elif current_state == 'ACTIVA':
                 menu_items.append("[1] Pausar Operación")
+                actions.append("pause")
                 menu_items.append("[2] Modificar Parámetros")
+                actions.append("modify")
                 menu_items.append("[3] Detener Operación (Cierre Forzoso)")
-                action_map = {0: "pause", 1: "modify", 2: "stop"}
-            
+                actions.append("stop")
             elif current_state == 'DETENIENDO':
                 print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
                 print("   Cerrando posiciones y reseteando estado. La pantalla se refrescará automáticamente.")
@@ -188,25 +193,32 @@ def _show_single_operation_view(side: str):
             if open_positions_count > 0 and current_state not in ['DETENIDA', 'DETENIENDO']:
                 next_idx = len(menu_items)
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
-                action_map[next_idx] = "panic_close"
+                actions.append("panic_close")
 
+            # Añadir las acciones comunes al final
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
-            common_actions_keys = ["refresh", "help", "back"]
+            actions.extend([None, "refresh", "help", "back"])
             
-            non_none_items = [item for item in menu_items if item is not None]
-            last_action_idx = len(non_none_items) - len(common_actions_keys) - 1
-
-            action_map[last_action_idx + 1] = "refresh"
-            action_map[last_action_idx + 2] = "help"
-            action_map[last_action_idx + 3] = "back"
-
-            # Creamos una copia local de los estilos y desactivamos el borrado de pantalla
             menu_options = MENU_STYLE.copy()
             menu_options['clear_screen'] = False
-            main_menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
-            choice = main_menu.show()
             
-            action = action_map.get(choice)
+            main_menu = TerminalMenu(
+                # Filtramos los None para que el menú no los muestre como seleccionables
+                [item for item in menu_items if item is not None],
+                title="\nAcciones:", 
+                **menu_options
+            )
+            choice_index = main_menu.show()
+            
+            action = None
+            if choice_index is not None:
+                # Usamos el índice para encontrar la acción en nuestra lista paralela
+                # Primero, creamos una lista de acciones sin los None
+                selectable_actions = [act for act in actions if act is not None]
+                if choice_index < len(selectable_actions):
+                    action = selectable_actions[choice_index]
+            
+            # --- FIN DE LA MODIFICACIÓN ---
             
             if action == "start_new": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=False)
@@ -246,7 +258,7 @@ def _show_single_operation_view(side: str):
                 continue
             elif action == "help": 
                 show_help_popup("auto_mode")
-            elif action == "back" or choice is None:
+            elif action == "back" or action is None:
                 break
         
         except Exception as e:
