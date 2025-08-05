@@ -87,34 +87,36 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         entry_cond_str = "No definida"
     _print_line("Condición", entry_cond_str, len("Condición"))
     
-    # --- SECCIÓN: LÍMITES DE OPERACIÓN (DISYUNTORES) ---
-    print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_config_box_line("Límites de la Operación (Disyuntores)", box_width))
+    # --- INICIO DE LA MODIFICACIÓN: Bloque de salida unificado ---
     
+    # --- SECCIÓN: CONDICIONES Y LÍMITES DE SALIDA ---
+    print("├" + "─" * (box_width - 2) + "┤")
+    print(_create_config_box_line("Condiciones y Límites de Salida (Cualquiera activa la salida)", box_width))
+    
+    if params.get('tipo_cond_salida'):
+        op = ">" if params.get('tipo_cond_salida') == 'PRICE_ABOVE' else "<"
+        exit_price_str = f"Precio {op} {params.get('valor_cond_salida', 0.0):.4f}"
+    else:
+        exit_price_str = "Desactivado"
+        
     sl_roi_val = params.get('sl_roi_pct')
     tsl_act_val = params.get('tsl_roi_activacion_pct')
-    limits_data = {
+    
+    exit_conditions_data = {
+        "Salida por Precio": exit_price_str,
         "Límite SL por ROI (%)": f"-{abs(sl_roi_val)}" if sl_roi_val else "Desactivado",
         "Límite TSL-ROI (Act/Dist %)": f"+{tsl_act_val}% / {params.get('tsl_roi_distancia_pct')}%" if tsl_act_val else "Desactivado",
-        "Límite de Trades": params.get('max_comercios') or "Ilimitado",
         "Límite de Duración (min)": params.get('tiempo_maximo_min') or "Ilimitado",
+        "Límite de Trades": params.get('max_comercios') or "Ilimitado",
     }
-    max_key_len = max(len(k) for k in limits_data.keys())
-    for label, value in limits_data.items():
+    max_key_len = max(len(k) for k in exit_conditions_data.keys())
+    for label, value in exit_conditions_data.items():
         _print_line(label, value, max_key_len)
     
     print("├" + "─" * (box_width - 2) + "┤")
-    _print_line("Acción al Cumplir Límite", params.get('accion_al_finalizar', 'PAUSAR'), max_key_len)
+    _print_line("Acción al Finalizar", params.get('accion_al_finalizar', 'PAUSAR'), max_key_len)
 
-    # --- SECCIÓN: CONDICIÓN DE SALIDA ADICIONAL (PRECIO) ---
-    print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_config_box_line("Condición de Salida Adicional (Precio)", box_width))
-    if params.get('tipo_cond_salida'):
-        op = ">" if params.get('tipo_cond_salida') == 'PRICE_ABOVE' else "<"
-        exit_cond_str = f"Precio {op} {params.get('valor_cond_salida', 0.0):.4f}"
-    else:
-        exit_cond_str = "Sin condición de precio (los límites se aplican solos)"
-    _print_line("Condición", exit_cond_str, len("Condición"))
+    # --- FIN DE LA MODIFICACIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
 
@@ -159,14 +161,12 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         box_width = _get_terminal_width()
         _display_setup_box(temp_params, box_width, is_modification)
 
-        # --- INICIO DE LA MODIFICACIÓN: Nuevo orden del menú ---
+        # --- INICIO DE LA MODIFICACIÓN: Menú de edición simplificado ---
         menu_items = [
-            "[1] Editar Precio de Entrada",
-            "[2] Editar Precio de Salida",
-            None,
-            "[3] Editar Capital y Apalancamiento",
-            "[4] Editar Riesgo por Posición (SL/TSL)",
-            "[5] Editar Límites de Operación (ROI, Trades, Duración)",
+            "[1] Editar Capital y Apalancamiento",
+            "[2] Editar Riesgo por Posición (SL/TSL)",
+            "[3] Editar Condición de Entrada",
+            "[4] Editar Condiciones y Límites de Salida",
             None,
             "[s] Guardar Cambios",
             "[c] Cancelar y Volver"
@@ -179,28 +179,13 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         choice = menu.show()
 
         try:
-            # --- INICIO DE LA MODIFICACIÓN: Nueva lógica de selección para coincidir con el menú ---
-            if choice == 0: # Editar Precio de Entrada
-                entry_menu = TerminalMenu(["[1] Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a"], title="Condición de Entrada:").show()
-                if entry_menu == 0: temp_params.update({'tipo_cond_entrada': 'MARKET', 'valor_cond_entrada': 0.0})
-                elif entry_menu == 1: temp_params.update({'tipo_cond_entrada': 'PRICE_ABOVE', 'valor_cond_entrada': get_input("Activar si precio >", float)})
-                elif entry_menu == 2: temp_params.update({'tipo_cond_entrada': 'PRICE_BELOW', 'valor_cond_entrada': get_input("Activar si precio <", float)})
-                params_changed = True
-            
-            elif choice == 1: # Editar Precio de Salida
-                exit_price_menu = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si precio SUPERIOR a", "[3] Salir si precio INFERIOR a"], title="Condición de Salida por Precio:").show()
-                if exit_price_menu == 0: temp_params.update({'tipo_cond_salida': None, 'valor_cond_salida': None})
-                elif exit_price_menu == 1: temp_params.update({'tipo_cond_salida': 'PRICE_ABOVE', 'valor_cond_salida': get_input("Salir si precio >", float)})
-                elif exit_price_menu == 2: temp_params.update({'tipo_cond_salida': 'PRICE_BELOW', 'valor_cond_salida': get_input("Salir si precio <", float)})
-                params_changed = True
-
-            elif choice == 3: # Editar Capital y Apalancamiento
+            # --- INICIO DE LA MODIFICACIÓN: Lógica de selección actualizada y reordenada ---
+            if choice == 0: # Capital
                 temp_params['tamaño_posicion_base_usdt'] = get_input("Nuevo Tamaño Base (USDT)", float, temp_params['tamaño_posicion_base_usdt'])
                 temp_params['max_posiciones_logicas'] = get_input("Nuevo Máx. de Posiciones", int, temp_params['max_posiciones_logicas'])
                 temp_params['apalancamiento'] = get_input("Nuevo Apalancamiento", float, temp_params['apalancamiento'])
                 params_changed = True
-
-            elif choice == 4: # Editar Riesgo por Posición
+            elif choice == 1: # Riesgo por Posición
                 temp_params['sl_posicion_individual_pct'] = get_input("Nuevo SL Individual (%)", float, temp_params.get('sl_posicion_individual_pct'), is_optional=True)
                 temp_params['tsl_activacion_pct'] = get_input("Nueva Activación TSL (%)", float, temp_params.get('tsl_activacion_pct'), is_optional=True)
                 if temp_params.get('tsl_activacion_pct'):
@@ -208,11 +193,27 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 else:
                     temp_params['tsl_distancia_pct'] = None
                 params_changed = True
-
-            elif choice == 5: # Editar Límites de Operación
+            elif choice == 2: # Condición de Entrada
+                entry_menu = TerminalMenu(["[1] Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a"], title="Condición de Entrada:").show()
+                if entry_menu == 0: temp_params.update({'tipo_cond_entrada': 'MARKET', 'valor_cond_entrada': 0.0})
+                elif entry_menu == 1: temp_params.update({'tipo_cond_entrada': 'PRICE_ABOVE', 'valor_cond_entrada': get_input("Activar si precio >", float)})
+                elif entry_menu == 2: temp_params.update({'tipo_cond_entrada': 'PRICE_BELOW', 'valor_cond_entrada': get_input("Activar si precio <", float)})
+                params_changed = True
+            
+            elif choice == 3: # Condiciones y Límites de Salida (Bloque unificado)
+                print("\n--- Editando Condiciones de Salida ---")
+                
+                # 1. Salida por Precio
+                exit_price_menu = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si precio SUPERIOR a", "[3] Salir si precio INFERIOR a"], title="Condición de Salida por Precio:").show()
+                if exit_price_menu == 0: temp_params.update({'tipo_cond_salida': None, 'valor_cond_salida': None})
+                elif exit_price_menu == 1: temp_params.update({'tipo_cond_salida': 'PRICE_ABOVE', 'valor_cond_salida': get_input("Salir si precio >", float)})
+                elif exit_price_menu == 2: temp_params.update({'tipo_cond_salida': 'PRICE_BELOW', 'valor_cond_salida': get_input("Salir si precio <", float)})
+                
+                # 2. SL por ROI
                 sl_roi_val = get_input("Límite SL por ROI (%) (positivo)", float, abs(temp_params.get('sl_roi_pct')) if temp_params.get('sl_roi_pct') else None, is_optional=True)
                 temp_params['sl_roi_pct'] = -abs(sl_roi_val) if sl_roi_val else None
 
+                # 3. TSL por ROI
                 tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_params.get('tsl_roi_activacion_pct'), is_optional=True)
                 if tsl_act:
                     temp_params['tsl_roi_activacion_pct'] = tsl_act
@@ -221,15 +222,20 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     temp_params['tsl_roi_activacion_pct'] = None
                     temp_params['tsl_roi_distancia_pct'] = None
                 
-                temp_params['max_comercios'] = get_input("Límite de Trades", int, temp_params.get('max_comercios'), is_optional=True)
+                # 4. Límite de Duración
                 temp_params['tiempo_maximo_min'] = get_input("Límite de Duración (min)", int, temp_params.get('tiempo_maximo_min'), is_optional=True)
-                
-                action_menu = TerminalMenu(["[1] Pausar Operación", "[2] Detener y Resetear"], title="Acción al Cumplir Límite:").show()
+
+                # 5. Límite de Trades
+                temp_params['max_comercios'] = get_input("Límite de Trades", int, temp_params.get('max_comercios'), is_optional=True)
+
+                # 6. Acción al Finalizar
+                action_menu = TerminalMenu(["[1] Pausar Operación", "[2] Detener y Resetear"], title="Acción al Cumplir CUALQUIER Límite:").show()
                 if action_menu == 0: temp_params['accion_al_finalizar'] = 'PAUSAR'
                 elif action_menu == 1: temp_params['accion_al_finalizar'] = 'DETENER'
+                
                 params_changed = True
 
-            elif choice == 7: # Guardar (índice actualizado)
+            elif choice == 5: # Guardar (índice actualizado)
                 if not params_changed and is_modification:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     break
@@ -244,7 +250,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     print(f"\n{msg}"); time.sleep(2.5)
                     break
             
-            elif choice == 8 or choice is None: # Cancelar (índice actualizado)
+            elif choice == 6 or choice is None: # Cancelar (índice actualizado)
                 if params_changed:
                     cancel_confirm = TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show()
                     if cancel_confirm == 0:
