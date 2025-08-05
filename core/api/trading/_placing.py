@@ -1,4 +1,4 @@
-# core/api/trading/_placing.py
+# ./core/api/trading/_placing.py
 
 """
 Módulo para la Colocación de Órdenes.
@@ -100,15 +100,27 @@ def place_market_order(
         "reduceOnly": bool(reduce_only)
     }
     
-    # Añadir lógica de positionIdx para Hedge Mode
+    # --- INICIO DE LA CORRECCIÓN CRÍTICA DE positionIdx ---
     is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
     if is_hedge_mode:
-        if position_idx is None:
-            # Por defecto: 1 para Long (Buy), 2 para Short (Sell)
-            position_idx = 1 if side == "Buy" else 2
-        params["positionIdx"] = position_idx
+        if position_idx is not None:
+            # Si se proporciona un position_idx explícitamente (como desde _closing.py), se respeta.
+            params["positionIdx"] = position_idx
+        else:
+            # Lógica para órdenes de APERTURA (no reduce-only)
+            if not reduce_only:
+                # Una orden 'Buy' abre una posición LONG (idx 1)
+                # Una orden 'Sell' abre una posición SHORT (idx 2)
+                params["positionIdx"] = 1 if side == "Buy" else 2
+            # Lógica para órdenes de CIERRE (reduce-only)
+            else:
+                # Una orden 'Buy' (para cerrar) cierra una posición SHORT (idx 2)
+                # Una orden 'Sell' (para cerrar) cierra una posición LONG (idx 1)
+                params["positionIdx"] = 2 if side == "Buy" else 1
     else:
+        # Modo One-Way siempre usa positionIdx 0
         params["positionIdx"] = 0
+    # --- FIN DE LA CORRECCIÓN CRÍTICA DE positionIdx ---
 
     # 4. Ejecutar la llamada a la API
     memory_logger.log(f"Enviando orden MARKET a cuenta '{target_account}': {params}", level="INFO")
