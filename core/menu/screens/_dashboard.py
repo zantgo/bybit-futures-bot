@@ -98,6 +98,23 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         press_enter_to_continue()
         return
 
+    # --- INICIO DE LA MODIFICACIÓN: Añadir Configuración del Bot ---
+    if config_module:
+        print("\n--- Configuración del Bot ---")
+        bot_cfg = config_module.BOT_CONFIG
+        modo_trading_str = "Paper Trading" if bot_cfg.get("PAPER_TRADING_MODE", False) else "Live Trading"
+        
+        bot_params_to_show = {
+            "Exchange": bot_cfg.get("EXCHANGE_NAME", "N/A").upper(),
+            "Símbolo Ticker": bot_cfg.get("TICKER", {}).get("SYMBOL", "N/A"),
+            "Modo de Trading": modo_trading_str,
+            "Modo Testnet": "ACTIVADO" if bot_cfg.get("UNIVERSAL_TESTNET_MODE", False) else "DESACTIVADO"
+        }
+        max_bot_key_len = max(len(k) for k in bot_params_to_show.keys())
+        for key, value in bot_params_to_show.items():
+            print(f"  {key:<{max_bot_key_len}} : {value}")
+    # --- FIN DE LA MODIFICACIÓN ---
+
     realized_pnl = summary.get('total_session_pnl', 0.0)
     initial_capital = summary.get('total_session_initial_capital', 0.0)
     final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
@@ -112,7 +129,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     print(f"  ROI Final (Realizado): {final_roi:+.2f}%")
     print(f"  Duración Total: {duration_str}")
 
-    # --- INICIO DE LA MODIFICACIÓN: Añadir sección de estado de operaciones ---
     print("\n--- Estado Final de las Operaciones ---")
     sides = ['long', 'short']
     for side in sides:
@@ -134,7 +150,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         print(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
         print(f"    - PNL (Realizado+No R.) : {pnl:+.4f} USDT")
         print(f"    - ROI                   : {roi:+.2f}%")
-    # --- FIN DE LA MODIFICACIÓN ---
 
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
@@ -161,15 +176,9 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
             "Período EMA": session_cfg['TA']['EMA_WINDOW'] if session_cfg['TA']['ENABLED'] else "Desactivado",
             "Margen Compra (%)": session_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
             "Margen Venta (%)": session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
-            "Umbral Incremento Señal": session_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
-            "Umbral Decremento Señal": session_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
             "Comisión (%)": f"{session_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
             "Reinvertir Ganancias (%)": session_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
-            "SL por ROI (%)": f"-{session_cfg['SESSION_LIMITS']['ROI_SL']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_SL']['ENABLED'] else "Desactivado",
-            "TP por ROI (%)": f"+{session_cfg['SESSION_LIMITS']['ROI_TP']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_TP']['ENABLED'] else "Desactivado",
-            "Duración Máx. (min)": session_cfg['SESSION_LIMITS']['MAX_DURATION']['MINUTES'] if session_cfg['SESSION_LIMITS']['MAX_DURATION']['ENABLED'] else "Desactivado",
         }
-        
         max_key_len = max(len(k) for k in params_to_show.keys())
         for key, value in params_to_show.items():
             print(f"  {key:<{max_key_len}} : {value}")

@@ -1,4 +1,5 @@
 # ./core/strategy/pm/_executor.py
+
 import datetime
 import uuid
 import traceback
@@ -42,15 +43,14 @@ class PositionExecutor:
         self._helpers = helpers
         self._closed_position_logger = closed_position_logger
         
-        # --- INICIO DE LA CORRECCIÓN ---
         self._symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         self._price_prec = self._config.PRECISION_FALLBACKS["PRICE_PRECISION"]
         self._pnl_prec = self._config.PRECISION_FALLBACKS["PNL_PRECISION"]
-        # --- FIN DE LA CORRECCIÓN ---
         
         memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
     def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float, tsl_activation_pct: float, tsl_distance_pct: float) -> Dict[str, Any]:
+        """Orquesta la apertura de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'api_order_id': None, 'logical_position_object': None, 'message': 'Error no especificado'}
         operacion = self._state_manager._om_api.get_operation_by_side(side)
         if not operacion:
@@ -62,8 +62,12 @@ class PositionExecutor:
 
         try:
             calc_qty_result = self._helpers.calculate_and_round_quantity(
-                margin_usdt=margin_to_use, entry_price=entry_price, leverage=leverage, 
-                symbol=self._symbol, is_live=True, exchange_adapter=self._exchange
+                margin_usdt=margin_to_use, 
+                entry_price=entry_price, 
+                leverage=leverage, 
+                symbol=self._symbol, 
+                is_live=True,
+                exchange_adapter=self._exchange
             )
             if not calc_qty_result['success']:
                 result['message'] = calc_qty_result['error']
@@ -82,38 +86,60 @@ class PositionExecutor:
             return result
         
         logical_position_id = str(uuid.uuid4())
+        
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
         new_position_obj = LogicalPosition(
-            id=logical_position_id, entry_timestamp=timestamp, entry_price=entry_price,
-            margin_usdt=margin_to_use, size_contracts=size_contracts_float, leverage=leverage, 
-            stop_loss_price=stop_loss_price, est_liq_price=est_liq_price, ts_is_active=False,
-            ts_peak_price=None, ts_stop_price=None, api_order_id=None,
-            tsl_activation_pct_at_open=tsl_activation_pct, tsl_distance_pct_at_open=tsl_distance_pct
+            id=logical_position_id, 
+            entry_timestamp=timestamp, 
+            entry_price=entry_price,
+            margin_usdt=margin_to_use, 
+            size_contracts=size_contracts_float,
+            leverage=leverage, 
+            stop_loss_price=stop_loss_price,
+            est_liq_price=est_liq_price, 
+            ts_is_active=False,
+            ts_peak_price=None, 
+            ts_stop_price=None, 
+            api_order_id=None,
+            tsl_activation_pct_at_open=tsl_activation_pct,
+            tsl_distance_pct_at_open=tsl_distance_pct
         )
         result['logical_position_object'] = new_position_obj
 
         execution_success = False
         api_order_id = None
-        try:
-            order_to_place = StandardOrder(
-                symbol=self._symbol, side="buy" if side == 'long' else "sell",
-                order_type="market", quantity_contracts=float(size_contracts_str),
-                reduce_only=False
-            )
-            account_purpose = 'longs' if side == 'long' else 'shorts'
-            success, order_id_or_error = self._exchange.place_order(order_to_place, account_purpose=account_purpose)
-            
-            if success:
-                execution_success = True
-                api_order_id = order_id_or_error
-                memory_logger.log(f"  -> ÉXITO EXCHANGE: Orden Market aceptada. OrderID: {api_order_id}")
-            else:
-                result['message'] = f"Fallo en Exchange al colocar orden Market: {order_id_or_error}"
-                memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
-        except Exception as exec_err:
-            result['message'] = f"Excepción durante ejecución de orden: {exec_err}"
+        
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Paper Trading ---
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            memory_logger.log(f"  -> MODO PAPEL: Simulación de orden Market aceptada.", "WARN")
+            execution_success = True
+            api_order_id = f"paper-open-{uuid.uuid4()}"
+        else:
+            # --- Lógica de Trading Real (código existente) ---
+            try:
+                order_to_place = StandardOrder(
+                    symbol=self._symbol,
+                    side="buy" if side == 'long' else "sell",
+                    order_type="market",
+                    quantity_contracts=float(size_contracts_str),
+                    reduce_only=False
+                )
+                
+                account_purpose = 'longs' if side == 'long' else 'shorts'
+                success, order_id_or_error = self._exchange.place_order(order_to_place, account_purpose=account_purpose)
+                
+                if success:
+                    execution_success = True
+                    api_order_id = order_id_or_error
+                    memory_logger.log(f"  -> ÉXITO EXCHANGE: Orden Market aceptada. OrderID: {api_order_id}")
+                else:
+                    result['message'] = f"Fallo en Exchange al colocar orden Market: {order_id_or_error}"
+                    memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
+            except Exception as exec_err:
+                result['message'] = f"Excepción durante ejecución de orden: {exec_err}"
+        # --- FIN DE LA MODIFICACIÓN ---
 
         if execution_success:
             new_position_obj.api_order_id = api_order_id
@@ -124,6 +150,7 @@ class PositionExecutor:
         return result
 
     def execute_close(self, position_to_close: LogicalPosition, side: str, exit_price: float, timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
+        """Orquesta el cierre de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
         
         pos_id_short = str(position_to_close.id)[-6:]
@@ -138,28 +165,40 @@ class PositionExecutor:
         size_to_close_str = format_qty_result['qty_str']
         
         execution_success = False
-        try:
-            order_to_close = StandardOrder(
-                symbol=self._symbol, side="sell" if side == 'long' else "buy",
-                order_type="market", quantity_contracts=float(size_to_close_str),
-                reduce_only=True
-            )
-            account_purpose = 'longs' if side == 'long' else 'shorts'
-            success, response_msg = self._exchange.place_order(order_to_close, account_purpose=account_purpose)
-            
-            if success:
-                execution_success = True
-            else:
-                if "position does not exist" in response_msg.lower() or "110001" in response_msg:
+        
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Paper Trading ---
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            memory_logger.log(f"  -> MODO PAPEL: Simulación de orden de cierre aceptada para ID {pos_id_short}.", "WARN")
+            execution_success = True
+        else:
+            # --- Lógica de Trading Real (código existente) ---
+            try:
+                order_to_close = StandardOrder(
+                    symbol=self._symbol,
+                    side="sell" if side == 'long' else "buy",
+                    order_type="market",
+                    quantity_contracts=float(size_to_close_str),
+                    reduce_only=True
+                )
+                
+                account_purpose = 'longs' if side == 'long' else 'shorts'
+                success, response_msg = self._exchange.place_order(order_to_close, account_purpose=account_purpose)
+                
+                if success:
                     execution_success = True
-                    memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
                 else:
-                    result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
-        except Exception as e:
-            result['message'] = f"Excepción durante ejecución de cierre: {e}"
+                    if "position does not exist" in response_msg.lower() or "110001" in response_msg:
+                        execution_success = True
+                        memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
+                    else:
+                        result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
+            except Exception as e:
+                result['message'] = f"Excepción durante ejecución de cierre: {e}"
+        # --- FIN DE LA MODIFICACIÓN ---
 
         if execution_success:
             removed_pos_dict = asdict(position_to_close)
+
             calc_res = self._calculations.calculate_pnl_commission_reinvestment(
                 side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
             )
@@ -175,12 +214,20 @@ class PositionExecutor:
         return result
 
     def sync_physical_state(self, side: str):
+        """Sincroniza el estado físico interno con el real del exchange."""
+        # --- INICIO DE LA MODIFICACIÓN: Omitir en Paper Trading ---
+        # En modo papel, no hay estado físico real que sincronizar.
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            return
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         try:
             account_purpose = 'longs' if side == 'long' else 'shorts'
             standard_positions = self._exchange.get_positions(self._symbol, account_purpose=account_purpose)
             if standard_positions is None: return
 
             positions_for_side = [p for p in standard_positions if p.side == side]
+            
             state_data = self._helpers.extract_physical_state_from_standard_positions(positions_for_side, self._utils)
             
             if state_data:

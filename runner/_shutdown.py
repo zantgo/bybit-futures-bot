@@ -7,8 +7,6 @@ import datetime
 from typing import Any, Dict
 import os
 
-# --- INICIO DE LA MODIFICACIÓN: Nueva función para escribir el resumen ---
-
 def _write_session_summary_to_file(
     final_summary: Dict[str, Any],
     config_module: Any
@@ -16,17 +14,19 @@ def _write_session_summary_to_file(
     """
     Formatea el resumen final de la sesión y lo guarda en un archivo de texto.
     """
+    # --- INICIO DE LA CORRECCIÓN: Importar pm_api para obtener el start_time ---
+    from core.strategy.pm import api as pm_api
+    # --- FIN DE LA CORRECCIÓN ---
+
     if not final_summary or final_summary.get('error'):
         print("No se generará archivo de resumen debido a un error en los datos.")
         return
 
     try:
-        # Crear un nombre de archivo único con timestamp
         now = datetime.datetime.now(datetime.timezone.utc)
         filename = f"session_summary_{now.strftime('%Y%m%d_%H%M%S')}.txt"
         filepath = os.path.join(config_module.RESULTS_DIR, filename)
 
-        # Preparar el contenido del archivo
         content = []
         
         # --- Cabecera ---
@@ -35,13 +35,28 @@ def _write_session_summary_to_file(
         content.append(f"Finalizada el: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}".center(80))
         content.append("="*80)
 
+        # --- Configuración del Bot ---
+        content.append("\n--- Configuración del Bot ---")
+        bot_cfg = config_module.BOT_CONFIG
+        modo_trading_str = "Paper Trading" if bot_cfg["PAPER_TRADING_MODE"] else "Live Trading"
+        
+        bot_params_to_show = {
+            "Exchange": bot_cfg["EXCHANGE_NAME"].upper(),
+            "Símbolo Ticker": bot_cfg["TICKER"]["SYMBOL"],
+            "Modo de Trading": modo_trading_str,
+            "Modo Testnet": "ACTIVADO" if bot_cfg["UNIVERSAL_TESTNET_MODE"] else "DESACTIVADO"
+        }
+        max_bot_key_len = max(len(k) for k in bot_params_to_show.keys())
+        for key, value in bot_params_to_show.items():
+            content.append(f"  {key:<{max_bot_key_len}} : {value}")
+
         # --- Rendimiento General ---
         content.append("\n--- Rendimiento General ---")
         realized_pnl = final_summary.get('total_session_pnl', 0.0)
         initial_capital = final_summary.get('total_session_initial_capital', 0.0)
         final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
         
-        start_time_obj = final_summary.get('session_start_time')
+        start_time_obj = pm_api.get_session_start_time()
         duration_str = "N/A"
         if start_time_obj:
             duration = now - start_time_obj
@@ -63,11 +78,11 @@ def _write_session_summary_to_file(
             capital_usado = balance_info.get('used_margin', 0.0)
             capital_operativo = balance_info.get('operational_margin', 0.0)
             pos_count = final_summary.get(f'open_{side}_positions_count', 0)
-            max_pos = op_info.get('max_posiciones_logicas', 'N/A')
+            # max_pos no está disponible de forma fiable aquí, lo omitimos para evitar errores
             
             content.append(f"\n  Operación {side.upper()}:")
             content.append(f"    - Estado Final          : {op_info.get('estado', 'DETENIDA').upper()}")
-            content.append(f"    - Posiciones Abiertas   : {pos_count} / {max_pos}")
+            content.append(f"    - Posiciones Abiertas   : {pos_count}")
             content.append(f"    - Capital (Usado/Total) : ${capital_usado:.2f} / ${capital_operativo:.2f}")
             content.append(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
             content.append(f"    - PNL (Realizado+No R.) : {pnl:+.4f} USDT")
@@ -86,14 +101,11 @@ def _write_session_summary_to_file(
             "Margen Venta (%)": f"{session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE']}" if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
             "Comisión (%)": f"{session_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
             "Reinvertir Ganancias (%)": session_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
-            "SL por ROI (%)": f"-{session_cfg['SESSION_LIMITS']['ROI_SL']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_SL']['ENABLED'] else "Desactivado",
-            "TP por ROI (%)": f"+{session_cfg['SESSION_LIMITS']['ROI_TP']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_TP']['ENABLED'] else "Desactivado",
         }
         max_key_len = max(len(k) for k in params_to_show.keys())
         for key, value in params_to_show.items():
             content.append(f"  {key:<{max_key_len}} : {value}")
 
-        # --- Escribir al archivo ---
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(content))
         
@@ -101,8 +113,6 @@ def _write_session_summary_to_file(
 
     except Exception as e:
         print(f"\nERROR: No se pudo escribir el archivo de resumen de sesión: {e}")
-
-# --- FIN DE LA MODIFICACIÓN ---
 
 
 def shutdown_session_backend(
@@ -137,9 +147,7 @@ def shutdown_session_backend(
         
         print("Resumen final de la sesión obtenido y logueado.")
         
-        # --- INICIO DE LA MODIFICACIÓN: Llamar a la nueva función ---
         _write_session_summary_to_file(final_summary, config_module)
-        # --- FIN DE LA MODIFICACIÓN ---
 
     else:
         final_summary['error'] = 'No se pudo obtener el resumen final de la sesión.'
