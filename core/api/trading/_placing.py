@@ -32,54 +32,35 @@ except ImportError:
 # Importar helpers del paquete y del sub-paquete
 from .._helpers import _handle_api_error_generic
 from ._helpers import _validate_and_round_quantity
-
 def place_market_order(
     symbol: str,
     side: str,
     quantity: Union[float, str],
     reduce_only: bool = False,
-    position_idx: Optional[int] = None,
+    position_idx: Optional[int] = None, # Lo recibimos, pero ya no lo calculamos aquí
     account_name: Optional[str] = None
 ) -> Optional[dict]:
     """
     Coloca una orden de mercado en Bybit (v5 API).
-
-    Delega la validación y redondeo de la cantidad al helper y utiliza
-    la lógica centralizada para seleccionar la cuenta de trading correcta.
-
-    Args:
-        symbol (str): El símbolo del instrumento.
-        side (str): 'Buy' o 'Sell'.
-        quantity (Union[float, str]): La cantidad deseada de la orden.
-        reduce_only (bool): Flag para órdenes de solo reducción.
-        position_idx (Optional[int]): Índice de posición para Hedge Mode.
-        account_name (Optional[str]): Nombre de una cuenta específica a usar (override).
-
-    Returns:
-        Optional[dict]: La respuesta de la API si la orden es aceptada, o None si hay un error previo.
     """
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Obtenemos la instancia JUSTO cuando se necesita.
     connection_manager = get_connection_manager_instance()
     if not (connection_manager and config):
-    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Place Order]: Dependencias no disponibles.", level="ERROR")
         return None
     if side not in ["Buy", "Sell"]:
         memory_logger.log(f"ERROR [Place Order]: Lado inválido '{side}'.", level="ERROR")
         return None
 
-    # 1. Validar y formatear la cantidad usando el helper
+    # 1. Validar y formatear la cantidad
     qty_str_api = _validate_and_round_quantity(
         quantity=quantity,
         symbol=symbol,
         reduce_only=reduce_only
     )
     if qty_str_api is None:
-        # El helper ya habrá logueado el error específico
         return None
 
-    # 2. Obtener la sesión API correcta para la operación
+    # 2. Obtener la sesión API correcta
     op_side = 'long' if side == 'Buy' else 'short'
     session, target_account = connection_manager.get_session_for_operation(
         purpose='trading',
@@ -100,27 +81,11 @@ def place_market_order(
         "reduceOnly": bool(reduce_only)
     }
     
-    # --- INICIO DE LA CORRECCIÓN CRÍTICA DE positionIdx ---
-    is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
-    if is_hedge_mode:
-        if position_idx is not None:
-            # Si se proporciona un position_idx explícitamente (como desde _closing.py), se respeta.
-            params["positionIdx"] = position_idx
-        else:
-            # Lógica para órdenes de APERTURA (no reduce-only)
-            if not reduce_only:
-                # Una orden 'Buy' abre una posición LONG (idx 1)
-                # Una orden 'Sell' abre una posición SHORT (idx 2)
-                params["positionIdx"] = 1 if side == "Buy" else 2
-            # Lógica para órdenes de CIERRE (reduce-only)
-            else:
-                # Una orden 'Buy' (para cerrar) cierra una posición SHORT (idx 2)
-                # Una orden 'Sell' (para cerrar) cierra una posición LONG (idx 1)
-                params["positionIdx"] = 2 if side == "Buy" else 1
-    else:
-        # Modo One-Way siempre usa positionIdx 0
-        params["positionIdx"] = 0
-    # --- FIN DE LA CORRECCIÓN CRÍTICA DE positionIdx ---
+    # --- INICIO DE LA REVERSIÓN ---
+    # La lógica compleja se elimina. Simplemente añadimos el position_idx si se proporciona.
+    if position_idx is not None:
+        params["positionIdx"] = position_idx
+    # --- FIN DE LA REVERSIÓN ---
 
     # 4. Ejecutar la llamada a la API
     memory_logger.log(f"Enviando orden MARKET a cuenta '{target_account}': {params}", level="INFO")
@@ -136,7 +101,6 @@ def place_market_order(
             order_id = response.get('result', {}).get('orderId', 'N/A')
             memory_logger.log(f"ÉXITO [Place Order]: Orden aceptada por API. OrderID: {order_id}", level="INFO")
 
-        # Se devuelve la respuesta completa (con éxito o con error de la API)
         return response
             
     except (InvalidRequestError, FailedRequestError) as api_err:

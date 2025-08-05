@@ -183,25 +183,37 @@ class BybitAdapter(AbstractExchange):
         account_name = self._purpose_to_account_name_map.get(account_purpose)
         if not account_name: return False, f"Propósito de cuenta desconocido: '{account_purpose}'"
 
-        # --- INICIO DE LA CORRECCIÓN ---
         is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
-        # --- FIN DE LA CORRECCIÓN ---
-        pos_idx = 0
+        pos_idx = 0 # Valor por defecto para modo One-Way
+
+        # --- INICIO DE LA CORRECCIÓN CRÍTICA ---
+        # La lógica para determinar el positionIdx ahora reside aquí y considera si la orden es de cierre.
         if is_hedge_mode:
-            side_map = {'buy': 'long', 'sell': 'short'}
-            pos_idx = 1 if side_map.get(order.side.lower()) == 'long' else 2
+            if not order.reduce_only:
+                # Lógica para órdenes de APERTURA
+                # Una orden de compra ('buy') abre una posición LONG (idx 1)
+                # Una orden de venta ('sell') abre una posición SHORT (idx 2)
+                pos_idx = 1 if order.side.lower() == 'buy' else 2
+            else:
+                # Lógica para órdenes de CIERRE (reduce_only = True)
+                # Una orden de compra ('buy') cierra una posición SHORT (idx 2)
+                # Una orden de venta ('sell') cierra una posición LONG (idx 1)
+                pos_idx = 2 if order.side.lower() == 'buy' else 1
+        # --- FIN DE LA CORRECCIÓN CRÍTICA ---
 
         response = bybit_api.place_market_order(
-            symbol=order.symbol, side=order.side.capitalize(),
-            quantity=order.quantity_contracts, reduce_only=order.reduce_only,
-            position_idx=pos_idx, account_name=account_name
+            symbol=order.symbol, 
+            side=order.side.capitalize(),
+            quantity=order.quantity_contracts, 
+            reduce_only=order.reduce_only,
+            position_idx=pos_idx,  # Pasamos el valor calculado correctamente
+            account_name=account_name
         )
 
         if response and response.get('retCode') == 0:
             return True, response.get('result', {}).get('orderId', 'N/A')
         else:
             return False, response.get('retMsg', 'Error desconocido') if response else 'Sin respuesta'
-
     def cancel_order(self, order_id: str, symbol: str, account_purpose: str) -> bool:
         account_name = self._purpose_to_account_name_map.get(account_purpose)
         if not account_name: return False
