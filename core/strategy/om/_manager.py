@@ -5,11 +5,8 @@ import uuid
 import threading
 from typing import Optional, Dict, Any, Tuple
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Aseguramos que todas las entidades se importen de sus fuentes únicas.
 try:
-    from ._entities import Operacion
-    from core.strategy.pm._entities import LogicalBalances # Importación directa
+    from ._entities import Operacion, LogicalBalances # Se importa LogicalBalances desde aquí
     from core.logging import memory_logger
     import config as config_module
 except ImportError:
@@ -19,9 +16,9 @@ except ImportError:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
     config_module = None
-# --- FIN DE LA MODIFICACIÓN ---
 
 class OperationManager:
+    # ... (El resto del código de esta clase NO cambia) ...
     """
     Gestiona el estado y la lógica de negocio de las operaciones estratégicas
     independientes para LONG y SHORT.
@@ -89,8 +86,6 @@ class OperationManager:
                         setattr(target_operation, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Asegurarse de que el objeto de balances existe y se actualiza correctamente
             operational_margin_nuevo = params.get('operational_margin')
             if operational_margin_nuevo is not None:
                 if not hasattr(target_operation, 'balances') or not target_operation.balances:
@@ -132,7 +127,6 @@ class OperationManager:
                 if not condicion_cumplida_ahora:
                     target_operation.estado = 'EN_ESPERA'
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
-            # --- FIN DE LA MODIFICACIÓN ---
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -202,11 +196,9 @@ class OperationManager:
             if not target_operation or target_operation.estado == 'DETENIDA':
                 return False, f"La operación {side.upper()} ya está detenida o no existe."
 
-            # Cambiar a estado intermedio
             target_operation.estado = 'DETENIENDO'
             self._memory_logger.log(f"OPERACIÓN {side.upper()} en estado DETENIENDO. Esperando cierre de posiciones por PM.", "WARN")
 
-            # Si no hay posiciones, podemos resetear inmediatamente
             if not target_operation.posiciones_activas.get(side):
                 self.revisar_y_transicionar_a_detenida(side)
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
