@@ -12,6 +12,8 @@ import datetime
 from datetime import timezone
 import textwrap
 from typing import Dict, Any, Optional, Callable
+import shutil
+import re # <-- SE AÑADE ESTA IMPORTACIÓN NECESARIA
 
 # --- Estilo Visual Consistente para simple-term-menu ---
 MENU_STYLE = {
@@ -22,7 +24,6 @@ MENU_STYLE = {
     "clear_screen": True,
 }
 
-# La constante RESET_COLOR ya fue añadida en la corrección anterior, se mantiene.
 RESET_COLOR = "\033[0m"
 
 # --- Sistema de Ayuda en Pantalla ---
@@ -58,6 +59,43 @@ def press_enter_to_continue():
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+# --- INICIO DE LA CORRECCIÓN: Añadir todas las funciones de UI faltantes ---
+
+def _get_terminal_width():
+    """Obtiene el ancho actual del terminal."""
+    try:
+        return shutil.get_terminal_size().columns
+    except:
+        return 90
+
+def _clean_ansi_codes(text: str) -> str:
+    """Función de ayuda para eliminar códigos de color ANSI de un string."""
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', str(text))
+
+def _truncate_text(text: str, max_length: int) -> str:
+    """Trunca el texto si es muy largo, añadiendo '...' al final."""
+    clean_text = _clean_ansi_codes(text)
+    if len(clean_text) <= max_length:
+        return text
+    
+    truncated_clean = clean_text[:max_length-3] + "..."
+    
+    # Intenta preservar el color si existe
+    color_codes = re.findall(r'(\x1B\[[0-?]*[ -/]*[@-~])', text)
+    if color_codes:
+        return color_codes[0] + truncated_clean + RESET_COLOR
+    return truncated_clean
+
+def _create_config_box_line(content: str, width: int) -> str:
+    """Crea una línea de caja de configuración con el contenido alineado."""
+    clean_content = _clean_ansi_codes(content)
+    # El padding se calcula restando 4 (dos bordes y dos espacios)
+    padding = ' ' * max(0, width - len(clean_content) - 4)
+    return f"│ {content}{padding} │"
+
+# --- FIN DE LA CORRECCIÓN ---
+
 def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
     if not isinstance(dt_object, datetime.datetime): return "N/A"
     try:
@@ -65,35 +103,20 @@ def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%
     except (ValueError, TypeError):
         return "Invalid DateTime"
 
-# --- INICIO DE LA MODIFICACIÓN: Actualizar la firma de la función ---
-# def print_tui_header(title: str, width: int = 80): (LÍNEA ANTIGUA COMENTADA CONCEPTUALMENTE)
-#     # La versión del código que me proporcionaste tiene una implementación de cabecera con timestamp. La mantengo intacta.
-#     timestamp_str = format_datetime_utc(datetime.datetime.now())
-#     print("=" * width)
-#     print(f"|{title.center(width - 2)}|")
-#     if timestamp_str: print(f"|{timestamp_str.center(width - 2)}|")
-#     print("=" * width)
-
 def print_tui_header(title: str, subtitle: Optional[str] = None, width: int = 90):
     """
     Imprime una cabecera TUI estandarizada, ahora con soporte para subtítulo.
-    - Se añade 'subtitle' como argumento opcional para solucionar el TypeError.
-    - Se ajusta el 'width' por defecto a 90 para mayor consistencia.
-    - Se simplifica el formato para evitar el uso de '|' y centrar el texto directamente.
     """
     print("=" * width)
     print(f"{title.center(width)}")
-    # Solo imprime el subtítulo si se proporciona uno.
     if subtitle:
         print(f"{subtitle.center(width)}")
     print("=" * width)
-# --- FIN DE LA MODIFICACIÓN ---
 
 class UserInputCancelled(Exception):
     """Excepción para ser lanzada cuando el usuario cancela un wizard de entrada."""
     pass
 
-# --- El resto del código permanece intacto ---
 def get_input(
     prompt: str,
     type_func: Callable,

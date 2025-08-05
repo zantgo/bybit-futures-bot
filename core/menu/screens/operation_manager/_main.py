@@ -1,14 +1,17 @@
+# ./core/menu/screens/operation_manager/_main.py
+
 """
 Módulo Principal del Panel de Control de Operación.
 
 v9.3 (Corrección de UI en Detener Operación):
-- Se añade un bloque de renderizado para el nuevo estado 'DETENiendo',
+- Se añade un bloque de renderizado para el nuevo estado 'DETENIENDO',
   evitando que el menú de acciones desaparezca y proporcionando feedback
   visual al usuario durante el proceso de cierre.
 """
 import time
 import datetime
 from typing import Any, Dict, Optional
+import traceback
 
 try:
     from simple_term_menu import TerminalMenu
@@ -138,7 +141,8 @@ def _show_single_operation_view(side: str):
                 error_msg = summary.get('error', 'No se pudo obtener el estado de la operación.')
                 print(f"\n\033[91mADVERTENCIA: {error_msg}\033[0m")
                 menu_items = ["[r] Reintentar", "[b] Volver al Selector/Dashboard"]
-                menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
+                menu_options = MENU_STYLE.copy()
+                menu_options['clear_screen'] = False
                 choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
                 if choice == 0: continue
                 else: break
@@ -173,9 +177,15 @@ def _show_single_operation_view(side: str):
                 menu_items.append("[2] Modificar Parámetros")
                 menu_items.append("[3] Detener Operación (Cierre Forzoso)")
                 action_map = {0: "pause", 1: "modify", 2: "stop"}
+            
+            elif current_state == 'DETENIENDO':
+                print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
+                print("   Cerrando posiciones y reseteando estado. La pantalla se refrescará automáticamente.")
+                time.sleep(2)
+                continue
 
             open_positions_count = summary.get(f'open_{side}_positions_count', 0)
-            if open_positions_count > 0 and current_state not in ['DETENIDA']:
+            if open_positions_count > 0 and current_state not in ['DETENIDA', 'DETENIENDO']:
                 next_idx = len(menu_items)
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
                 action_map[next_idx] = "panic_close"
@@ -183,12 +193,16 @@ def _show_single_operation_view(side: str):
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
             common_actions_keys = ["refresh", "help", "back"]
             
-            current_index = len(menu_items) - len(common_actions_keys)
-            for key in common_actions_keys:
-                action_map[current_index] = key
-                current_index += 1
+            non_none_items = [item for item in menu_items if item is not None]
+            last_action_idx = len(non_none_items) - len(common_actions_keys) - 1
 
-            menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
+            action_map[last_action_idx + 1] = "refresh"
+            action_map[last_action_idx + 2] = "help"
+            action_map[last_action_idx + 3] = "back"
+
+            # Creamos una copia local de los estilos y desactivamos el borrado de pantalla
+            menu_options = MENU_STYLE.copy()
+            menu_options['clear_screen'] = False
             main_menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
             choice = main_menu.show()
             
@@ -209,32 +223,22 @@ def _show_single_operation_view(side: str):
                 if confirm_menu == 0:
                     om_api.forzar_activacion_manual(side)
             
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
                 confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title)
                 
                 if confirm_menu.show() == 0:
-                    # 1. Mostrar mensaje de espera, pero sin limpiar la pantalla actual
                     print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")
-                    
-                    # 2. Ejecutar la acción síncrona
                     try:
                         success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
                         if success:
-                            # Imprimir el mensaje de éxito
                             print(f"\033[92mÉXITO:\033[0m {message}")
                         else:
-                            # Imprimir el mensaje de error
                             print(f"\033[91mERROR:\033[0m {message}")
                     except Exception as e:
                         print(f"\033[91mERROR CRÍTICO:\033[0m Excepción inesperada: {e}")
                     
-                    # 3. Pausar brevemente para que el usuario vea el resultado
                     time.sleep(2.5)
-                    # 4. No llamar a press_enter_to_continue(). El bucle se reanudará
-                    #    automáticamente, refrescando la pantalla con el nuevo estado.
-            # --- FIN DE LA MODIFICACIÓN ---
 
             elif action == "panic_close": 
                 _wizards._force_close_all_wizard(pm_api, side)
@@ -250,7 +254,6 @@ def _show_single_operation_view(side: str):
             header_title = f"Panel de Operación {side.upper()} - ERROR"
             print_tui_header(title=header_title, subtitle="Ocurrió un error crítico")
             print(f"\n\033[91mERROR CRÍTICO: {e}\033[0m\nOcurrió un error inesperado al renderizar la pantalla.")
-            import traceback
             traceback.print_exc()
             press_enter_to_continue()
             break

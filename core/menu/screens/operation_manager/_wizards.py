@@ -1,208 +1,45 @@
 """
-Módulo de Asistentes del Panel de Control de Operación.
+Módulo fachada para los Asistentes del Panel de Control de Operación.
 
-v9.3 (UX Mejora en Detener Operación):
-- Se añade `_stop_operation_wizard` para manejar la acción de detener una
-  operación, proporcionando feedback visual durante la llamada bloqueante
-  y evitando que la TUI se congele.
+Este módulo importa y delega las llamadas a los asistentes específicos.
 """
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 try:
     from simple_term_menu import TerminalMenu
 except ImportError:
     TerminalMenu = None
 
-# Importar helpers y entidades necesarios
 from ..._helpers import (
     clear_screen,
     print_tui_header,
-    get_input,
-    press_enter_to_continue, # Importado para la nueva UX
-    MENU_STYLE,
-    UserInputCancelled
+    press_enter_to_continue,
+    MENU_STYLE
 )
 
-try:
-    from core.strategy.om._entities import Operacion
-    import config as config_module
-except ImportError:
-    class Operacion: pass
-    config_module = None
+# Importar el nuevo asistente unificado
+from . import _wizard_setup 
 
-# --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
-    """Recibe las dependencias inyectadas desde el __init__.py del módulo."""
+    """Recibe las dependencias e inicializa los submódulos de asistentes."""
     global _deps
     _deps = dependencies
-
-# --- Funciones de Asistente ---
+    
+    if hasattr(_wizard_setup, 'init'):
+        _wizard_setup.init(dependencies)
 
 def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = False):
-    """Asistente único para configurar o modificar una operación estratégica para un lado específico."""
-    title = f"Modificar Operación {side.upper()}" if is_modification else f"Configurar Nueva Operación {side.upper()}"
-    clear_screen()
-    print_tui_header(title)
-    
-    WIZARD_MENU_STYLE = MENU_STYLE.copy()
-    WIZARD_MENU_STYLE['clear_screen'] = False
-
-    current_op = om_api.get_operation_by_side(side)
-    if not current_op:
-        print(f"\nError: No se encontró la operación para el lado {side.upper()}.")
-        time.sleep(2)
-        return
-        
-    print("\n(Deja un campo en blanco para mantener el valor actual o presiona Enter para usar el default)")
-    params_to_update = {}
-    
-    try:
-        # --- SECCIÓN 1: CONDICIÓN DE ENTRADA ---
-        print("\n--- 1. Condición de Entrada ---")
-        cond_menu_items = ["[1] Activación Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a", None, "[c] Cancelar y Volver"]
-        cond_menu = TerminalMenu(
-            cond_menu_items,
-            title="Elige la condición para que la operación se active:",
-            **WIZARD_MENU_STYLE
-        )
-        cond_choice = cond_menu.show()
-
-        if cond_choice == 0: 
-            new_cond_type, new_cond_value = 'MARKET', 0.0
-            print("  -> Condición seleccionada: Activación Inmediata")
-        elif cond_choice == 1:
-            new_cond_type = 'PRICE_ABOVE'
-            new_cond_value = get_input("Activar si precio SUPERA", float, default=current_op.valor_cond_entrada, is_optional=False)
-            print(f"  -> Condición seleccionada: Precio > {new_cond_value}")
-        elif cond_choice == 2:
-            new_cond_type = 'PRICE_BELOW'
-            new_cond_value = get_input("Activar si precio BAJA DE", float, default=current_op.valor_cond_entrada, is_optional=False)
-            print(f"  -> Condición seleccionada: Precio < {new_cond_value}")
-        else: return
-        
-        params_to_update['tipo_cond_entrada'] = new_cond_type
-        params_to_update['valor_cond_entrada'] = new_cond_value
-
-        if not is_modification:
-            tendencia = "LONG_ONLY" if side == 'long' else "SHORT_ONLY"
-            params_to_update['tendencia'] = tendencia
-            print(f"  -> Tendencia establecida automáticamente a: {tendencia}")
-
-        # --- SECCIÓN 2: CAPITAL LÓGICO ---
-        print(f"\n--- 2. Capital Lógico ---")
-        default_capital = current_op.balances.operational_margin if is_modification and current_op.balances.operational_margin > 0 else 100.0
-        
-        is_capital_optional = is_modification
-        
-        new_capital = get_input(
-            "Capital Lógico Operativo (USDT)", 
-            float, 
-            default=default_capital, 
-            min_val=1.0,
-            is_optional=is_capital_optional
-        )
-        
-        if new_capital is not None:
-             params_to_update['operational_margin'] = new_capital
-             print(f"  -> Capital Lógico establecido en: {new_capital:.2f} USDT")
-
-        # --- SECCIÓN 3: PARÁMETROS DE TRADING ---
-        use_config_defaults = not is_modification
-        default_base_size = config_module.OPERATION_DEFAULTS["CAPITAL"]["BASE_SIZE_USDT"] if use_config_defaults else current_op.tamaño_posicion_base_usdt
-        default_max_pos = config_module.OPERATION_DEFAULTS["CAPITAL"]["MAX_POSITIONS"] if use_config_defaults else current_op.max_posiciones_logicas
-        default_leverage = config_module.OPERATION_DEFAULTS["CAPITAL"]["LEVERAGE"] if use_config_defaults else current_op.apalancamiento
-        
-        print(f"\n--- 3. Parámetros de Trading (Obligatorios) ---")
-        params_to_update['tamaño_posicion_base_usdt'] = get_input("Tamaño base (USDT)", float, default=default_base_size, min_val=0.01)
-        params_to_update['max_posiciones_logicas'] = get_input("Máx. posiciones", int, default=default_max_pos, min_val=1)
-        params_to_update['apalancamiento'] = get_input("Apalancamiento", float, default=default_leverage, min_val=1.0)
-
-        print(f"\n--- 4. Riesgo por Posición (Opcional, Enter para desactivar) ---")
-        default_sl_pct = config_module.OPERATION_DEFAULTS["RISK"]["INDIVIDUAL_SL_PCT"] if use_config_defaults else current_op.sl_posicion_individual_pct
-        default_tsl_act = config_module.OPERATION_DEFAULTS["RISK"]["TSL_ACTIVATION_PCT"] if use_config_defaults else current_op.tsl_activacion_pct
-        default_tsl_dist = config_module.OPERATION_DEFAULTS["RISK"]["TSL_DISTANCE_PCT"] if use_config_defaults else current_op.tsl_distancia_pct
-        
-        params_to_update['sl_posicion_individual_pct'] = get_input("SL individual (%)", float, default=default_sl_pct, min_val=0.0, is_optional=True)
-        params_to_update['tsl_activacion_pct'] = get_input("Activación TSL (%)", float, default=default_tsl_act, min_val=0.0, is_optional=True)
-        params_to_update['tsl_distancia_pct'] = get_input("Distancia TSL (%)", float, default=default_tsl_dist, min_val=0.0, is_optional=True)
-
-        # --- SECCIÓN 5: CONDICIONES DE SALIDA DE LA OPERACIÓN ---
-        print(f"\n--- 5. Condiciones de Salida de la Operación (Opcional) ---")
-        
-        tsl_roi_act = get_input(
-            "Activación TSL por ROI (%)", 
-            float, 
-            default=current_op.tsl_roi_activacion_pct, 
-            min_val=0.0, 
-            is_optional=True
-        )
-        params_to_update['tsl_roi_activacion_pct'] = tsl_roi_act
-
-        if tsl_roi_act is not None and tsl_roi_act > 0:
-            tsl_roi_dist = get_input(
-                "Distancia TSL por ROI (%)", 
-                float, 
-                default=current_op.tsl_roi_distancia_pct, 
-                min_val=0.1,
-                is_optional=False
-            )
-            params_to_update['tsl_roi_distancia_pct'] = tsl_roi_dist
-        else:
-            params_to_update['tsl_roi_distancia_pct'] = None
-            
-        sl_roi_val = abs(current_op.sl_roi_pct) if current_op.sl_roi_pct else None
-        sl_roi = get_input("SL por ROI (%) (valor positivo)", float, default=sl_roi_val, min_val=0.0, is_optional=True)
-        params_to_update['sl_roi_pct'] = -abs(sl_roi) if sl_roi is not None else None
-        max_trades = get_input("Máx. trades", int, default=current_op.max_comercios, min_val=1, is_optional=True)
-        params_to_update['max_comercios'] = max_trades
-        max_duracion = get_input("Duración máx. (min)", int, default=current_op.tiempo_maximo_min, min_val=1, is_optional=True)
-        params_to_update['tiempo_maximo_min'] = max_duracion
-
-        print("\n--- Acción al Finalizar (Cuando se cumple un límite de la operación) ---")
-        accion_final_menu = TerminalMenu(
-            ["[1] Pausar operación (permite reanudar)", "[2] Detener y resetear operación"],
-            title="Selecciona la acción a tomar:",
-            **WIZARD_MENU_STYLE
-        )
-        accion_choice = accion_final_menu.show()
-        
-        if accion_choice == 0:
-            params_to_update['accion_al_finalizar'] = 'PAUSAR'
-        elif accion_choice == 1:
-            params_to_update['accion_al_finalizar'] = 'DETENER'
-            
-    except UserInputCancelled:
-        print("\n\nAsistente de configuración cancelado.")
-        time.sleep(1.5)
-        return
-    
-    # --- CONFIRMACIÓN Y GUARDADO ---
-    if not params_to_update:
-        print("\nNo se realizaron cambios."); time.sleep(1.5)
-        return
-
-    confirm_menu = TerminalMenu(
-        ["[1] Confirmar y Guardar", "[2] Cancelar"],
-        title="\n¿Guardar estos cambios?",
-        **WIZARD_MENU_STYLE
-    )
-    if confirm_menu.show() == 0:
-        success, msg = om_api.create_or_update_operation(side, params_to_update)
-        print(f"\n{msg}"); time.sleep(2)
-
-
-# --- INICIO DE LA MODIFICACIÓN: La función _stop_operation_wizard ha sido eliminada ---
-# --- FIN DE LA MODIFICACIÓN ---
-
+    """
+    Actúa como un despachador que llama al asistente unificado para
+    crear o modificar una operación.
+    """
+    _wizard_setup.operation_setup_wizard(om_api, side, is_modification)
 
 def _force_close_all_wizard(pm_api: Any, side: str):
-    """
-    Asistente mejorado para el cierre de pánico de posiciones.
-    Proporciona feedback visual durante y después de la operación bloqueante.
-    """
+    """Asistente para el cierre de pánico de todas las posiciones de un lado."""
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return
         
@@ -214,35 +51,21 @@ def _force_close_all_wizard(pm_api: Any, side: str):
         time.sleep(2)
         return
 
-    WIZARD_MENU_STYLE = MENU_STYLE.copy()
-    WIZARD_MENU_STYLE['clear_screen'] = False
-
     title = f"Esta acción cerrará permanentemente las {position_count} posiciones {side.upper()}.\n¿Estás seguro?"
     confirm_menu_items = [f"[s] Sí, cerrar todas las posiciones {side.upper()}", "[n] No, cancelar"]
     
-    confirm_menu = TerminalMenu(
-        confirm_menu_items,
-        title=title,
-        **WIZARD_MENU_STYLE
-    )
-
-    if confirm_menu.show() == 0:
+    if TerminalMenu(confirm_menu_items, title=title, **MENU_STYLE).show() == 0:
         clear_screen()
         print_tui_header(f"CIERRE DE PÁNICO ({side.upper()})")
         print("\n\033[93mENVIANDO ÓRDENES DE CIERRE... POR FAVOR, ESPERE.\033[0m")
-        print("Esta operación puede tardar unos segundos y la pantalla no responderá.")
-
+        
         try:
             success, message = pm_api.close_all_logical_positions(side, reason="PANIC_CLOSE_ALL")
         except Exception as e:
             success = False
-            message = f"Ocurrió una excepción inesperada al llamar a la API: {e}"
+            message = f"Ocurrió una excepción inesperada: {e}"
 
         clear_screen()
         print_tui_header(f"CIERRE DE PÁNICO ({side.upper()}) - RESULTADO")
-        if success:
-            print(f"\n\033[92mÉXITO:\033[0m {message}")
-        else:
-            print(f"\n\033[91mERROR:\033[0m {message}")
-            
+        print(f"\n\033[92mÉXITO:\033[0m {message}" if success else f"\n\033[91mERROR:\033[0m {message}")
         press_enter_to_continue()
