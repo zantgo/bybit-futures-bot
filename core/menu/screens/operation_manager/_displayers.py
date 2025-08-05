@@ -7,18 +7,6 @@ Contiene todas las funciones auxiliares cuya única responsabilidad es
 mostrar (imprimir en la consola) secciones de información específicas, como
 los detalles de la operación, las estadísticas de capital o las tablas de posiciones.
 Estas funciones son "vistas puras": solo renderizan los datos que reciben.
-
-v3.0 (UI Dinámica):
-- Implementado sistema de cajas y ancho dinámico basado en el terminal.
-- Corregido el problema de alineación de las secciones con el menú.
-- Añadido truncamiento inteligente para texto largo.
-- Mantenido todo el funcionamiento original sin cambios.
-
-v2.0 (Fallback Robusto):
-- La clase de fallback para 'Operacion' ahora incluye todos los atributos
-  necesarios con valores por defecto. Esto previene un `AttributeError` si
-  la importación principal falla y asegura que la TUI pueda renderizar un
-  estado vacío en lugar de crashear.
 """
 from typing import Any, Dict
 import datetime
@@ -74,6 +62,23 @@ def _get_terminal_width():
     except:
         return 90
 
+# --- INICIO DE LA MODIFICACIÓN: Helper para unificar el ancho de las cajas ---
+def _get_unified_box_width() -> int:
+    """
+    Calcula un ancho unificado para todas las cajas de esta pantalla,
+    basado en el contenido más ancho (la tabla de posiciones) y el tamaño del terminal.
+    """
+    terminal_width = _get_terminal_width()
+    # Ancho mínimo requerido por la cabecera de la tabla de posiciones
+    # 'ID', 'Entrada', 'Tamaño', 'PNL (U)', 'SL', 'TP Act.', 'TS Status'
+    content_width = 7 + 9 + 8 + 10 + 9 + 9 + 20 + (6 * 2) # Suma de anchos + espacios
+    
+    # El ancho de la caja será el menor entre el contenido necesario y el ancho del terminal,
+    # con un máximo absoluto para no ser excesivamente ancho en pantallas grandes.
+    box_width = min(terminal_width - 2, content_width, 120)
+    return box_width
+# --- FIN DE LA MODIFICACIÓN ---
+
 def _clean_ansi_codes(text: str) -> str:
     """Función de ayuda para eliminar códigos de color ANSI de un string."""
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
@@ -111,13 +116,11 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
-# --- Funciones de Visualización ---
+# --- Funciones de Visualización (Actualizadas para usar el ancho unificado) ---
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     """Muestra la sección de parámetros de la operación para un lado específico."""
-    terminal_width = _get_terminal_width()
-    box_width = min(terminal_width - 2, 90)
-
+    box_width = _get_unified_box_width() # Usar ancho unificado
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
@@ -164,9 +167,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     """Muestra la sección de estadísticas de capital para un lado específico."""
-    terminal_width = _get_terminal_width()
-    box_width = min(terminal_width - 2, 90)
-
+    box_width = _get_unified_box_width() # Usar ancho unificado
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
@@ -214,8 +215,8 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     data_bottom = {
         "Ganancias Netas": f"{netas_color}{ganancias_netas:+.4f}{reset}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
-        "Trades Abiertos Totales": str(trades_abiertos),
-        "Trades Cerrados Totales": str(trades_cerrados)
+        "Trades Abiertos": str(trades_abiertos),
+        "Trades Cerrados": str(trades_cerrados)
     }
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in list(data_top.keys()) + list(data_bottom.keys()))
@@ -232,67 +233,65 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     """Muestra la tabla de posiciones abiertas y datos agregados."""
-    terminal_width = _get_terminal_width()
-    box_width = min(terminal_width - 2, 90)
+    box_width = _get_unified_box_width() # Usar ancho unificado
 
     positions = summary.get(f'open_{side}_positions', [])
     max_pos = operacion.max_posiciones_logicas if operacion else 'N/A'
     
-    
     print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line(f"Posiciones ({len(positions)}/{max_pos})", box_width, 'center'))
-    print("├" + "─" * (box_width - 2) + "┤")
+    print(_create_box_line(f"Posiciones Lógicas Abiertas ({len(positions)}/{max_pos})", box_width, 'center'))
     
     if not positions:
+        print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("(No hay posiciones abiertas)", box_width, 'center'))
     else:
-        # Aquí iría la tabla, pero el diseño solicitado no la incluye.
-        # En su lugar, se muestran datos agregados.
-        pass
+        header = f"  {'ID':<7} {'Entrada':>9} {'Tamaño':>8} {'PNL (U)':>10} {'SL':>9} {'TP Act.':>9} {'TS Status':<20}"
+        
+        # Ajustamos el ancho del separador para que coincida con el contenido o el ancho de la caja
+        separator_width = min(len(_clean_ansi_codes(header)) -1, box_width - 2)
+        print("├" + "─" * separator_width + "┤")
+        print(_truncate_text(header, box_width - 2))
+        print("├" + "─" * separator_width + "┤")
+        
+        for pos in positions:
+            pnl = 0.0
+            entry_price = pos.get('entry_price', 0.0)
+            size = pos.get('size_contracts', 0.0)
+            if current_price > 0 and entry_price > 0:
+                pnl = (current_price - entry_price) * size if side == 'long' else (entry_price - current_price) * size
 
-    print("├" + "─" * (box_width - 2) + "┤")
-    
-    avg_entry_price = summary.get(f'avg_entry_price_{side}', 'N/A')
-    avg_liq_price = summary.get(f'avg_liq_price_{side}', 'N/A')
-    
-    # Calcular promedios de SL y TSL
-    sl_points = [p['stop_loss_price'] for p in positions if p.get('stop_loss_price')]
-    avg_sl = np.mean(sl_points) if sl_points else 'N/A'
+            pnl_color = "\033[92m" if pnl >= 0 else "\033[91m"
+            reset = "\033[0m"
+            sl_str = f"{pos.get('stop_loss_price', 0.0):.4f}" if pos.get('stop_loss_price') else "N/A"
 
-    tsl_activation_points = []
-    if positions:
-        first_pos_entry = positions[0].get('entry_price', 0.0)
-        first_pos_tsl_pct = _deps['om_api'].get_operation_by_side(side).tsl_activacion_pct
-        if first_pos_entry and first_pos_tsl_pct:
-            if side == 'long':
-                avg_tsl_act = first_pos_entry * (1 + first_pos_tsl_pct / 100)
-            else:
-                avg_tsl_act = first_pos_entry * (1 - first_pos_tsl_pct / 100)
-        else:
-            avg_tsl_act = 'N/A'
-    else:
-        avg_tsl_act = 'N/A'
+            tp_act_price = 0.0
+            tsl_act_pct = pos.get('tsl_activation_pct_at_open', 0.0)
+            if tsl_act_pct > 0:
+                tp_act_price = entry_price * (1 + tsl_act_pct / 100) if side == 'long' else entry_price * (1 - tsl_act_pct / 100)
+            tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
 
+            ts_status_str = "Inactivo"
+            if pos.get('ts_is_active'):
+                ts_stop = pos.get('ts_stop_price')
+                ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
 
-    data = {
-        "Avg Ent Price": f"{avg_entry_price:.4f}" if isinstance(avg_entry_price, (int, float)) else "N/A",
-        "Avg Liq Price": f"{avg_liq_price:.4f}" if isinstance(avg_liq_price, (int, float)) else "N/A",
-        "Avg Take Profit Activation Point": f"{avg_tsl_act:.4f}" if isinstance(avg_tsl_act, (int, float)) else "N/A",
-        "Avg Stop Loss Point": f"{avg_sl:.4f}" if isinstance(avg_sl, (int, float)) else "N/A"
-    }
-
-    max_key_len = max(len(k) for k in data.keys())
-    for key, value in data.items():
-        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
+            line = (
+                f"  {str(pos.get('id', ''))[-6:]:<7} "
+                f"{entry_price:>9.4f} "
+                f"{size:>8.4f} "
+                f"{pnl_color}{pnl:>+10.4f}{reset} "
+                f"{sl_str:>9} "
+                f"{tp_act_str:>9} "
+                f"{ts_status_str:<20}"
+            )
+            print(_truncate_text(line, box_width - 2))
 
     print("└" + "─" * (box_width - 2) + "┘")
 
 
 def _display_operation_conditions(operacion: Operacion):
     """Muestra la sección de condiciones de entrada y salida de la operación."""
-    terminal_width = _get_terminal_width()
-    box_width = min(terminal_width - 2, 90)
-
+    box_width = _get_unified_box_width() # Usar ancho unificado
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Condiciones de la Operación", box_width, 'center'))
@@ -304,7 +303,7 @@ def _display_operation_conditions(operacion: Operacion):
     
     print(_create_box_line(f"Estado Actual: {color}{operacion.estado}{reset}", box_width))
     if operacion.estado != 'DETENIDA':
-        print(_create_box_line(f"Estado de Salida: {operacion.accion_al_finalizar.upper()}", box_width))
+        print(_create_box_line(f"Acción al Finalizar por Límite: {operacion.accion_al_finalizar.upper()}", box_width))
     
     print("├" + "─" * (box_width - 2) + "┤")
     print(_create_box_line("Condición de Entrada:", box_width))
@@ -318,16 +317,16 @@ def _display_operation_conditions(operacion: Operacion):
     print(_create_box_line(f"  {cond_in_str}", box_width))
     
     print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_box_line("Condiciones de Salida (CUALQUIERA desactiva la operación):", box_width))
+    print(_create_box_line("Condiciones de Salida (CUALQUIERA activa la acción):", box_width))
     exit_conditions = []
     if operacion.tipo_cond_salida and operacion.valor_cond_salida is not None:
         op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
         exit_conditions.append(f"Precio {op} {operacion.valor_cond_salida:.4f}")
     
     if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
-        tsl_config_str = (f"TSL-ROI: Activa a {operacion.tsl_roi_activacion_pct}%, Distancia {operacion.tsl_roi_distancia_pct}%")
+        tsl_config_str = (f"TSL-ROI: Activa a +{operacion.tsl_roi_activacion_pct}%, Distancia {operacion.tsl_roi_distancia_pct}%")
         if operacion.tsl_roi_activo:
-            tsl_config_str += f" (ACTIVO | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
+            tsl_config_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         exit_conditions.append(tsl_config_str)
 
     if operacion.sl_roi_pct is not None: 
@@ -337,8 +336,10 @@ def _display_operation_conditions(operacion: Operacion):
     if operacion.max_comercios is not None: 
         exit_conditions.append(f"Trades >= {operacion.max_comercios}")
 
-    if not exit_conditions:
+    if not exit_conditions and operacion.estado != 'DETENIDA':
         print(_create_box_line("  - Ninguna (finalización manual)", box_width))
+    elif not exit_conditions:
+         print(_create_box_line("  (Operación inactiva)", box_width))
     else:
         for cond in exit_conditions:
             print(_create_box_line(f"  - {cond}", box_width))

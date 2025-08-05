@@ -1,3 +1,5 @@
+# ./core/exchange/_bybit_adapter.py
+
 """
 Implementación del Adaptador de Exchange para Bybit.
 
@@ -47,17 +49,7 @@ class BybitAdapter(AbstractExchange):
         self._connection_manager = connection_manager
         self._symbol: Optional[str] = None
         self._latest_price: Optional[float] = None
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # Mapeo de propósito a nombre de cuenta de config.py
-        # --- (COMENTADO) ---
-        # self._purpose_to_account_name_map = {
-        #     'main': config.ACCOUNT_MAIN,
-        #     'longs': config.ACCOUNT_LONGS,
-        #     'shorts': config.ACCOUNT_SHORTS,
-        #     'profit': config.ACCOUNT_PROFIT,
-        #     'ticker': config.TICKER_SOURCE_ACCOUNT
-        # }
-        # --- (CORREGIDO) ---
+        # --- INICIO DE LA CORRECCIÓN (Adaptación a Nueva Estructura) ---
         self._purpose_to_account_name_map = {
             'main': config.BOT_CONFIG["ACCOUNTS"]["MAIN"],
             'longs': config.BOT_CONFIG["ACCOUNTS"]["LONGS"],
@@ -65,7 +57,7 @@ class BybitAdapter(AbstractExchange):
             'profit': config.BOT_CONFIG["ACCOUNTS"]["PROFIT"],
             'ticker': config.BOT_CONFIG["TICKER"]["SOURCE_ACCOUNT"]
         }
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN ---
 
 
     def initialize(self, symbol: str) -> bool:
@@ -153,12 +145,9 @@ class BybitAdapter(AbstractExchange):
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=account_name)
         if not session: return None
         
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # category = getattr(config, 'CATEGORY_LINEAR', 'linear')
-        # --- (CORREGIDO) ---
+        # --- INICIO DE LA CORRECCIÓN ---
         category = config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"]
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN ---
         
         try:
             response = session.get_tickers(category=category, symbol=symbol)
@@ -194,12 +183,9 @@ class BybitAdapter(AbstractExchange):
         account_name = self._purpose_to_account_name_map.get(account_purpose)
         if not account_name: return False, f"Propósito de cuenta desconocido: '{account_purpose}'"
 
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # is_hedge_mode = getattr(config, 'BYBIT_HEDGE_MODE_ENABLED', True)
-        # --- (CORREGIDO) ---
+        # --- INICIO DE LA CORRECCIÓN ---
         is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN ---
         pos_idx = 0
         if is_hedge_mode:
             side_map = {'buy': 'long', 'sell': 'short'}
@@ -238,24 +224,18 @@ class BybitAdapter(AbstractExchange):
             memory_logger.log(f"Error de transferencia: propósito desconocido '{from_purpose}' o '{to_purpose}'", "ERROR")
             return False
 
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # loaded_uids = getattr(config, 'LOADED_UIDS', {})
-        # --- (CORREGIDO) ---
+        # --- INICIO DE LA CORRECCIÓN ---
         loaded_uids = config.LOADED_UIDS
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN ---
         from_uid = loaded_uids.get(from_acc_name)
         to_uid = loaded_uids.get(to_acc_name)
         if not from_uid or not to_uid: 
             memory_logger.log(f"Error de transferencia: UID no encontrado para '{from_acc_name}' o '{to_acc_name}'", "ERROR")
             return False
 
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # session, _ = self._connection_manager.get_session_for_operation('general', specific_account=config.ACCOUNT_MAIN)
-        # --- (CORREGIDO) ---
+        # --- INICIO DE LA CORRECCIÓN ---
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=config.BOT_CONFIG["ACCOUNTS"]["MAIN"])
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN ---
         if not session: 
             memory_logger.log("Error de transferencia: No se pudo obtener sesión para la cuenta principal.", "ERROR")
             return False
@@ -264,22 +244,14 @@ class BybitAdapter(AbstractExchange):
         
         try:
             transfer_id = str(uuid.uuid4())
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # response = session.create_universal_transfer(
-            #     transferId=transfer_id, coin=coin.upper(), amount=amount_str,
-            #     fromMemberId=int(from_uid), toMemberId=int(to_uid),
-            #     fromAccountType=getattr(config, 'UNIVERSAL_TRANSFER_FROM_TYPE', 'UNIFIED'),
-            #     toAccountType=getattr(config, 'UNIVERSAL_TRANSFER_TO_TYPE', 'UNIFIED')
-            # )
-            # --- (CORREGIDO) ---
+            # --- INICIO DE LA CORRECCIÓN ---
             response = session.create_universal_transfer(
                 transferId=transfer_id, coin=coin.upper(), amount=amount_str,
                 fromMemberId=int(from_uid), toMemberId=int(to_uid),
                 fromAccountType=config.EXCHANGE_CONSTANTS["BYBIT"]["UNIVERSAL_TRANSFER_FROM_TYPE"],
                 toAccountType=config.EXCHANGE_CONSTANTS["BYBIT"]["UNIVERSAL_TRANSFER_TO_TYPE"]
             )
-            # --- FIN DE LA MODIFICACIÓN ---
+            # --- FIN DE LA CORRECCIÓN ---
             
             if response and response.get('retCode') == 0:
                 return True

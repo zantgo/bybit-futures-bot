@@ -1,3 +1,5 @@
+# ./core/bot_controller/_manager.py
+
 """
 Módulo Gestor del Bot (BotController).
 
@@ -21,7 +23,6 @@ try:
     from core.strategy.sm._manager import SessionManager
     from core.strategy.om._manager import OperationManager
     from core.strategy.pm.manager import PositionManager
-    # from core.strategy.pm._balance import BalanceManager # Comentado
     from core.strategy.pm._position_state import PositionState
     from core.strategy.pm._executor import PositionExecutor
     from core.exchange._bybit_adapter import BybitAdapter
@@ -95,14 +96,8 @@ class BotController:
         is_valid = validation_adapter.initialize(symbol=new_symbol)
 
         if is_valid:
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # old_symbol = getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-            # setattr(self._config, 'TICKER_SYMBOL', new_symbol)
-            # --- (CORREGIDO) ---
             old_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
             self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = new_symbol
-            # --- FIN DE LA MODIFICACIÓN ---
             msg = f"Símbolo del Ticker actualizado con éxito a '{new_symbol}'."
             self._memory_logger.log(f"BotController: {msg} (Anterior: '{old_symbol}')", "WARN")
             return True, msg
@@ -173,16 +168,9 @@ class BotController:
             return False, "Las conexiones API deben ser inicializadas primero."
 
         try:
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # default_ticker = getattr(self._config, 'TICKER_SYMBOL', 'BTCUSDT')
-            # default_size = getattr(self._config, 'POSITION_BASE_SIZE_USDT', 1.0)
-            # default_leverage = getattr(self._config, 'POSITION_LEVERAGE', 10.0)
-            # --- (CORREGIDO) ---
             default_ticker = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
             default_size = self._config.OPERATION_DEFAULTS["CAPITAL"]["BASE_SIZE_USDT"]
             default_leverage = self._config.OPERATION_DEFAULTS["CAPITAL"]["LEVERAGE"]
-            # --- FIN DE LA MODIFICACIÓN ---
 
             ticker = get_input("Introduce el Ticker a probar", str, default_ticker)
             ticker = ticker.upper()
@@ -213,30 +201,18 @@ class BotController:
                 return False, "Fallo al establecer el apalancamiento."
             print(" -> Éxito.")
 
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # print(f"Abriendo posición LONG en '{self._config.ACCOUNT_LONGS}'...")
-            # long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=self._config.ACCOUNT_LONGS)
-            # --- (CORREGIDO) ---
             long_account = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
             print(f"Abriendo posición LONG en '{long_account}'...")
             long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
-            # --- FIN DE LA MODIFICACIÓN ---
             
             if not long_res or long_res.get('retCode') != 0:
                 return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
             print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
             time.sleep(1)
 
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # print(f"Abriendo posición SHORT en '{self._config.ACCOUNT_SHORTS}'...")
-            # short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=self._config.ACCOUNT_SHORTS)
-            # --- (CORREGIDO) ---
             short_account = self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
             print(f"Abriendo posición SHORT en '{short_account}'...")
             short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
-            # --- FIN DE LA MODIFICACIÓN ---
 
             if not short_res or short_res.get('retCode') != 0:
                 return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
@@ -244,18 +220,10 @@ class BotController:
             time.sleep(2)
         finally:
             print("\n--- Fase de Limpieza ---")
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # --- (COMENTADO) ---
-            # print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_LONGS}'...")
-            # self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_LONGS)
-            # print(f"Cerrando posiciones de {ticker} en '{self._config.ACCOUNT_SHORTS}'...")
-            # self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=self._config.ACCOUNT_SHORTS)
-            # --- (CORREGIDO) ---
             print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
             self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
             print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
             self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
-            # --- FIN DE LA MODIFICACIÓN ---
             self._memory_logger.log("BotController[Test]: Limpieza completada.", "INFO")
 
         return True, f"Prueba de trading completada con éxito para {ticker}."
@@ -318,31 +286,63 @@ class BotController:
     def get_general_config(self) -> Dict[str, Any]:
         """Obtiene la configuración a nivel de aplicación."""
         if not self._config: return {}
-        # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-        # --- (COMENTADO) ---
-        # return { 
-        #     'Exchange': getattr(self._config, 'EXCHANGE_NAME', 'N/A'),
-        #     'Modo Testnet': getattr(self._config, 'UNIVERSAL_TESTNET_MODE', False),
-        #     'Paper Trading': getattr(self._config, 'PAPER_TRADING_MODE', False),
-        #     'Ticker Symbol': getattr(self._config, 'TICKER_SYMBOL', 'N/A')
-        # }
-        # --- (CORREGIDO) ---
         return { 
             'Exchange': self._config.BOT_CONFIG["EXCHANGE_NAME"],
             'Modo Testnet': self._config.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"],
             'Paper Trading': self._config.BOT_CONFIG["PAPER_TRADING_MODE"],
             'Ticker Symbol': self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         }
-        # --- FIN DE LA MODIFICACIÓN ---
 
+    # --- INICIO DE LA FUNCIÓN CORREGIDA ---
     def update_general_config(self, params: Dict[str, Any]) -> bool:
-        """Actualiza la configuración a nivel de aplicación."""
-        if not self._config: return False
+        """
+        Actualiza la configuración a nivel de aplicación (BOT_CONFIG).
+        Esta función está diseñada para ser llamada con un diccionario de cambios,
+        aunque la TUI actual modifica el config directamente.
+        """
+        if not self._config: 
+            return False
+            
+        config_changed = False
+        bot_config = self._config.BOT_CONFIG
+
         for key, value in params.items():
-            if hasattr(self._config, key):
-                setattr(self._config, key, value)
-                self._memory_logger.log(f"BotController: Config general actualizada -> {key} = {value}", "WARN")
+            original_value = None
+            key_to_update = None
+            
+            # Mapeamos las claves públicas a las rutas internas del diccionario de configuración.
+            if key == 'Exchange' and 'EXCHANGE_NAME' in bot_config:
+                original_value = bot_config['EXCHANGE_NAME']
+                if original_value != value:
+                    bot_config['EXCHANGE_NAME'] = value
+                    config_changed = True
+            
+            elif key == 'Modo Testnet' and 'UNIVERSAL_TESTNET_MODE' in bot_config:
+                original_value = bot_config['UNIVERSAL_TESTNET_MODE']
+                if original_value != value:
+                    bot_config['UNIVERSAL_TESTNET_MODE'] = value
+                    config_changed = True
+
+            elif key == 'Paper Trading' and 'PAPER_TRADING_MODE' in bot_config:
+                original_value = bot_config['PAPER_TRADING_MODE']
+                if original_value != value:
+                    bot_config['PAPER_TRADING_MODE'] = value
+                    config_changed = True
+
+            elif key == 'Ticker Symbol' and 'TICKER' in bot_config and 'SYMBOL' in bot_config['TICKER']:
+                # Para el Ticker Symbol, se recomienda usar el método dedicado que incluye validación.
+                # Pero si se llama directamente, lo actualizamos.
+                original_value = bot_config['TICKER']['SYMBOL']
+                if original_value != value:
+                    self.validate_and_update_ticker_symbol(value) # Usamos el método con validación
+                    config_changed = True # Asumimos que cambió si se llamó a la función
+            
+            if config_changed and original_value is not None:
+                 self._memory_logger.log(f"BotController: Config general actualizada -> {key}: '{original_value}' -> '{value}'", "WARN")
+                 config_changed = False # Reseteamos para el siguiente item del bucle
+
         return True
+    # --- FIN DE LA FUNCIÓN CORREGIDA ---
 
     def shutdown_bot(self):
         """Orquesta el apagado de los servicios de bajo nivel."""

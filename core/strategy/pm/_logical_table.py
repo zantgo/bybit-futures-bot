@@ -1,3 +1,5 @@
+# ./core/strategy/pm/logical_position_table.py
+
 """
 Módulo que define la clase LogicalPositionTable para gestionar una lista de
 posiciones lógicas abiertas para un lado específico (long/short).
@@ -61,14 +63,11 @@ class LogicalPositionTable:
         self._config_param = config_param
         self._utils = utils
         self._exchange = exchange_adapter
-        # --- INICIO DE LA CORRECCIÓN: El tipado de la lista es ahora explícito ---
         self._positions: List[LogicalPosition] = []
-        # --- FIN DE LA CORRECCIÓN ---
         self._lock = threading.Lock()
 
         memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
 
-    # --- INICIO DE LA MODIFICACIÓN: Nuevo método de sincronización ---
     def sync_positions(self, new_positions: List[LogicalPosition]):
         """
         Sobrescribe completamente la lista interna de posiciones con una nueva lista.
@@ -83,7 +82,6 @@ class LogicalPositionTable:
             self._positions = copy.deepcopy(new_positions)
         
         memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
 
     # --- Métodos de Gestión Básica (con tipado mejorado) ---
     def add_position(self, position_data: LogicalPosition) -> bool:
@@ -210,12 +208,12 @@ class LogicalPositionTable:
         
         return self._utils.safe_division(total_value, total_size, default=0.0)
 
-    # --- Visualización ---
+    # --- INICIO DE LA MODIFICACIÓN: `display_table` actualizada ---
     def display_table(self):
-        """Muestra una representación en tabla de las posiciones."""
+        """Muestra una representación en tabla de las posiciones, incluyendo todas las propiedades relevantes."""
         from dataclasses import asdict
         with self._lock:
-            positions_copy = [asdict(p) for p in self._positions]
+            positions_copy = self.get_positions() # Usa el método que ya devuelve una copia
             positions_count = len(positions_copy)
 
         if positions_count == 0:
@@ -225,23 +223,44 @@ class LogicalPositionTable:
         qty_prec = getattr(self._config_param, 'DEFAULT_QTY_PRECISION', 3)
 
         data_for_df = []
-        columns = ['ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 'Stop Loss', 'API Order ID']
+        columns = [
+            'ID', 'Entry Time', 'Entry Price', 'Size', 'Margin', 'Leverage', 
+            'Stop Loss', 'TP Act. (Price)', 'TS Status'
+        ]
         
         for pos in positions_copy:
-            entry_ts = pos.get('entry_timestamp')
-            entry_ts_str = self._utils.format_datetime(entry_ts, '%Y-%m-%d %H:%M:%S') if self._utils and entry_ts else "N/A"
-            sl_price = pos.get('stop_loss_price')
+            entry_ts = pos.entry_timestamp
+            entry_ts_str = self._utils.format_datetime(entry_ts, '%H:%M:%S') if self._utils and entry_ts else "N/A"
             
+            # Calcular el precio de activación del Take Profit (Trailing Stop)
+            tp_activation_price = 'N/A'
+            if pos.tsl_activation_pct_at_open > 0:
+                if self.side == 'long':
+                    price = pos.entry_price * (1 + pos.tsl_activation_pct_at_open / 100)
+                else: # short
+                    price = pos.entry_price * (1 - pos.tsl_activation_pct_at_open / 100)
+                tp_activation_price = f"{price:.{price_prec}f}"
+            
+            # Determinar el estado del Trailing Stop
+            ts_status = "Inactivo"
+            if pos.ts_is_active:
+                if pos.ts_stop_price:
+                    ts_status = f"Activo @ {pos.ts_stop_price:.{price_prec}f}"
+                else:
+                    ts_status = "Activo (Calculando)"
+
             data_for_df.append({
-                'ID': str(pos.get('id', 'N/A'))[-6:], 
+                'ID': str(pos.id)[-6:], 
                 'Entry Time': entry_ts_str,
-                'Entry Price': f"{self._utils.safe_float_convert(pos.get('entry_price'), 0.0):.{price_prec}f}",
-                'Size': f"{self._utils.safe_float_convert(pos.get('size_contracts'), 0.0):.{qty_prec}f}",
-                'Margin': f"{self._utils.safe_float_convert(pos.get('margin_usdt'), 0.0):.2f}",
-                'Leverage': f"{float(pos.get('leverage', 1.0)):.1f}x",
-                'Stop Loss': f"{self._utils.safe_float_convert(sl_price, 0.0):.{price_prec}f}" if sl_price else 'N/A',
-                'API Order ID': str(pos.get('api_order_id', 'N/A'))[-8:]
+                'Entry Price': f"{pos.entry_price:.{price_prec}f}",
+                'Size': f"{pos.size_contracts:.{qty_prec}f}",
+                'Margin': f"{pos.margin_usdt:.2f}",
+                'Leverage': f"{pos.leverage:.1f}x",
+                'Stop Loss': f"{pos.stop_loss_price:.{price_prec}f}" if pos.stop_loss_price else 'N/A',
+                'TP Act. (Price)': tp_activation_price,
+                'TS Status': ts_status
             })
+            
         try:
              df = pd.DataFrame(data_for_df, columns=columns)
              print(f"\n--- Tabla Posiciones Lógicas {self.side.upper()} (Total: {positions_count}) ---")
@@ -255,3 +274,4 @@ class LogicalPositionTable:
         except Exception as e_df: 
             memory_logger.log(f"ERROR [LPT Display]: Creando DataFrame: {e_df}", level="ERROR")
             print("-" * 60)
+    # --- FIN DE LA MODIFICACIÓN ---

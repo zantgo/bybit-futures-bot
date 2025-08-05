@@ -9,7 +9,7 @@ from typing import Dict, Any
 import config
 from core import utils
 from core.logging import memory_logger
-from ._data_store import DataStore  # Importar la nueva clase
+from ._data_store import DataStore
 from . import _calculator
 
 class TAManager:
@@ -18,18 +18,20 @@ class TAManager:
     utiliza un calculador para generar indicadores. Cada instancia es independiente.
     """
 
-    def __init__(self):
+    # --- INICIO DE LA CORRECCIÓN: Inyectar config en el constructor ---
+    def __init__(self, config_module: Any = config):
+    # --- FIN DE LA CORRECCIÓN ---
         """
         Inicializa el TAManager, creando su propio DataStore y
         estableciendo su estado inicial.
         """
-        # El TAManager ahora es dueño de su propio DataStore
-        self._data_store = DataStore()
+        # --- INICIO DE LA CORRECCIÓN ---
+        self._config = config_module
+        # El TAManager ahora es dueño de su propio DataStore, al cual le pasamos la config
+        self._data_store = DataStore(self._config)
+        # --- FIN DE LA CORRECCIÓN ---
         
-        # El estado (caché de indicadores) ahora es un atributo de la instancia
         self._latest_indicators = {}
-        
-        # Inicializar al crear la instancia para asegurar un estado válido
         self.initialize()
 
     def initialize(self):
@@ -37,14 +39,14 @@ class TAManager:
         Inicializa o resetea el estado del gestor para una nueva sesión,
         limpiando el almacén de datos y la caché de indicadores.
         """
-        print("[TAManager] Inicializando...")
+        memory_logger.log("[TAManager] Inicializando...", "INFO")
         self._data_store.initialize()
         self._latest_indicators = {
             'timestamp': pd.NaT, 'price': np.nan, 'ema': np.nan,
             'weighted_increment': np.nan, 'weighted_decrement': np.nan,
             'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
         }
-        print("[TAManager] Inicializado.")
+        memory_logger.log("[TAManager] Inicializado.", "INFO")
 
     def process_raw_price_event(self, raw_event_data: dict) -> dict:
         """
@@ -60,24 +62,20 @@ class TAManager:
         if not isinstance(raw_event_data, dict) or 'price' not in raw_event_data:
             return self.get_latest_indicators()
 
-        # 1. Almacenar el nuevo evento usando la instancia de DataStore
         self._data_store.add_event(raw_event_data)
-
-        # 2. Obtener la ventana de datos actualizada del DataStore
         current_raw_df = self._data_store.get_data()
 
-        # 3. Calcular los nuevos indicadores si está habilitado
         calculated_indicators = {}
-        if config.SESSION_CONFIG["TA"]["ENABLED"]:
+        # --- INICIO DE LA CORRECCIÓN ---
+        if self._config.SESSION_CONFIG["TA"]["ENABLED"]:
+        # --- FIN DE LA CORRECCIÓN ---
             try:
-                # Utiliza el módulo _calculator para procesar el DataFrame
                 calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
             except Exception as e:
                 ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
                 memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
                 memory_logger.log(traceback.format_exc(), level="ERROR")
 
-                # En caso de error, devolver los datos base sin indicadores calculados
                 calculated_indicators = {
                     'timestamp': raw_event_data.get('timestamp', pd.NaT),
                     'price': raw_event_data.get('price', np.nan),
@@ -85,7 +83,6 @@ class TAManager:
                     'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
                 }
         else:
-            # Si el cálculo está desactivado, solo devolver los datos base del evento
             calculated_indicators = {
                 'timestamp': raw_event_data.get('timestamp', pd.NaT),
                 'price': raw_event_data.get('price', np.nan),
@@ -93,22 +90,15 @@ class TAManager:
                 'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
             }
 
-        # 4. Actualizar la caché interna con los nuevos resultados
         self._latest_indicators = calculated_indicators.copy()
-
-        # 5. Opcional: Imprimir datos para depuración si está activado en config
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # La variable PRINT_PROCESSED_DATA_ALWAYS ya no existe.
-        # Esta lógica puede ser manejada por el nivel de LOG_LEVEL.
-        # if getattr(config, 'PRINT_PROCESSED_DATA_ALWAYS', False):
-        #     print(f"DEBUG [TA Calculated]: {self._latest_indicators}")
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        
+        # Lógica de impresión eliminada para mantener el código limpio.
+        # El nivel de log DEBUG sería el lugar apropiado para esto.
+        
         return self.get_latest_indicators()
 
     def get_latest_indicators(self) -> dict:
         """
         Devuelve una copia del último conjunto de indicadores almacenado en caché.
-        Es seguro de usar ya que devuelve una copia, no una referencia.
         """
         return self._latest_indicators.copy()

@@ -1,11 +1,5 @@
-"""
-Módulo del Position Manager: Lógica Privada.
+# ./core/strategy/pm/manager/_private_logic.py
 
-v8.0 (Capital Lógico por Operación):
-- La lógica de apertura ahora consulta el capital disponible desde el objeto
-  `Operacion` correspondiente, en lugar del `BalanceManager` global.
-- Al abrir/cerrar, se actualiza el estado del objeto `LogicalBalances` de la operación.
-"""
 import datetime
 import uuid
 from typing import Any
@@ -23,9 +17,6 @@ except ImportError:
 class _PrivateLogic:
     """Clase base que contiene la lógica interna y privada del PositionManager."""
 
-    # Comentario: La función _reset_all_states pertenece a _LifecycleManager
-    # y no se necesita aquí.
-
     def _can_open_new_position(self, side: str) -> bool:
         """Verifica si se puede abrir una nueva posición para un lado específico."""
         if self._session_tp_hit:
@@ -35,15 +26,44 @@ class _PrivateLogic:
         if not operacion or operacion.estado != 'ACTIVA':
             return False
             
-        open_positions_count = len(operacion.posiciones_activas.get(side, []))
+        open_positions = operacion.posiciones_activas.get(side, [])
+        open_positions_count = len(open_positions)
+        
         if open_positions_count >= operacion.max_posiciones_logicas:
             return False
-            
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Comprobar el margen disponible desde el objeto de balance de la operación.
+
         if operacion.balances.available_margin < 1.0:
             self._memory_logger.log(f"Apertura omitida ({side.upper()}): Margen lógico insuficiente ({operacion.balances.available_margin:.4f} USDT).", level="DEBUG")
             return False
+
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Distancia de Promediación ---
+        if open_positions_count > 0:
+            last_position_entry_price = open_positions[-1].entry_price
+            current_price = self.get_current_market_price()
+            
+            if not current_price:
+                self._memory_logger.log(f"Apertura omitida ({side.upper()}): No se pudo obtener el precio de mercado actual para calcular la distancia.", level="WARN")
+                return False
+
+            # Obtener la distancia requerida desde la configuración
+            if side == 'long':
+                required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_LONG"]
+                # Para un LONG, el precio actual debe ser MENOR que la última entrada para promediar a la baja.
+                price_condition_met = current_price <= last_position_entry_price * (1 - required_distance_pct / 100)
+            else: # side == 'short'
+                required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"]
+                # Para un SHORT, el precio actual debe ser MAYOR que la última entrada para promediar al alza.
+                price_condition_met = current_price >= last_position_entry_price * (1 + required_distance_pct / 100)
+
+            if not price_condition_met:
+                price_diff_pct = (abs(current_price - last_position_entry_price) / last_position_entry_price) * 100
+                self._memory_logger.log(
+                    f"Apertura omitida ({side.upper()}): Distancia insuficiente. "
+                    f"Última entrada: {last_position_entry_price:.4f}, Actual: {current_price:.4f}. "
+                    f"Distancia: {price_diff_pct:.2f}%, Requerida: {required_distance_pct:.2f}%",
+                    level="DEBUG"
+                )
+                return False
         # --- FIN DE LA MODIFICACIÓN ---
 
         return True
@@ -59,11 +79,7 @@ class _PrivateLogic:
         if available_slots <= 0:
             return
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Obtener margen disponible desde el objeto `balances` de la operación.
         available_margin = operacion.balances.available_margin
-        # --- FIN DE LA MODIFICACIÓN ---
-
         margin_per_slot = self._utils.safe_division(available_margin, available_slots)
         margin_to_use = min(operacion.tamaño_posicion_base_usdt, margin_per_slot)
         
@@ -75,7 +91,6 @@ class _PrivateLogic:
             side=side, entry_price=entry_price, timestamp=timestamp, 
             margin_to_use=margin_to_use, 
             sl_pct=operacion.sl_posicion_individual_pct,
-            # leverage=operacion.apalancamiento, # El executor ahora lo obtiene de la operación
             tsl_activation_pct=operacion.tsl_activacion_pct,
             tsl_distance_pct=operacion.tsl_distancia_pct
         )
@@ -83,18 +98,12 @@ class _PrivateLogic:
         if result and result.get('success'):
             new_pos_obj = result.get('logical_position_object')
             if new_pos_obj:
-                # Obtenemos de nuevo la operación para asegurar que tenemos la versión más fresca del estado
                 current_op = self._om_api.get_operation_by_side(side)
                 if current_op:
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Actualizar el balance lógico de la operación ANTES de guardar el estado.
                     current_op.balances.decrease_available_margin(margin_to_use)
-                    # --- FIN DE LA MODIFICACIÓN ---
-
                     new_positions = current_op.posiciones_activas
                     new_positions[side].append(new_pos_obj)
                     
-                    # Actualizamos la operación del lado correspondiente, propagando el nuevo estado de balances
                     self._om_api.create_or_update_operation(side, {
                         'posiciones_activas': new_positions,
                         'balances': current_op.balances
@@ -109,7 +118,6 @@ class _PrivateLogic:
 
         activation_pct = position_obj.tsl_activation_pct_at_open
         distance_pct = position_obj.tsl_distance_pct_at_open
-        
         is_ts_active = position_obj.ts_is_active
         entry_price = position_obj.entry_price
         
@@ -142,22 +150,15 @@ class _PrivateLogic:
         result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
         
         if result and result.get('success', False):
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # La lógica de devolución de margen y reinversión ahora ocurre aquí,
-            # modificando el objeto de balances de la operación.
             margin_original = pos_to_close.margin_usdt
             pnl = result.get('pnl_net_usdt', 0.0)
-            
-            # Devolver el margen original + la porción reinvertida del PNL al balance lógico.
             reinvested_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
             total_margin_to_release = margin_original + reinvested_amount
             operacion_before_close.balances.increase_available_margin(total_margin_to_release)
 
-            # Registrar la porción transferible para que el ejecutor de transferencias la use.
             transferable_amount = result.get('amount_transferable_to_profit', 0.0)
             if transferable_amount > 0:
                 operacion_before_close.balances.record_profit_transfer(transferable_amount)
-            # --- FIN DE LA MODIFICACIÓN ---
 
             new_positions = operacion_before_close.posiciones_activas
             new_positions[side].pop(index)
@@ -170,20 +171,17 @@ class _PrivateLogic:
             else:
                 self._total_realized_pnl_short += pnl
             
-            # Enviamos todos los cambios en una sola llamada a la API para el lado correcto
             params_to_update = {
                 'posiciones_activas': new_positions,
                 'pnl_realizado_usdt': new_pnl_realizado,
                 'comercios_cerrados_contador': new_trade_count,
-                'balances': operacion_before_close.balances # Propagar el balance actualizado
+                'balances': operacion_before_close.balances
             }
             self._om_api.create_or_update_operation(side, params_to_update)
             self._position_state.remove_logical_position(side, index)
 
-            # La llamada al transfer_executor ya no necesita balance_manager y usa el monto del resultado.
             if _transfer_executor and transferable_amount >= self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]:
                 _transfer_executor.execute_transfer(amount=transferable_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
-                # La lógica de `record_real_profit_transfer` fue movida al objeto de balances.
             
             self._om_api.revisar_y_transicionar_a_detenida(side)
         

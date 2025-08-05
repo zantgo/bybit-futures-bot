@@ -2,29 +2,6 @@
 
 """
 Módulo para la Pantalla del Dashboard de Sesión.
-
-v8.3 (Reordenamiento de UI):
-- Reorganizada la UI para dar prioridad al panel de Señal.
-- Mejorado el panel de Señal con separadores internos.
-- Ajustado el panel de Operaciones para ser más conciso.
-
-v8.2 (Corrección de Alineación y Títulos):
-- Restaurados los títulos de cada bloque de información.
-- Corregido el problema de alineación de las cajas del dashboard.
-- Implementado sistema de ancho dinámico basado en el terminal.
-- Mejorado el truncamiento de texto largo para mantener la estructura.
-- Solucionado TypeError en print_tui_header cuando el subtítulo es None.
-
-v8.1 (Refactor de Configuración):
-- Adaptado para leer el `TICKER_SYMBOL` desde la nueva estructura de `config.py`.
-
-v8.0 (Capital Lógico y Nuevo UI):
-- La pantalla ha sido rediseñada completamente para mostrar el estado de la sesión
-  y los balances lógicos de las operaciones LONG y SHORT de forma separada y clara.
-- El menú de acciones ahora permite el acceso directo a la gestión de la operación
-  LONG o SHORT, eliminando menús intermedios.
-- Se añade una opción para refrescar la vista del dashboard en tiempo real.
-- La opción "Ver/Gestionar Posiciones" se elimina del dashboard.
 """
 import time
 import datetime
@@ -111,7 +88,7 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
 
-def _display_final_summary(summary: Dict[str, Any]):
+def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     """Muestra una pantalla de resumen clara al finalizar la sesión."""
     clear_screen()
     print_tui_header("Resumen Final de la Sesión")
@@ -135,6 +112,30 @@ def _display_final_summary(summary: Dict[str, Any]):
     print(f"  ROI Final (Realizado): {final_roi:+.2f}%")
     print(f"  Duración Total: {duration_str}")
 
+    # --- INICIO DE LA MODIFICACIÓN: Añadir sección de estado de operaciones ---
+    print("\n--- Estado Final de las Operaciones ---")
+    sides = ['long', 'short']
+    for side in sides:
+        op_info = summary.get('operations_info', {}).get(side, {})
+        balance_info = summary.get('logical_balances', {}).get(side, {})
+        pnl = summary.get(f'operation_{side}_pnl', 0.0)
+        roi = summary.get(f'operation_{side}_roi', 0.0)
+        ganancias_netas = pnl - summary.get(f'comisiones_totales_usdt_{side}', 0.0)
+        capital_usado = balance_info.get('used_margin', 0.0)
+        capital_operativo = balance_info.get('operational_margin', 0.0)
+        pos_count = summary.get(f'open_{side}_positions_count', 0)
+        max_pos_op = _deps.get("operation_manager_api_module").get_operation_by_side(side)
+        max_pos = max_pos_op.max_posiciones_logicas if max_pos_op else 'N/A'
+        
+        print(f"\n  Operación {side.upper()}:")
+        print(f"    - Estado Final          : {op_info.get('estado', 'DETENIDA').upper()}")
+        print(f"    - Posiciones Abiertas   : {pos_count} / {max_pos}")
+        print(f"    - Capital (Usado/Total) : ${capital_usado:.2f} / ${capital_operativo:.2f}")
+        print(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
+        print(f"    - PNL (Realizado+No R.) : {pnl:+.4f} USDT")
+        print(f"    - ROI                   : {roi:+.2f}%")
+    # --- FIN DE LA MODIFICACIÓN ---
+
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
     
@@ -150,6 +151,28 @@ def _display_final_summary(summary: Dict[str, Any]):
                 print(f"    - ID: {pos.get('id', 'N/A')}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}")
     else:
         print("\n--- No quedaron posiciones abiertas ---")
+        
+    if config_module:
+        print("\n--- Parámetros Clave de la Sesión ---")
+        session_cfg = config_module.SESSION_CONFIG
+        
+        params_to_show = {
+            "Intervalo Ticker (s)": session_cfg['TICKER_INTERVAL_SECONDS'],
+            "Período EMA": session_cfg['TA']['EMA_WINDOW'] if session_cfg['TA']['ENABLED'] else "Desactivado",
+            "Margen Compra (%)": session_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
+            "Margen Venta (%)": session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
+            "Umbral Incremento Señal": session_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
+            "Umbral Decremento Señal": session_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
+            "Comisión (%)": f"{session_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
+            "Reinvertir Ganancias (%)": session_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
+            "SL por ROI (%)": f"-{session_cfg['SESSION_LIMITS']['ROI_SL']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_SL']['ENABLED'] else "Desactivado",
+            "TP por ROI (%)": f"+{session_cfg['SESSION_LIMITS']['ROI_TP']['PERCENTAGE']}" if session_cfg['SESSION_LIMITS']['ROI_TP']['ENABLED'] else "Desactivado",
+            "Duración Máx. (min)": session_cfg['SESSION_LIMITS']['MAX_DURATION']['MINUTES'] if session_cfg['SESSION_LIMITS']['MAX_DURATION']['ENABLED'] else "Desactivado",
+        }
+        
+        max_key_len = max(len(k) for k in params_to_show.keys())
+        for key, value in params_to_show.items():
+            print(f"  {key:<{max_key_len}} : {value}")
 
     press_enter_to_continue()
 
@@ -364,7 +387,7 @@ def show_dashboard_screen(session_manager: Any):
         menu_items = [
             "[1] Gestionar Operación LONG", 
             "[2] Gestionar Operación SHORT",
-            None,  # Separador añadido
+            None,
             "[3] Editar Configuración de Sesión", 
             "[4] Ver Logs en Tiempo Real",
             None,
@@ -373,14 +396,11 @@ def show_dashboard_screen(session_manager: Any):
             "[q] Finalizar Sesión y Volver al Menú Principal"
         ]
         
-        # El action_map se actualiza para reflejar los nuevos índices
         action_map = {
             0: 'manage_long', 
             1: 'manage_short', 
-            # El índice 2 es ahora el separador (None)
             3: 'edit_config', 
             4: 'view_logs',
-            # El índice 5 es el otro separador (None)
             6: 'refresh', 
             7: 'help', 
             8: 'exit_session'
@@ -415,7 +435,8 @@ def show_dashboard_screen(session_manager: Any):
                 break
     
     final_summary_data = sm_api.get_session_summary()
-    _display_final_summary(final_summary_data)
+    
+    _display_final_summary(final_summary_data, config_module)
     
     if session_manager.is_running():
         session_manager.stop()

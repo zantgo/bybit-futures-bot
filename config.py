@@ -182,15 +182,17 @@ PRECISION_FALLBACKS = {
     "PNL_PRECISION": 4,
 }
 
-# Rutas de Archivos de Log
+# Rutas de Archivos de Log y Resultados
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results") # <-- AÑADIR ESTA LÍNEA
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True) # <-- AÑADIR ESTA LÍNEA
+
 LOG_FILES = {
     "SIGNAL": os.path.join(LOG_DIR, "signals_log.jsonl"),
     "CLOSED_POSITIONS": os.path.join(LOG_DIR, "closed_positions.jsonl"),
     "OPEN_SNAPSHOT": os.path.join(LOG_DIR, "open_positions_snapshot.jsonl"),
 }
-
 # --- 5. LÓGICA DE CARGA DE ENTORNO (UIDs y Claves API) ---
 
 # Variable global para almacenar UIDs cargados.

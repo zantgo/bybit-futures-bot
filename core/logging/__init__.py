@@ -1,3 +1,5 @@
+# core/logging/__init__.py
+
 """
 Paquete de Logging del Bot.
 
@@ -147,22 +149,11 @@ def initialize_loggers():
     global _signal_manager, _closed_pos_manager, _open_pos_manager
     import config # Importación local para asegurar que config esté cargado
 
-    # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
+    # --- INICIO DE LA CORRECCIÓN (Adaptación a Nueva Estructura) ---
     logging_config = config.BOT_CONFIG["LOGGING"]
     log_files = config.LOG_FILES
     
     # Configuración para el logger de señales
-    # --- (COMENTADO) ---
-    # if getattr(config, 'LOG_SIGNAL_OUTPUT', False):
-    #     _signal_manager = FileLogManager(
-    #         filepath=getattr(config, 'SIGNAL_LOG_FILE'),
-    #         max_lines=1000,
-    #         batch_size=10,
-    #         flush_interval=30
-    #     )
-    #     signal_logger.setup(_signal_manager)
-    #     _signal_manager.start()
-    # --- (CORREGIDO) ---
     if logging_config.get("LOG_SIGNAL_OUTPUT", False):
         _signal_manager = FileLogManager(
             filepath=log_files["SIGNAL"],
@@ -173,17 +164,7 @@ def initialize_loggers():
         signal_logger.setup(_signal_manager)
         _signal_manager.start()
 
-
     # Configuración para el logger de posiciones cerradas
-    # --- (COMENTADO) ---
-    # if getattr(config, 'POSITION_LOG_CLOSED_POSITIONS', False):
-    #     _closed_pos_manager = FileLogManager(
-    #         filepath=getattr(config, 'POSITION_CLOSED_LOG_FILE'),
-    #         max_lines=1000
-    #     )
-    #     closed_position_logger.setup(_closed_pos_manager)
-    #     _closed_pos_manager.start()
-    # --- (CORREGIDO) ---
     if logging_config.get("LOG_CLOSED_POSITIONS", False):
         _closed_pos_manager = FileLogManager(
             filepath=log_files["CLOSED_POSITIONS"],
@@ -193,16 +174,6 @@ def initialize_loggers():
         _closed_pos_manager.start()
         
     # Configuración para el logger de snapshot de posiciones abiertas
-    # --- (COMENTADO) ---
-    # if getattr(config, 'POSITION_LOG_OPEN_SNAPSHOT', False):
-    #     _open_pos_manager = FileLogManager(
-    #         filepath=getattr(config, 'POSITION_OPEN_SNAPSHOT_FILE'),
-    #         max_lines=1, # Solo nos interesa la última instantánea
-    #         overwrite=True # Siempre sobrescribir
-    #     )
-    #     open_position_logger.setup(_open_pos_manager)
-    #     _open_pos_manager.start()
-    # --- (CORREGIDO) ---
     if logging_config.get("LOG_OPEN_SNAPSHOT", False):
         _open_pos_manager = FileLogManager(
             filepath=log_files["OPEN_SNAPSHOT"],
@@ -211,7 +182,7 @@ def initialize_loggers():
         )
         open_position_logger.setup(_open_pos_manager)
         _open_pos_manager.start()
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- FIN DE LA CORRECCIÓN ---
     
     memory_logger.log("Sistema de logging asíncrono inicializado.", "INFO")
 

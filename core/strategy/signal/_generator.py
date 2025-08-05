@@ -44,20 +44,14 @@ class SignalGenerator:
                 - 'config_module': El módulo de configuración del sistema.
                 - 'memory_logger_module': La instancia del logger en memoria.
         """
-        # Dependencias inyectadas para desacoplamiento y pruebas
         self._config = dependencies.get('config_module', config)
         self._memory_logger = dependencies.get('memory_logger_module')
         
-        # Dependencias internas del paquete (se asume que no cambiarán)
         self._data_handler = _data_handler
         self._rules = _rules
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Inicializar el estado interno al crear la instancia.
         self.initialize()
-        # --- FIN DE LA MODIFICACIÓN ---
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def initialize(self):
         """
         Resetea el estado del generador de señales a su estado inicial.
@@ -66,36 +60,20 @@ class SignalGenerator:
         self._strategy_is_ready = False
         if self._memory_logger:
             self._memory_logger.log("SignalGenerator: Estado reseteado. Esperando cálculo de indicadores iniciales...", "INFO")
-    # --- FIN DE LA MODIFICACIÓN ---
 
 
     def generate_signal(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Punto de entrada principal. Orquesta la evaluación de indicadores técnicos
         para generar una señal de trading.
-
-        La lógica de esta función es idéntica a la versión funcional, pero ahora
-        utiliza las dependencias almacenadas en la instancia.
-
-        Args:
-            processed_data (dict): Un diccionario que contiene los indicadores
-                                   calculados desde el TAManager.
-
-        Returns:
-            dict: Un diccionario completo representando la señal y el estado de
-                  los indicadores en ese momento.
         """
-        # 1. Extraer y validar los datos de entrada usando el manejador de datos
         (timestamp, price, ema, inc_pct, dec_pct, w_inc, w_dec) = self._data_handler.extract_indicator_values(processed_data)
 
-        # Validación básica de datos. Si los datos crudos son inválidos, no se puede continuar.
         if pd.isna(timestamp) or pd.isna(price):
             signal = "HOLD_INVALID_DATA"
             reason = "Timestamp o Precio inválido en los datos procesados"
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         else:
-            # Comprobar si todos los indicadores necesarios tienen valores numéricos válidos.
             indicators_are_valid = (
                 pd.notna(ema) and np.isfinite(ema) and
                 pd.notna(w_inc) and np.isfinite(w_inc) and
@@ -103,27 +81,22 @@ class SignalGenerator:
             )
 
             if not indicators_are_valid:
-                # Si los indicadores aún no están listos, estamos en fase de "calentamiento".
                 signal = "HOLD_INITIALIZING"
                 reason = "Calculando indicadores iniciales..."
             
-            # 2. Evaluar la lógica de la estrategia (si está habilitada en la config)
-            elif self._config.SESSION_CONFIG["STRATEGY"]["ENABLED"]:
-                # Loguear un único mensaje la primera vez que la estrategia está lista.
+            # --- INICIO DE LA CORRECCIÓN ---
+            elif self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
+            # --- FIN DE LA CORRECCIÓN ---
                 if not self._strategy_is_ready and self._memory_logger:
                     self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
                     self._strategy_is_ready = True
 
-                # Delega la evaluación de las reglas al módulo de reglas
                 signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
             
-            # Si la estrategia no está habilitada, se mantiene en HOLD por defecto.
             else:
                 signal = "HOLD_STRATEGY_DISABLED"
                 reason = "Estrategia desactivada en config"
-        # --- FIN DE LA MODIFICACIÓN ---
 
-        # 3. Construir el diccionario de salida final usando el manejador de datos
         return self._data_handler.build_signal_dict(
             timestamp, price, ema, inc_pct, dec_pct, w_inc, w_dec, signal, reason
         )

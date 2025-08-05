@@ -135,6 +135,8 @@ class Ticker:
             start_time = time.monotonic()
             
             try:
+                # Recargamos el intervalo en cada ciclo para permitir cambios en caliente
+                fetch_interval = self._config.SESSION_CONFIG["TICKER_INTERVAL_SECONDS"]
                 symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
 
                 if not symbol: # Se valida que el símbolo no esté vacío
@@ -187,9 +189,12 @@ class Ticker:
             self._intermediate_ticks_buffer.append(current_tick_info)
             self._tick_counter += 1
             
-            # Comentario: La lógica de RAW_PRICE_TICK_INTERVAL se mantiene por si se reintroduce.
-            # De lo contrario, este bloque se ejecutará en cada tick.
-            raw_event_ticks = getattr(self._config, 'RAW_PRICE_TICK_INTERVAL', 1) 
+            # --- INICIO DE LA CORRECCIÓN ---
+            # En lugar de una variable inexistente, asumimos que cada tick genera un evento.
+            # La lógica del intervalo ya se maneja en el bucle principal con `wait_time`.
+            raw_event_ticks = 1 
+            # --- FIN DE LA CORRECCIÓN ---
+
             if self._tick_counter >= raw_event_ticks:
                 final_info = self._latest_price_info.copy()
                 intermediate_info = self._intermediate_ticks_buffer.copy()
