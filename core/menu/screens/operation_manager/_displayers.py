@@ -191,6 +191,13 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
     pnl_color, reset = ("\033[92m" if total_pnl >= 0 else "\033[91m"), "\033[0m"
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # 1. Obtener el balance de profits desde el objeto 'operacion'.
+    # Usamos getattr para seguridad, en caso de que el objeto no lo tuviera (aunque debería).
+    profit_balance = getattr(operacion.balances, 'profit_balance', 0.0)
+    profit_color = "\033[92m" if profit_balance > 0 else "" # Solo colorear si es positivo
+    # --- FIN DE LA MODIFICACIÓN ---
+
     capital_actual = initial_capital + realized_pnl
     balances_info = summary.get('logical_balances', {}).get(side, {})
     margen_uso = balances_info.get('used_margin', 0.0)
@@ -215,6 +222,10 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     data_bottom = {
         "Ganancias Netas": f"{netas_color}{ganancias_netas:+.4f}{reset}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 2. Añadir la nueva métrica al diccionario de datos a mostrar.
+        "Transferido a PROFIT": f"{profit_color}${profit_balance:+.4f}{reset}",
+        # --- FIN DE LA MODIFICACIÓN ---
         "Trades Abiertos": str(trades_abiertos),
         "Trades Cerrados": str(trades_cerrados)
     }
@@ -229,7 +240,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
         
     print("└" + "─" * (box_width - 2) + "┘")
-
+    
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     """Muestra la tabla de posiciones abiertas y datos agregados."""
