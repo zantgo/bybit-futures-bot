@@ -188,6 +188,10 @@ class EventProcessor:
                     exit_condition_met = False
                     reason = ""
                     summary = self._pm_api.get_position_summary()
+                    
+                    # --- INICIO DE LA CORRECCIÓN ---
+                    # Asegurarse de que el ROI es un número antes de usarlo.
+                    roi = 0.0
                     if summary and 'error' not in summary:
                         unrealized_pnl_side = 0.0
                         open_positions_side = summary.get(f'open_{side}_positions', [])
@@ -198,20 +202,30 @@ class EventProcessor:
                             else: unrealized_pnl_side += (entry - current_price) * size
                         
                         total_pnl_side = operacion.pnl_realizado_usdt + unrealized_pnl_side
-                        roi = (total_pnl_side / operacion.capital_inicial_usdt) * 100 if operacion.capital_inicial_usdt > 0 else 0.0
+                        roi = self._utils.safe_division(total_pnl_side, operacion.capital_inicial_usdt) * 100
 
-                        if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
-                            if not operacion.tsl_roi_activo and roi >= operacion.tsl_roi_activacion_pct:
+                        # Ahora que ROI es seguro, procedemos con las comprobaciones
+                        tsl_act_pct = operacion.tsl_roi_activacion_pct
+                        tsl_dist_pct = operacion.tsl_roi_distancia_pct
+                        
+                        if tsl_act_pct is not None and tsl_dist_pct is not None:
+                            if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
                                 operacion.tsl_roi_activo = True
                                 operacion.tsl_roi_peak_pct = roi
                                 self._memory_logger.log(f"TSL-ROI para Operación {side.upper()} ACTIVADO. ROI: {roi:.2f}%, Pico: {operacion.tsl_roi_peak_pct:.2f}%", "INFO")
+                            
                             if operacion.tsl_roi_activo:
-                                if roi > operacion.tsl_roi_peak_pct: operacion.tsl_roi_peak_pct = roi
-                                umbral_disparo = operacion.tsl_roi_peak_pct - operacion.tsl_roi_distancia_pct
-                                if roi <= umbral_disparo: exit_condition_met, reason = True, f"TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
+                                if roi > operacion.tsl_roi_peak_pct: 
+                                    operacion.tsl_roi_peak_pct = roi
+                                
+                                umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
+                                if roi <= umbral_disparo: 
+                                    exit_condition_met, reason = True, f"TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
 
-                        if not exit_condition_met and operacion.sl_roi_pct is not None and roi <= -abs(operacion.sl_roi_pct):
+                        sl_roi_pct = operacion.sl_roi_pct
+                        if not exit_condition_met and sl_roi_pct is not None and roi <= -abs(sl_roi_pct):
                             exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}%)"
+                    # --- FIN DE LA CORRECCIÓN ---
 
                     if not exit_condition_met and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_condition_met, reason = True, f"Límite de {operacion.max_comercios} trades"
@@ -272,11 +286,11 @@ class EventProcessor:
         limits_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]
 
         # Límite de Duración
-        duration_cfg = limits_cfg["MAX_DURATION"]
-        if duration_cfg["ENABLED"]:
-            max_minutes = duration_cfg["MINUTES"]
+        duration_cfg = limits_cfg.get("MAX_DURATION", {})
+        if duration_cfg.get("ENABLED", False):
+            max_minutes = duration_cfg.get("MINUTES")
             start_time = self._pm_api.get_session_start_time()
-            if start_time and max_minutes > 0 and (timestamp - start_time).total_seconds() / 60.0 >= max_minutes:
+            if start_time and max_minutes is not None and max_minutes > 0 and (timestamp - start_time).total_seconds() / 60.0 >= max_minutes:
                 self._global_stop_loss_triggered = True
                 msg = f"LÍMITE DE DURACIÓN DE SESIÓN ({max_minutes} min) ALCANZADO"
                 self._memory_logger.log(msg, "ERROR")
@@ -294,23 +308,27 @@ class EventProcessor:
         current_roi = self._utils.safe_division(realized_pnl + unrealized_pnl, initial_capital) * 100.0
 
         # Límite de Take Profit por ROI
-        tp_cfg = limits_cfg["ROI_TP"]
-        if tp_cfg["ENABLED"] and not self._pm_api.is_session_tp_hit():
-            tp_pct = tp_cfg["PERCENTAGE"]
-            if tp_pct > 0 and current_roi >= tp_pct:
-                self._memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
-                # Aquí podrías añadir lógica adicional si TP finaliza la sesión
-                self._pm_api.set_session_tp_hit(True) # Marcar como alcanzado
+        tp_cfg = limits_cfg.get("ROI_TP", {})
+        if tp_cfg.get("ENABLED", False) and not self._pm_api.is_session_tp_hit():
+            tp_pct = tp_cfg.get("PERCENTAGE")
+            if tp_pct is not None and isinstance(current_roi, (int, float)):
+                if tp_pct > 0 and current_roi >= tp_pct:
+                    self._memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
+                    self._pm_api.set_session_tp_hit(True)
 
         # Límite de Stop Loss por ROI
-        sl_cfg = limits_cfg["ROI_SL"]
-        if sl_cfg["ENABLED"]:
-            sl_pct = sl_cfg["PERCENTAGE"]
-            if sl_pct > 0 and current_roi <= -abs(sl_pct):
-                self._global_stop_loss_triggered = True
-                msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
-                self._memory_logger.log(msg, "ERROR")
-                self._pm_api.close_all_logical_positions('long', "SESSION_SL_ROI")
-                self._pm_api.close_all_logical_positions('short', "SESSION_SL_ROI")
-                if self._global_stop_loss_event: self._global_stop_loss_event.set()
-                raise GlobalStopLossException(msg)
+        sl_cfg = limits_cfg.get("ROI_SL", {})
+        if sl_cfg.get("ENABLED", False):
+            sl_pct = sl_cfg.get("PERCENTAGE")
+            # --- INICIO DE LA MODIFICACIÓN CRÍTICA ---
+            # Se añade la comprobación para asegurar que sl_pct no es None y que current_roi es un número válido.
+            if sl_pct is not None and isinstance(current_roi, (int, float)):
+                if sl_pct > 0 and current_roi <= -abs(sl_pct):
+                    self._global_stop_loss_triggered = True
+                    msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
+                    self._memory_logger.log(msg, "ERROR")
+                    self._pm_api.close_all_logical_positions('long', "SESSION_SL_ROI")
+                    self._pm_api.close_all_logical_positions('short', "SESSION_SL_ROI")
+                    if self._global_stop_loss_event: self._global_stop_loss_event.set()
+                    raise GlobalStopLossException(msg)
+            # --- FIN DE LA MODIFICACIÓN CRÍTICA ---
