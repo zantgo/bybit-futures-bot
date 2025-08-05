@@ -1,4 +1,5 @@
 # ./core/strategy/pm/manager/_lifecycle.py
+
 import datetime
 import time
 import copy
@@ -8,7 +9,10 @@ import uuid
 from datetime import timezone
 
 try:
-    from .._entities import Operacion
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se importa la entidad Operacion desde su única fuente de verdad en 'om'.
+    from core.strategy.om._entities import Operacion
+    # --- FIN DE LA MODIFICACIÓN ---
     from core.exchange import AbstractExchange
 except ImportError:
     class Operacion: pass
@@ -54,11 +58,9 @@ class _LifecycleManager:
         self._operation_mode = operation_mode
         self._session_start_time = datetime.datetime.now(timezone.utc)
         
-        # --- INICIO DE LA CORRECCIÓN ---
         session_limits = self._config.SESSION_CONFIG["SESSION_LIMITS"]
-        self._global_stop_loss_roi_pct = session_limits["ROI_SL"]["PERCENTAGE"] if session_limits["ROI_SL"]["ENABLED"] else 0.0
-        self._global_take_profit_roi_pct = session_limits["ROI_TP"]["PERCENTAGE"] if session_limits["ROI_TP"]["ENABLED"] else 0.0
-        # --- FIN DE LA CORRECCIÓN ---
+        self._global_stop_loss_roi_pct = session_limits["ROI_SL"]["PERCENTAGE"] if session_limits["ROI_SL"]["ENABLED"] else None
+        self._global_take_profit_roi_pct = session_limits["ROI_TP"]["PERCENTAGE"] if session_limits["ROI_TP"]["ENABLED"] else None
 
         self._position_state.initialize(is_live_mode=True)
         self._initialized = True

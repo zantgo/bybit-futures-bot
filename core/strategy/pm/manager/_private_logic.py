@@ -7,7 +7,11 @@ from collections import defaultdict
 from dataclasses import asdict
 
 try:
-    from .._entities import Operacion, LogicalPosition
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se importa la entidad Operacion desde 'om' y las entidades de PM desde su propio paquete.
+    from core.strategy.om._entities import Operacion
+    from .._entities import LogicalPosition
+    # --- FIN DE LA MODIFICACIÓN ---
     from .. import _transfer_executor
 except ImportError:
     class Operacion: pass
@@ -36,7 +40,6 @@ class _PrivateLogic:
             self._memory_logger.log(f"Apertura omitida ({side.upper()}): Margen lógico insuficiente ({operacion.balances.available_margin:.4f} USDT).", level="DEBUG")
             return False
 
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de Distancia de Promediación ---
         if open_positions_count > 0:
             last_position_entry_price = open_positions[-1].entry_price
             current_price = self.get_current_market_price()
@@ -45,14 +48,11 @@ class _PrivateLogic:
                 self._memory_logger.log(f"Apertura omitida ({side.upper()}): No se pudo obtener el precio de mercado actual para calcular la distancia.", level="WARN")
                 return False
 
-            # Obtener la distancia requerida desde la configuración
             if side == 'long':
                 required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_LONG"]
-                # Para un LONG, el precio actual debe ser MENOR que la última entrada para promediar a la baja.
                 price_condition_met = current_price <= last_position_entry_price * (1 - required_distance_pct / 100)
             else: # side == 'short'
                 required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"]
-                # Para un SHORT, el precio actual debe ser MAYOR que la última entrada para promediar al alza.
                 price_condition_met = current_price >= last_position_entry_price * (1 + required_distance_pct / 100)
 
             if not price_condition_met:
@@ -64,7 +64,6 @@ class _PrivateLogic:
                     level="DEBUG"
                 )
                 return False
-        # --- FIN DE LA MODIFICACIÓN ---
 
         return True
 
@@ -140,15 +139,15 @@ class _PrivateLogic:
 
         self._om_api.create_or_update_operation(side, {'posiciones_activas': operacion.posiciones_activas})
 
-    def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> bool:
+    def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         """Cierra una posición lógica específica y actualiza el estado de la operación correspondiente."""
         operacion_before_close = self._om_api.get_operation_by_side(side)
-        if not self._executor or not operacion_before_close:
-            return False
-        
+        if not self._executor or not operacion_before_close or index >= len(operacion_before_close.posiciones_activas.get(side, [])):
+            return {'success': False, 'message': 'Executor, operación o índice no válido'}
+
         pos_to_close = operacion_before_close.posiciones_activas[side][index]
         result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
-        
+
         if result and result.get('success', False):
             margin_original = pos_to_close.margin_usdt
             pnl = result.get('pnl_net_usdt', 0.0)
@@ -160,8 +159,11 @@ class _PrivateLogic:
             if transferable_amount > 0:
                 operacion_before_close.balances.record_profit_transfer(transferable_amount)
 
-            new_positions = operacion_before_close.posiciones_activas
-            new_positions[side].pop(index)
+            # --- CORRECCIÓN IMPORTANTE ---
+            # Se debe eliminar la posición de la lista ANTES de actualizar el OM
+            # para evitar condiciones de carrera.
+            if index < len(operacion_before_close.posiciones_activas.get(side, [])):
+                operacion_before_close.posiciones_activas[side].pop(index)
             
             new_pnl_realizado = operacion_before_close.pnl_realizado_usdt + pnl
             new_trade_count = operacion_before_close.comercios_cerrados_contador + 1
@@ -172,7 +174,7 @@ class _PrivateLogic:
                 self._total_realized_pnl_short += pnl
             
             params_to_update = {
-                'posiciones_activas': new_positions,
+                'posiciones_activas': operacion_before_close.posiciones_activas,
                 'pnl_realizado_usdt': new_pnl_realizado,
                 'comercios_cerrados_contador': new_trade_count,
                 'balances': operacion_before_close.balances
@@ -185,4 +187,4 @@ class _PrivateLogic:
             
             self._om_api.revisar_y_transicionar_a_detenida(side)
         
-        return result.get('success', False)
+        return result
