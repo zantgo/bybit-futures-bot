@@ -1,20 +1,15 @@
 # ./core/strategy/pm/_executor.py
-
-import datetime
-import uuid
-import traceback
+import datetime, uuid, traceback
 from typing import Optional, Dict, Any
 from dataclasses import asdict
-
-# --- INICIO DE LA MODIFICACIÓN ---
-# La importación ahora es mucho más simple y directa, eliminando el ciclo.
 try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
-    from .._entities import LogicalPosition # Solo necesitamos esta entidad aquí
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Importamos desde la nueva ubicación central y única.
+    from core.strategy.entities import LogicalPosition
+    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError as e:
-    # Este fallback ahora es mucho menos probable que se active.
-    # Si lo hace, el error será claro.
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
         raise ImportError("Fallo crítico importando LogicalPosition. Verifica la estructura de archivos.")
@@ -23,10 +18,9 @@ except ImportError as e:
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
-# --- FIN DE LA MODIFICACIÓN ---
 
 class PositionExecutor:
-    # ... (El resto del código de esta clase NO cambia) ...
+    # ... EL RESTO DEL CÓDIGO DE LA CLASE NO CAMBIA ...
     """
     Clase responsable de la ejecución mecánica de apertura y cierre de posiciones
     y de la sincronización del estado físico a través de una interfaz de exchange.
