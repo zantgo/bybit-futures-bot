@@ -4,20 +4,35 @@ import datetime
 import uuid
 import traceback
 from typing import Optional, Dict, Any
+from dataclasses import asdict
 
+# --- INICIO DE LA MODIFICACIÓN CRÍTICA ---
+# Se separa cada importación para aislar el fallo.
 try:
     from core.logging import memory_logger
-    from core.exchange import AbstractExchange, StandardOrder
-    from .._entities import LogicalPosition
-    from dataclasses import asdict
 except ImportError:
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
+
+try:
+    from core.exchange import AbstractExchange, StandardOrder
+except ImportError:
     class AbstractExchange: pass
     class StandardOrder: pass
-    class LogicalPosition: pass
-    def asdict(obj): return obj.__dict__
+    memory_logger.log("ERROR CRÍTICO: No se pudo importar AbstractExchange o StandardOrder en _executor.", "ERROR")
+
+
+try:
+    # Se importa LogicalPosition desde su ÚNICA ubicación.
+    from .._entities import LogicalPosition
+except ImportError as e:
+    # Si esta importación falla, es un error fatal. El fallback vacío es la causa del bug.
+    memory_logger.log(f"ERROR FATAL: No se pudo importar 'LogicalPosition' en _executor: {e}", "ERROR")
+    # Creamos un fallback que fallará con un error más claro si se intenta instanciar.
+    def LogicalPosition(*args, **kwargs):
+        raise ImportError("Se está intentando usar una versión falsa de LogicalPosition. La importación original falló.")
+# --- FIN DE LA MODIFICACIÓN CRÍTICA ---
 
 class PositionExecutor:
     """
@@ -111,13 +126,11 @@ class PositionExecutor:
         execution_success = False
         api_order_id = None
         
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de Paper Trading ---
         if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
             memory_logger.log(f"  -> MODO PAPEL: Simulación de orden Market aceptada.", "WARN")
             execution_success = True
             api_order_id = f"paper-open-{uuid.uuid4()}"
         else:
-            # --- Lógica de Trading Real (código existente) ---
             try:
                 order_to_place = StandardOrder(
                     symbol=self._symbol,
@@ -139,7 +152,6 @@ class PositionExecutor:
                     memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
             except Exception as exec_err:
                 result['message'] = f"Excepción durante ejecución de orden: {exec_err}"
-        # --- FIN DE LA MODIFICACIÓN ---
 
         if execution_success:
             new_position_obj.api_order_id = api_order_id
@@ -166,12 +178,10 @@ class PositionExecutor:
         
         execution_success = False
         
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de Paper Trading ---
         if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
             memory_logger.log(f"  -> MODO PAPEL: Simulación de orden de cierre aceptada para ID {pos_id_short}.", "WARN")
             execution_success = True
         else:
-            # --- Lógica de Trading Real (código existente) ---
             try:
                 order_to_close = StandardOrder(
                     symbol=self._symbol,
@@ -194,7 +204,6 @@ class PositionExecutor:
                         result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
             except Exception as e:
                 result['message'] = f"Excepción durante ejecución de cierre: {e}"
-        # --- FIN DE LA MODIFICACIÓN ---
 
         if execution_success:
             removed_pos_dict = asdict(position_to_close)
@@ -215,11 +224,8 @@ class PositionExecutor:
 
     def sync_physical_state(self, side: str):
         """Sincroniza el estado físico interno con el real del exchange."""
-        # --- INICIO DE LA MODIFICACIÓN: Omitir en Paper Trading ---
-        # En modo papel, no hay estado físico real que sincronizar.
         if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
             return
-        # --- FIN DE LA MODIFICACIÓN ---
         
         try:
             account_purpose = 'longs' if side == 'long' else 'shorts'
