@@ -179,6 +179,19 @@ class BotController:
         except UserInputCancelled:
             return False, "Prueba cancelada por el usuario."
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 1. Definir los nombres de las cuentas al principio.
+        long_account = self._config.BOT_CONFIG["ACCOUNTS"].get("LONGS")
+        short_account = self._config.BOT_CONFIG["ACCOUNTS"].get("SHORTS")
+
+        if not long_account or not short_account:
+            return False, "Nombres de cuenta para LONGS o SHORTS no definidos en la configuración."
+        
+        # 2. Banderas para saber si las posiciones se abrieron con éxito.
+        long_position_opened = False
+        short_position_opened = False
+        # --- FIN DE LA MODIFICACIÓN ---
+
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
         adapter = self._BybitAdapter(self._connection_manager)
         
@@ -197,37 +210,50 @@ class BotController:
 
         try:
             print("\nEstableciendo apalancamiento...")
-            if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage)):
-                return False, "Fallo al establecer el apalancamiento."
+            # Se establece en ambas cuentas para asegurar consistencia
+            if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=long_account):
+                return False, f"Fallo al establecer apalancamiento en '{long_account}'."
+            if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=short_account):
+                return False, f"Fallo al establecer apalancamiento en '{short_account}'."
             print(" -> Éxito.")
 
-            long_account = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
             print(f"Abriendo posición LONG en '{long_account}'...")
             long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
             
             if not long_res or long_res.get('retCode') != 0:
                 return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
+            
             print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
+            long_position_opened = True # Marcar como abierta
             time.sleep(1)
 
-            short_account = self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
             print(f"Abriendo posición SHORT en '{short_account}'...")
             short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
 
             if not short_res or short_res.get('retCode') != 0:
                 return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
+            
             print(f" -> Éxito. OrderID: {short_res.get('result', {}).get('orderId')}")
+            short_position_opened = True # Marcar como abierta
             time.sleep(2)
+
         finally:
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # 3. El bloque de limpieza ahora usa las banderas para actuar de forma segura.
             print("\n--- Fase de Limpieza ---")
-            print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
-            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
-            print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
-            self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
+            if long_position_opened:
+                print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
+                self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
+            
+            if short_position_opened:
+                print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
+                self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
+            
             self._memory_logger.log("BotController[Test]: Limpieza completada.", "INFO")
+            # --- FIN DE LA MODIFICACIÓN ---
 
         return True, f"Prueba de trading completada con éxito para {ticker}."
-
+    
     def create_session(self) -> Optional[SessionManager]:
         """Fábrica para crear una nueva sesión de trading."""
         if not self._connections_initialized:
