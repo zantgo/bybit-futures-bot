@@ -63,9 +63,15 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     Calcula el precio de Stop Loss para una posición individual.
     Recibe el porcentaje de SL como argumento para permitir el ajuste dinámico.
     """
-    # sl_pct = getattr(config, 'POSITION_INDIVIDUAL_STOP_LOSS_PCT', 0.0) # Ya no se lee de config
+    # --- INICIO DE LA CORRECCIÓN CRÍTICA ---
+    # Comprobamos PRIMERO si sl_pct es un número válido.
+    # Si es None o no es un número, no podemos hacer la comparación <=.
+    if not isinstance(sl_pct, (int, float)) or not np.isfinite(sl_pct):
+        return None # No hay Stop Loss si el valor no es un número válido.
+
     if sl_pct <= 0:
-        return None # No hay Stop Loss si el porcentaje es cero o negativo
+        return None # No hay Stop Loss si el porcentaje es cero o negativo.
+    # --- FIN DE LA CORRECCIÓN CRÍTICA ---
 
     if not isinstance(entry_price, (int, float)) or not np.isfinite(entry_price) or entry_price <= 0:
         return None
@@ -83,7 +89,6 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     except Exception as e:
         memory_logger.log(f"ERROR [Calc SL]: Excepción calculando SL: {e}", level="ERROR")
         return None
-
 def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: float) -> Optional[float]:
     """
     Estima el precio de liquidación (aproximación simple margen aislado).
