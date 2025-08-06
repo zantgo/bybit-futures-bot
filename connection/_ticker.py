@@ -1,35 +1,19 @@
-# connection/_ticker.py
+# ./connection/_ticker.py
 
-"""
-Gestiona el hilo que obtiene los precios del mercado en tiempo real (Versión de Clase).
-
-v3.0 (Refactor a Clase):
-- Toda la lógica del ticker se encapsula en la clase Ticker.
-- El estado (hilo, evento de parada, caché de precios) se convierte en
-  atributos de instancia, eliminando el estado global.
-- Las dependencias (config, logger) se inyectan en el constructor.
-
-v2.2 (Refactor EventProcessor):
-- Se mantiene la llamada al callback con argumentos nombrados.
-
-v2.1 (Error Handling):
-- Se mantiene el manejo robusto de errores de red en el bucle.
-"""
 import threading
 import time
 import traceback
 import sys
 import os
 from typing import Optional, Dict, Any, Callable
+import datetime # Importamos datetime
 
 try:
     import requests
 except ImportError:
     requests = None
 
-# --- Dependencias del Proyecto (Importaciones adaptadas) ---
 try:
-    # Este bloque asegura que las importaciones funcionen tanto en ejecución normal como en pruebas aisladas
     if __name__ != "__main__":
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(script_dir))
@@ -40,7 +24,6 @@ try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardTicker
 except ImportError as e:
-    # Fallbacks para evitar errores si el script se ejecuta de forma aislada sin su entorno
     print(f"ERROR CRITICO [Ticker Class Import]: No se pudo importar un módulo esencial: {e}")
     config = type('obj', (object,), {})()
     memory_logger = type('obj', (object,), {'log': print})()
@@ -50,18 +33,13 @@ except ImportError as e:
 
 class Ticker:
     """
-    Gestiona un hilo dedicado para obtener precios de mercado en tiempo real
-    de forma periódica, encapsulando todo su estado y ciclo de vida.
+    Gestiona un hilo para obtener precios de mercado o ejecutar ticks de simulación.
     """
 
     def __init__(self, dependencies: Dict[str, Any]):
-        """
-        Inicializa el Ticker, inyectando sus dependencias.
-        """
         self._config = dependencies.get('config_module', config)
         self._memory_logger = dependencies.get('memory_logger_module', memory_logger)
         
-        # El estado global ahora es de la instancia
         self._latest_price_info: Dict[str, Any] = {"price": None, "timestamp": None, "symbol": None}
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -69,15 +47,13 @@ class Ticker:
         self._raw_event_callback: Optional[Callable] = None
         self._intermediate_ticks_buffer: list = []
         self._exchange_adapter: Optional[AbstractExchange] = None
-        self._lock = threading.Lock() # Lock de instancia para proteger el estado
+        self._lock = threading.Lock()
 
     def get_latest_price(self) -> dict:
-        """Devuelve una copia segura de la información del último precio."""
         with self._lock:
             return self._latest_price_info.copy()
 
     def start(self, exchange_adapter: AbstractExchange, raw_event_callback: Callable):
-        """Inicia el hilo del ticker en segundo plano."""
         if not isinstance(exchange_adapter, AbstractExchange):
             self._memory_logger.log("Ticker ERROR FATAL: El objeto proporcionado no es una instancia de AbstractExchange.", level="ERROR")
             return
@@ -103,30 +79,48 @@ class Ticker:
         self._memory_logger.log("Ticker: Hilo iniciado.", level="INFO")
 
     def stop(self):
-        """Detiene el hilo del ticker de forma segura."""
         if self._thread and self._thread.is_alive():
             self._memory_logger.log("Ticker: Solicitando parada...", level="INFO")
             self._stop_event.set()
             self._thread.join(timeout=5)
             if self._thread.is_alive():
                 self._memory_logger.log("WARN [Ticker]: El hilo no terminó de forma limpia.", level="WARN")
-        else:
-            self._memory_logger.log("Ticker: Info: Ticker no estaba en ejecución.", level="INFO")
         
         self._thread = None
 
+    # --- INICIO DE LA NUEVA FUNCIONALIDAD ---
+    def run_simulation_tick(self, new_price: float):
+        """
+        Ejecuta un único tick de simulación con un precio proporcionado manualmente.
+        Esto bypasea la llamada a la API y nos da control total.
+        """
+        if not callable(self._raw_event_callback):
+            self._memory_logger.log("Ticker Sim: Callback no configurado. No se puede ejecutar el tick.", "ERROR")
+            return
+
+        symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+        
+        # Creamos un objeto StandardTicker como si viniera de la API
+        simulated_ticker = StandardTicker(
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+            symbol=symbol,
+            price=new_price
+        )
+        
+        self._handle_new_price(simulated_ticker)
+        self._memory_logger.log(f"Ticker Sim: Tick ejecutado con precio simulado: {new_price}", "DEBUG")
+    # --- FIN DE LA NUEVA FUNCIONALIDAD ---
+
     def _fetch_price_loop(self):
-        """Bucle interno que se ejecuta en el hilo para obtener precios."""
         if not self._exchange_adapter:
             self._memory_logger.log("Ticker ERROR FATAL: Adaptador de exchange no disponible en el hilo.", "ERROR")
             return
 
-        fetch_interval = self._config.SESSION_CONFIG["TICKER_INTERVAL_SECONDS"]
-        
         if not callable(self._raw_event_callback):
             self._memory_logger.log(f"Ticker ERROR FATAL: Callback inválido. Saliendo del hilo.", level="ERROR")
             return
-            
+
+        fetch_interval = self._config.SESSION_CONFIG["TICKER_INTERVAL_SECONDS"]
         self._memory_logger.log(f"Ticker: Bucle iniciado (Intervalo: {fetch_interval}s)", level="INFO")
         
         last_symbol_used = ""
@@ -135,11 +129,10 @@ class Ticker:
             start_time = time.monotonic()
             
             try:
-                # Recargamos el intervalo en cada ciclo para permitir cambios en caliente
                 fetch_interval = self._config.SESSION_CONFIG["TICKER_INTERVAL_SECONDS"]
                 symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
 
-                if not symbol: # Se valida que el símbolo no esté vacío
+                if not symbol:
                     time.sleep(fetch_interval)
                     continue
                 
@@ -154,7 +147,7 @@ class Ticker:
                     standard_ticker = self._exchange_adapter.get_ticker(symbol)
                 except requests.exceptions.RequestException as e:
                     self._memory_logger.log(f"Ticker WARN: Error de red al obtener precio: {type(e).__name__}", level="WARN")
-                    time.sleep(2) 
+                    time.sleep(2)
                 except Exception as e:
                     self._memory_logger.log(f"Ticker ERROR: Excepción en get_ticker: {e}", level="ERROR")
                     self._memory_logger.log(traceback.format_exc(), level="ERROR")
@@ -175,9 +168,7 @@ class Ticker:
         self._memory_logger.log("Ticker: Bucle de obtención de precios detenido.", level="INFO")
 
     def _handle_new_price(self, ticker_data: StandardTicker):
-        """Actualiza el estado interno con el nuevo precio y dispara el callback."""
         final_info = None
-
         with self._lock:
             self._latest_price_info.update({
                 "price": ticker_data.price,
@@ -189,11 +180,7 @@ class Ticker:
             self._intermediate_ticks_buffer.append(current_tick_info)
             self._tick_counter += 1
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            # En lugar de una variable inexistente, asumimos que cada tick genera un evento.
-            # La lógica del intervalo ya se maneja en el bucle principal con `wait_time`.
             raw_event_ticks = 1 
-            # --- FIN DE LA CORRECCIÓN ---
 
             if self._tick_counter >= raw_event_ticks:
                 final_info = self._latest_price_info.copy()
