@@ -51,6 +51,10 @@ except ImportError:
             class Balances:
                 def __init__(self):
                     self.profit_balance = 0.0
+                    self.used_margin = 0.0
+                @property
+                def available_margin(self):
+                    return 0.0
             self.balances = Balances()
 
 
@@ -201,9 +205,8 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     roi_no_realizado = safe_division(pnl_no_realizado, capital_promedio) * 100
     roi_total = safe_division(pnl_total, capital_promedio) * 100
 
-    balances_info = summary.get('logical_balances', {}).get(side, {})
-    margen_uso = balances_info.get('used_margin', 0.0)
-    margen_disp = balances_info.get('available_margin', 0.0)
+    margen_uso = operacion.balances.used_margin
+    margen_disp = operacion.balances.available_margin
     
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
     total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
@@ -355,8 +358,15 @@ def _display_operation_conditions(operacion: Operacion):
             tsl_config_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         exit_conditions.append(tsl_config_str)
 
-    if operacion.sl_roi_pct is not None: 
-        exit_conditions.append(f"SL-ROI <= -{abs(operacion.sl_roi_pct)}%")
+    if operacion.sl_roi_pct is not None:
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Lógica de visualización para SL/TP unificado
+        if operacion.sl_roi_pct < 0:
+            exit_conditions.append(f"SL-ROI <= {operacion.sl_roi_pct}%")
+        else:
+            exit_conditions.append(f"TP-ROI >= {operacion.sl_roi_pct}%")
+        # --- FIN DE LA MODIFICACIÓN ---
+    
     if operacion.tiempo_maximo_min is not None: 
         exit_conditions.append(f"Tiempo >= {operacion.tiempo_maximo_min} min")
     if operacion.max_comercios is not None: 
