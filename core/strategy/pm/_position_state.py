@@ -16,12 +16,18 @@ import traceback
 from typing import List, Dict, Optional, Any
 
 # --- Dependencias del Proyecto ---
+# EN: core/strategy/pm/_position_state.py
+
+# --- Dependencias del Proyecto ---
 try:
     from ._logical_table import LogicalPositionTable
-    from ._entities import LogicalPosition, PhysicalPosition
+    # ANTES: from ._entities import LogicalPosition, PhysicalPosition
+    # AHORA:
+    from core.strategy.pm._entities import LogicalPosition, PhysicalPosition
     from core.exchange import AbstractExchange
     from core.logging import memory_logger
 except ImportError:
+    # ... el resto del bloque except se mantiene igual ...
     # Fallbacks
     class LogicalPositionTable: pass
     class LogicalPosition: pass

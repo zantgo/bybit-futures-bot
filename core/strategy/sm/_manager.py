@@ -1,5 +1,3 @@
-# ./core/strategy/sm/_manager.py
-
 """
 Módulo Gestor de Sesión (SessionManager).
 
@@ -39,22 +37,18 @@ import numpy as np # Importado para cálculos de promedio
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
     from core.logging import memory_logger
-    from core.strategy.ep.event_processor import GlobalStopLossException, EventProcessor
+    from core.strategy.ep.event_processor import EventProcessor # Se quita GlobalStopLossException
     from connection import Ticker
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
 except ImportError:
     # Fallbacks para análisis estático y resiliencia
     memory_logger = type('obj', (object,), {'log': print})()
-    class GlobalStopLossException(Exception): pass
     class EventProcessor: pass
     class Ticker: pass
     class TAManager: pass
     class SignalGenerator: pass
 
-# --- INICIO DE LA CORRECCIÓN: Claves que afectan la estrategia actualizadas ---
-# Estas son ahora las claves dentro de SESSION_CONFIG que, si cambian,
-# requieren un reinicio de los componentes de análisis.
 STRATEGY_AFFECTING_KEYS = {
     'EMA_WINDOW',
     'WEIGHTED_INC_WINDOW',
@@ -63,9 +57,8 @@ STRATEGY_AFFECTING_KEYS = {
     'PRICE_CHANGE_SELL_PERCENTAGE',
     'WEIGHTED_DECREMENT_THRESHOLD',
     'WEIGHTED_INCREMENT_THRESHOLD',
-    'ENABLED' # Clave genérica para sub-diccionarios como TA y SIGNAL
+    'ENABLED' 
 }
-# --- FIN DE LA CORRECCIÓN ---
 
 
 class SessionManager:
@@ -77,7 +70,6 @@ class SessionManager:
         Inicializa el SessionManager inyectando todas sus dependencias.
         Estas dependencias son creadas por el BotController.
         """
-        # --- Módulos y Clases de Dependencia ---
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
         self._exchange_adapter = dependencies.get('exchange_adapter')
@@ -109,14 +101,15 @@ class SessionManager:
         
         self._event_processor = EventProcessor_class(session_specific_deps)
 
-        # --- Estado Interno ---
         self._initialized = False
         self._is_running = False
         self._session_start_time: Optional[datetime.datetime] = None
-        self._global_stop_loss_event = None
-        # --- INICIO DE LA CORRECCIÓN ---
         self._last_known_valid_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-        # --- FIN DE LA CORRECCIÓN ---
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina el evento de stop loss global.
+        # self._global_stop_loss_event = None
+        # --- FIN DE LA MODIFICACIÓN ---
 
 
     def initialize(self):
@@ -125,18 +118,14 @@ class SessionManager:
         y manejando un posible símbolo de ticker inválido.
         """
         memory_logger.log("SessionManager: Inicializando nueva sesión...", "INFO")
-        # --- INICIO DE LA CORRECCIÓN ---
         symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-        # --- FIN DE LA CORRECCIÓN ---
 
         operation_mode = "live_interactive"
 
         if not self._exchange_adapter.initialize(symbol):
             memory_logger.log(f"SessionManager: Fallo al inicializar adaptador para '{symbol}'. "
                               f"Reintentando con el símbolo de respaldo '{self._last_known_valid_symbol}'.", "WARN")
-            # --- INICIO DE LA CORRECCIÓN ---
             self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = self._last_known_valid_symbol
-            # --- FIN DE LA CORRECCIÓN ---
             symbol = self._last_known_valid_symbol
 
             if not self._exchange_adapter.initialize(symbol):
@@ -146,16 +135,17 @@ class SessionManager:
         self._last_known_valid_symbol = symbol
 
         self._pm.initialize(operation_mode=operation_mode)
-        # --- INICIO DE LA CORRECCIÓN ---
         leverage = self._config.OPERATION_DEFAULTS["CAPITAL"].get('LEVERAGE')
-        # --- FIN DE LA CORRECCIÓN ---
         if leverage:
             self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(leverage), sell_leverage=str(leverage))
 
         self._event_processor.initialize(
             operation_mode=operation_mode,
-            pm_instance=self._pm,
-            global_stop_loss_event=self._global_stop_loss_event
+            pm_instance=self._pm
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina el paso del evento de stop loss.
+            # global_stop_loss_event=self._global_stop_loss_event
+            # --- FIN DE LA MODIFICACIÓN ---
         )
         
         if self._ta_manager:
@@ -200,8 +190,7 @@ class SessionManager:
 
     def get_session_summary(self) -> Dict[str, Any]:
         """
-        Construye y devuelve un resumen completo del estado de la sesión actual,
-        agregando datos de rendimiento total.
+        Construye y devuelve un resumen completo del estado de la sesión actual.
         """
         if not self._pm_api.is_initialized():
             return {"error": "El Position Manager de la sesión no está inicializado."}
@@ -218,12 +207,12 @@ class SessionManager:
             long_op = self._om_api.get_operation_by_side('long')
             short_op = self._om_api.get_operation_by_side('short')
             
-            total_initial_capital = 0
-            total_session_pnl = 0
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina el cálculo de PNL y ROI a nivel de sesión.
+            # La lógica para `total_initial_capital` y `total_session_pnl` se elimina.
+            # --- FIN DE LA MODIFICACIÓN ---
             
             if long_op:
-                total_initial_capital += long_op.capital_inicial_usdt
-                total_session_pnl += summary.get('operation_long_pnl', 0.0)
                 summary['comisiones_totales_usdt_long'] = long_op.comisiones_totales_usdt
                 long_positions = summary.get('open_long_positions', [])
                 if long_positions:
@@ -233,8 +222,6 @@ class SessionManager:
                     summary['avg_entry_price_long'] = 'N/A'
 
             if short_op:
-                total_initial_capital += short_op.capital_inicial_usdt
-                total_session_pnl += summary.get('operation_short_pnl', 0.0)
                 summary['comisiones_totales_usdt_short'] = short_op.comisiones_totales_usdt
                 short_positions = summary.get('open_short_positions', [])
                 if short_positions:
@@ -242,11 +229,7 @@ class SessionManager:
                     summary['avg_entry_price_short'] = np.mean(entry_prices) if entry_prices else 'N/A'
                 else:
                     summary['avg_entry_price_short'] = 'N/A'
-                
-            summary['total_session_initial_capital'] = total_initial_capital
-            summary['total_session_pnl'] = total_session_pnl
-            summary['total_session_roi'] = self._utils.safe_division(total_session_pnl, total_initial_capital) * 100
-            
+                            
             return summary
         except Exception as e:
             error_msg = f"Error generando el resumen de la sesión: {e}"
@@ -267,7 +250,6 @@ class SessionManager:
             memory_logger.log("SessionManager: No se detectaron cambios en la configuración.", "INFO")
             return
             
-        # El editor de config general ya no pasa 'TICKER_SYMBOL', pero se mantiene la lógica
         if 'TICKER_SYMBOL' in changed_keys:
             new_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
             memory_logger.log(f"SessionManager: Se detectó cambio de símbolo a '{new_symbol}'. Validando...", "WARN")
@@ -277,36 +259,28 @@ class SessionManager:
             if is_new_symbol_valid:
                 memory_logger.log(f"SessionManager: Símbolo '{new_symbol}' validado con éxito.", "INFO")
                 self._last_known_valid_symbol = new_symbol
-                changed_keys.add('TICKER_INTERVAL_SECONDS') # Forzar reinicio del Ticker
+                changed_keys.add('TICKER_INTERVAL_SECONDS') 
             else:
                 memory_logger.log(f"SessionManager: ERROR - El símbolo '{new_symbol}' es INVÁLIDO. Revertiendo a '{self._last_known_valid_symbol}'.", "ERROR")
                 self._config.BOT_CONFIG["TICKER"]["SYMBOL"] = self._last_known_valid_symbol
                 changed_keys.discard('TICKER_SYMBOL')
         
-        # --- INICIO DE LA CORRECCIÓN: Lógica de detección de cambios actualizada ---
         strategy_needs_reset = any(key in STRATEGY_AFFECTING_KEYS for key in changed_keys)
 
         if strategy_needs_reset:
             memory_logger.log("SessionManager: Cambios en parámetros de estrategia detectados. Reiniciando componentes de TA y Señal...", "WARN")
             if self._ta_manager: self._ta_manager.initialize()
             if self._signal_generator: self._signal_generator.initialize()
-        # --- FIN DE LA CORRECCIÓN ---
 
         if 'TICKER_INTERVAL_SECONDS' in changed_keys:
             memory_logger.log("SessionManager: Parámetros del Ticker actualizados. Reiniciando el hilo del Ticker...", "WARN")
             self.stop()
             self.start()
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina el bloque que actualizaba los límites globales a través de pm_api.
+        # --- FIN DE LA MODIFICACIÓN ---
 
-        # --- INICIO DE LA CORRECCIÓN: Actualizar límites globales ---
-        limits_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]
-        sl_enabled = limits_cfg["ROI_SL"]["ENABLED"]
-        sl_pct = limits_cfg["ROI_SL"]["PERCENTAGE"] if sl_enabled else 0.0
-        self._pm_api.set_global_stop_loss_pct(sl_pct)
-
-        tp_enabled = limits_cfg["ROI_TP"]["ENABLED"]
-        tp_pct = limits_cfg["ROI_TP"]["PERCENTAGE"] if tp_enabled else 0.0
-        self._pm_api.set_global_take_profit_pct(tp_pct)
-        # --- FIN DE LA CORRECCIÓN ---
 
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""

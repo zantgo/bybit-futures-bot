@@ -23,20 +23,9 @@ class _ApiActions:
         if self._initialized and self._balance_manager:
             self._balance_manager.force_update_real_balances_cache()
 
-    def set_global_stop_loss_pct(self, value: float) -> Tuple[bool, str]:
-        """Establece el disyuntor de SL global de la sesión."""
-        self._global_stop_loss_roi_pct = value
-        msg = f"Stop Loss Global de Sesión actualizado a -{value}%." if value > 0 else "Stop Loss Global de Sesión desactivado."
-        self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
-        return True, msg
-
-    def set_global_take_profit_pct(self, value: float) -> Tuple[bool, str]:
-        """Establece el disyuntor de TP global de la sesión."""
-        self._global_take_profit_roi_pct = value
-        self._session_tp_hit = False
-        msg = f"Take Profit Global de Sesión actualizado a +{value}%." if value > 0 else "Take Profit Global de Sesión desactivado."
-        self._memory_logger.log(f"CONFIGURACIÓN: {msg}", "WARN")
-        return True, msg
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se eliminan los métodos set_global_stop_loss_pct y set_global_take_profit_pct.
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # --- Métodos de Gestión de Posiciones ---
 
@@ -49,7 +38,6 @@ class _ApiActions:
         success = result and result.get('success', False)
         return (True, f"Orden de cierre para {side.upper()} #{index} enviada.") if success else (False, f"Fallo al enviar orden de cierre.")
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
         """
         Cierra TODAS las posiciones lógicas de un lado.
@@ -89,4 +77,3 @@ class _ApiActions:
             msg = f"Advertencia: Solo se pudieron cerrar {success_count} de {count} posiciones {side.upper()}."
             self._memory_logger.log(msg, level="WARN")
             return False, msg
-    # --- FIN DE LA MODIFICACIÓN ---

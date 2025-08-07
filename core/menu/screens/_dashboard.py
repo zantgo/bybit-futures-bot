@@ -1,5 +1,3 @@
-# ./core/menu/screens/_dashboard.py
-
 """
 Módulo para la Pantalla del Dashboard de Sesión.
 """
@@ -98,7 +96,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         press_enter_to_continue()
         return
 
-    # --- INICIO DE LA MODIFICACIÓN: Añadir Configuración del Bot ---
     if config_module:
         print("\n--- Configuración del Bot ---")
         bot_cfg = config_module.BOT_CONFIG
@@ -113,21 +110,14 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         max_bot_key_len = max(len(k) for k in bot_params_to_show.keys())
         for key, value in bot_params_to_show.items():
             print(f"  {key:<{max_bot_key_len}} : {value}")
-    # --- FIN DE LA MODIFICACIÓN ---
-
-    realized_pnl = summary.get('total_session_pnl', 0.0)
-    initial_capital = summary.get('total_session_initial_capital', 0.0)
-    final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
+    
     start_time = pm_api.get_session_start_time()
     duration_str = "N/A"
     if start_time:
         duration = datetime.datetime.now(timezone.utc) - start_time
         duration_str = str(datetime.timedelta(seconds=int(duration.total_seconds())))
 
-    print("\n--- Rendimiento General ---")
-    print(f"  PNL Realizado Total: {realized_pnl:+.4f} USDT")
-    print(f"  ROI Final (Realizado): {final_roi:+.2f}%")
-    print(f"  Duración Total: {duration_str}")
+    print(f"\nDuración Total de la Sesión: {duration_str}")
 
     print("\n--- Estado Final de las Operaciones ---")
     sides = ['long', 'short']
@@ -173,9 +163,9 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         
         params_to_show = {
             "Intervalo Ticker (s)": session_cfg['TICKER_INTERVAL_SECONDS'],
-            "Período EMA": session_cfg['TA']['EMA_WINDOW'] if session_cfg['TA']['ENABLED'] else "Desactivado",
-            "Margen Compra (%)": session_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
-            "Margen Venta (%)": session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'] if session_cfg['SIGNAL']['ENABLED'] else "Desactivado",
+            "Período EMA": session_cfg['TA']['EMA_WINDOW'],
+            "Margen Compra (%)": session_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'],
+            "Margen Venta (%)": session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'],
             "Comisión (%)": f"{session_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
             "Reinvertir Ganancias (%)": session_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
         }
@@ -186,6 +176,8 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     press_enter_to_continue()
 
 
+# --- INICIO DE LA MODIFICACIÓN ---
+# Se reintroduce la función _render_session_status_block con la lógica simplificada.
 def _render_session_status_block(summary: Dict[str, Any], box_width: int):
     """Imprime el bloque de Estado de Sesión con el estilo y formato correctos."""
     session_start_time = pm_api.get_session_start_time()
@@ -198,15 +190,12 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         duration_seconds = (now_utc - start_time_utc).total_seconds()
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
     
-    total_pnl = summary.get('total_session_pnl', 0.0)
-    total_roi = summary.get('total_session_roi', 0.0)
+    # El PNL total realizado de la sesión se usa para "Total Transferido"
     transferido_val = summary.get('total_realized_pnl_session', 0.0)
 
     data = {
         "Inicio Sesión": start_time_str,
         "Duración": duration_str,
-        "ROI Sesión": f"{total_roi:+.2f}%",
-        "PNL Total": f"{total_pnl:+.4f} USDT",
         "Total Transferido a PROFIT": f"{transferido_val:+.4f} USDT"
     }
     
@@ -221,6 +210,7 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         print(_create_box_line(content, box_width))
     
     print("└" + "─" * (box_width - 2) + "┘")
+# --- FIN DE LA MODIFICACIÓN ---
 
 
 def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box_width: int):
@@ -340,15 +330,15 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     print(f"{now_str:^{box_width}}")
     print(header_line)
     
-     
     _render_signal_status_block(summary, config_module, box_width)
-     
-    _render_session_status_block(summary, box_width)
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se reintroduce la llamada a _render_session_status_block y se mantiene la corrección del TypeError.
+    _render_session_status_block(summary, box_width)
     _render_operations_status_block(summary, box_width)
+    # --- FIN DE LA MODIFICACIÓN ---
     
 
-# --- Lógica Principal de la Pantalla (Sin cambios) ---
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
 

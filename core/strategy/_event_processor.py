@@ -1,5 +1,3 @@
-# ./core/strategy/ep/event_processor.py
-
 """
 Orquestador Principal del Procesamiento de Eventos.
 
@@ -44,10 +42,12 @@ except ImportError as e:
     traceback.print_exc()
     sys.exit(1)
 
-
-class GlobalStopLossException(Exception):
-    """Excepción para ser lanzada cuando se activa el Global Stop Loss."""
-    pass
+# --- INICIO DE LA MODIFICACIÓN ---
+# Se elimina la excepción personalizada, ya que no se usará.
+# class GlobalStopLossException(Exception):
+#     """Excepción para ser lanzada cuando se activa el Global Stop Loss."""
+#     pass
+# --- FIN DE LA MODIFICACIÓN ---
 
 
 class EventProcessor:
@@ -73,17 +73,25 @@ class EventProcessor:
 
         self._operation_mode: str = "unknown"
         self._latest_signal_data: Dict[str, Any] = {}
-        self._global_stop_loss_event: Optional[threading.Event] = None
         self._pm_instance: Optional['PositionManager'] = None
-        self._global_stop_loss_triggered: bool = False
         self._previous_raw_event_price: float = np.nan
         self._is_first_event: bool = True
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se eliminan los atributos relacionados con los disyuntores de sesión.
+        # self._global_stop_loss_event: Optional[threading.Event] = None
+        # self._global_stop_loss_triggered: bool = False
+        # --- FIN DE LA MODIFICACIÓN ---
+
 
     def initialize(
         self,
         operation_mode: str,
         pm_instance: 'PositionManager',
-        global_stop_loss_event: Optional[threading.Event] = None
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina el argumento global_stop_loss_event
+        # global_stop_loss_event: Optional[threading.Event] = None
+        # --- FIN DE LA MODIFICACIÓN ---
     ):
         """
         Inicializa el orquestador para una nueva sesión, reseteando su estado.
@@ -91,13 +99,17 @@ class EventProcessor:
         self._memory_logger.log("Event Processor: Inicializando orquestador...", level="INFO")
 
         self._operation_mode = operation_mode
-        self._global_stop_loss_event = global_stop_loss_event
         self._pm_instance = pm_instance
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la asignación de los atributos de disyuntores.
+        # self._global_stop_loss_event = global_stop_loss_event
+        # self._global_stop_loss_triggered = False
+        # --- FIN DE LA MODIFICACIÓN ---
 
         self._latest_signal_data = {}
         self._previous_raw_event_price = np.nan
         self._is_first_event = True
-        self._global_stop_loss_triggered = False
 
         if self._ta_manager:
             self._ta_manager.initialize()
@@ -111,18 +123,24 @@ class EventProcessor:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
 
-    def has_global_stop_loss_triggered(self) -> bool:
-        """
-        Devuelve si el Global Stop Loss se ha activado para esta instancia.
-        """
-        return self._global_stop_loss_triggered
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se elimina el método has_global_stop_loss_triggered
+    # def has_global_stop_loss_triggered(self) -> bool:
+    #     """
+    #     Devuelve si el Global Stop Loss se ha activado para esta instancia.
+    #     """
+    #     return self._global_stop_loss_triggered
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
         Orquesta el flujo de trabajo completo para procesar un único evento de precio.
         """
-        if not self._pm_instance or self.has_global_stop_loss_triggered():
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la comprobación de _global_stop_loss_triggered
+        if not self._pm_instance:
             return
+        # --- FIN DE LA MODIFICACIÓN ---
 
         if not final_price_info:
             self._memory_logger.log("Evento de precio final vacío, saltando tick.", level="WARN")
@@ -150,11 +168,16 @@ class EventProcessor:
                     timestamp=current_timestamp
                 )
 
-            # 4. Comprobar Límites de Sesión (Disyuntores Globales)
-            self._check_session_limits(current_price, current_timestamp)
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # 4. Se elimina la llamada a la comprobación de límites de sesión
+            # self._check_session_limits(current_price, current_timestamp)
+            # --- FIN DE LA MODIFICACIÓN ---
 
-        except GlobalStopLossException as e:
-            self._memory_logger.log(f"GlobalStopLossException capturada en Event Processor: {e}", level="ERROR")
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la captura de GlobalStopLossException
+        # except GlobalStopLossException as e:
+        #     self._memory_logger.log(f"GlobalStopLossException capturada en Event Processor: {e}", level="ERROR")
+        # --- FIN DE LA MODIFICACIÓN ---
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
@@ -279,56 +302,3 @@ class EventProcessor:
         
         self._previous_raw_event_price = price
         return signal_data
-
-    def _check_session_limits(self, current_price: float, timestamp: datetime.datetime):
-        if not (self._pm_api and self._pm_api.is_initialized()) or self._global_stop_loss_triggered: return
-
-        limits_cfg = self._config.SESSION_CONFIG["SESSION_LIMITS"]
-
-        # Límite de Duración
-        duration_cfg = limits_cfg.get("MAX_DURATION", {})
-        if duration_cfg.get("ENABLED", False):
-            max_minutes = duration_cfg.get("MINUTES")
-            start_time = self._pm_api.get_session_start_time()
-            if start_time and max_minutes is not None and max_minutes > 0 and (timestamp - start_time).total_seconds() / 60.0 >= max_minutes:
-                self._global_stop_loss_triggered = True
-                msg = f"LÍMITE DE DURACIÓN DE SESIÓN ({max_minutes} min) ALCANZADO"
-                self._memory_logger.log(msg, "ERROR")
-                self._pm_api.close_all_logical_positions('long', "SESSION_DURATION_LIMIT")
-                self._pm_api.close_all_logical_positions('short', "SESSION_DURATION_LIMIT")
-                if self._global_stop_loss_event: self._global_stop_loss_event.set()
-                raise GlobalStopLossException(msg)
-
-        summary = self._pm_api.get_position_summary()
-        initial_capital = summary.get('initial_total_capital', 0.0)
-        if initial_capital < 1e-9: return
-
-        unrealized_pnl = self._pm_api.get_unrealized_pnl(current_price)
-        realized_pnl = summary.get('total_realized_pnl_session', 0.0)
-        current_roi = self._utils.safe_division(realized_pnl + unrealized_pnl, initial_capital) * 100.0
-
-        # Límite de Take Profit por ROI
-        tp_cfg = limits_cfg.get("ROI_TP", {})
-        if tp_cfg.get("ENABLED", False) and not self._pm_api.is_session_tp_hit():
-            tp_pct = tp_cfg.get("PERCENTAGE")
-            if tp_pct is not None and isinstance(current_roi, (int, float)):
-                if tp_pct > 0 and current_roi >= tp_pct:
-                    self._memory_logger.log(f"TAKE PROFIT GLOBAL DE SESIÓN ALCANZADO ({current_roi:.2f}% >= {tp_pct}%)", "INFO")
-                    self._pm_api.set_session_tp_hit(True)
-
-        # Límite de Stop Loss por ROI
-        sl_cfg = limits_cfg.get("ROI_SL", {})
-        if sl_cfg.get("ENABLED", False):
-            sl_pct = sl_cfg.get("PERCENTAGE")
-            # --- INICIO DE LA MODIFICACIÓN CRÍTICA ---
-            # Se añade la comprobación para asegurar que sl_pct no es None y que current_roi es un número válido.
-            if sl_pct is not None and isinstance(current_roi, (int, float)):
-                if sl_pct > 0 and current_roi <= -abs(sl_pct):
-                    self._global_stop_loss_triggered = True
-                    msg = f"STOP LOSS GLOBAL DE SESIÓN POR ROI ({current_roi:.2f}% <= {-abs(sl_pct)}%)"
-                    self._memory_logger.log(msg, "ERROR")
-                    self._pm_api.close_all_logical_positions('long', "SESSION_SL_ROI")
-                    self._pm_api.close_all_logical_positions('short', "SESSION_SL_ROI")
-                    if self._global_stop_loss_event: self._global_stop_loss_event.set()
-                    raise GlobalStopLossException(msg)
-            # --- FIN DE LA MODIFICACIÓN CRÍTICA ---

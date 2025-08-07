@@ -97,22 +97,6 @@ SESSION_CONFIG = {
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
     },
 
-    # Límites Globales de la Sesión (Disyuntores)
-    "SESSION_LIMITS": {
-        # Al alcanzar estos limites la sesion debe cerrar todas las posiciones abiertas y finalizar
-        "ROI_SL": {
-            "ENABLED": True,
-            "PERCENTAGE": 50.0,  # Siempre positivo, el código lo hará negativo
-        },
-        "ROI_TP": {
-            "ENABLED": False,
-            "PERCENTAGE": 100.0,
-        },
-        "MAX_DURATION": {
-            "ENABLED": False,
-            "MINUTES": 10080,
-        }
-    }
 }
 
 # --- 3. CONFIGURACIÓN POR DEFECTO PARA NUEVAS OPERACIONES ---

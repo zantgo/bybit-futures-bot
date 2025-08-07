@@ -42,29 +42,6 @@ def get_unrealized_pnl(current_price: float) -> float:
 def get_session_start_time() -> Optional[datetime.datetime]:
     return _pm_instance.get_session_start_time() if _pm_instance else None
 
-def get_global_tp_pct() -> Optional[float]:
-    return _pm_instance.get_global_tp_pct() if _pm_instance else None
-
-# --- INICIO DE LA MODIFICACIÓN: La función is_session_tp_hit() debe ser movida o renombrada ---
-# Esta lógica ahora es más propia del SessionManager, pero el PM la usa internamente.
-# Mantenemos la función pero renombramos para claridad futura.
-def set_session_tp_hit(value: bool):
-    """Establece el estado del TP de la sesión. Es llamado por el SM o el Event Processor."""
-    if _pm_instance and hasattr(_pm_instance, 'set_session_tp_hit'):
-        _pm_instance.set_session_tp_hit(value)
-
-def is_session_tp_hit() -> bool:
-    return _pm_instance.is_session_tp_hit() if _pm_instance else False
-# --- FIN DE LA MODIFICACIÓN ---
-
-
-def get_global_sl_pct() -> Optional[float]:
-    return _pm_instance.get_global_sl_pct() if _pm_instance else None
-
-def get_session_time_limit() -> Dict[str, Any]:
-    if not _pm_instance: return {'duration': 0, 'action': 'NEUTRAL'}
-    return _pm_instance.get_session_time_limit()
-
 # --- Funciones de Control de Posiciones ---
 def manual_close_logical_position_by_index(side: str, index: int) -> Tuple[bool, str]:
     if not _pm_instance: return False, "PM no instanciado"
@@ -73,22 +50,6 @@ def manual_close_logical_position_by_index(side: str, index: int) -> Tuple[bool,
 def close_all_logical_positions(side: str, reason: str = "MANUAL_ALL") -> bool:
     if not _pm_instance: return False
     return _pm_instance.close_all_logical_positions(side, reason)
-
-# --- Funciones de Gestión de Límites de Sesión (TUI) ---
-def set_global_stop_loss_pct(value: float) -> Tuple[bool, str]:
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.set_global_stop_loss_pct(value)
-
-def set_global_take_profit_pct(value: float) -> Tuple[bool, str]:
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.set_global_take_profit_pct(value)
-    
-# --- (ELIMINADO) Funciones de gestión de Operación ---
-# Estas funciones ahora pertenecen y son gestionadas por el OperationManager (om_api)
-# def get_operation() -> Optional['Operacion']: ...
-# def create_or_update_operation(params: Dict[str, Any]) -> Tuple[bool, str]: ...
-# def force_start_operation() -> Tuple[bool, str]: ...
-# def force_stop_operation(close_positions: bool = False) -> Tuple[bool, str]: ...
 
 # --- Funciones de Ayuda y Sistema ---
 def force_balance_update():

@@ -1,4 +1,3 @@
-# ./core/strategy/pm/logical_position_table.py
 import datetime
 import traceback
 import copy
@@ -22,10 +21,19 @@ if TYPE_CHECKING:
     from core import utils as ut_mod
 
 class LogicalPositionTable:
+    # --- ESTA ES LA PARTE CRÍTICA QUE DEBE ESTAR PRESENTE ---
     def __init__(self,
-                 side: str, is_live_mode: bool, config_param: Optional[Any] = None,
-                 utils: Optional[Any] = None, exchange_adapter: Optional[AbstractExchange] = None):
-        if side not in ['long', 'short']: raise ValueError(f"Lado inválido '{side}'.")
+                 side: str,
+                 is_live_mode: bool,
+                 config_param: Optional[Any] = None,
+                 utils: Optional[Any] = None,
+                 exchange_adapter: Optional[AbstractExchange] = None):
+        """
+        Inicializa la tabla de posiciones lógicas para un lado específico.
+        """
+        if side not in ['long', 'short']:
+            raise ValueError(f"Lado inválido '{side}'. Debe ser 'long' o 'short'.")
+        
         if is_live_mode and not exchange_adapter: 
             memory_logger.log(f"WARN [LPT Init {side}]: Modo Live pero exchange_adapter no fue proporcionado.", level="WARN")
 
@@ -34,9 +42,12 @@ class LogicalPositionTable:
         self._config_param = config_param
         self._utils = utils
         self._exchange = exchange_adapter
+        
         self._positions: List[LogicalPosition] = []
         self._lock = threading.Lock()
+        
         memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
+    # --- FIN DE LA PARTE CRÍTICA ---
 
     def sync_positions(self, new_positions: List[LogicalPosition]):
         if not isinstance(new_positions, list):
@@ -154,10 +165,8 @@ class LogicalPositionTable:
         if positions_count == 0:
             return
         
-        # --- INICIO DE LA CORRECCIÓN ---
         price_prec = self._config_param.PRECISION_FALLBACKS["PRICE_PRECISION"] if self._config_param else 4
         qty_prec = self._config_param.PRECISION_FALLBACKS["QTY_PRECISION"] if self._config_param else 3
-        # --- FIN DE LA CORRECCIÓN ---
 
         data_for_df = []
         columns = [

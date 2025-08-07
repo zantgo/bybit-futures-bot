@@ -1,4 +1,3 @@
-# ./core/strategy/pm/manager/_api_getters.py
 import datetime
 import copy
 from typing import Optional, Dict, Any, List
@@ -83,8 +82,11 @@ class _ApiGetters:
             "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts],
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": initial_capital_ops,
-            "session_limits": { "time_limit": self.get_session_time_limit() },
             "current_market_price": current_market_price,
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se elimina la clave "session_limits".
+            # "session_limits": { "time_limit": self.get_session_time_limit() },
+            # --- FIN DE LA MODIFICACIÓN ---
         }
 
     def get_unrealized_pnl(self, current_price: float) -> float:
@@ -102,20 +104,10 @@ class _ApiGetters:
     def get_session_start_time(self) -> Optional[datetime.datetime]: 
         return self._session_start_time
         
-    def get_global_tp_pct(self) -> Optional[float]: 
-        return self._global_take_profit_roi_pct
-        
-    def is_session_tp_hit(self) -> bool: 
-        return self._session_tp_hit
-        
-    def get_global_sl_pct(self) -> Optional[float]: 
-        return self._global_stop_loss_roi_pct
-        
-    def get_session_time_limit(self) -> Dict[str, Any]:
-        # --- INICIO DE LA CORRECCIÓN ---
-        limits = self._config.SESSION_CONFIG["SESSION_LIMITS"]["MAX_DURATION"]
-        return {"duration": limits["MINUTES"] if limits["ENABLED"] else 0, "action": "NEUTRAL"}
-        # --- FIN DE LA CORRECCIÓN ---
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se eliminan los métodos: get_global_tp_pct, is_session_tp_hit,
+    # get_global_sl_pct, y get_session_time_limit.
+    # --- FIN DE LA MODIFICACIÓN ---
                 
     def get_total_pnl_realized(self) -> float: 
         return self._total_realized_pnl_long + self._total_realized_pnl_short

@@ -1,5 +1,3 @@
-# ./runner/_shutdown.py
-
 """
 Módulo responsable de la secuencia de apagado limpio de una sesión de trading.
 """
@@ -14,9 +12,7 @@ def _write_session_summary_to_file(
     """
     Formatea el resumen final de la sesión y lo guarda en un archivo de texto.
     """
-    # --- INICIO DE LA CORRECCIÓN: Importar pm_api para obtener el start_time ---
     from core.strategy.pm import api as pm_api
-    # --- FIN DE LA CORRECCIÓN ---
 
     if not final_summary or final_summary.get('error'):
         print("No se generará archivo de resumen debido a un error en los datos.")
@@ -29,13 +25,11 @@ def _write_session_summary_to_file(
 
         content = []
         
-        # --- Cabecera ---
         content.append("="*80)
         content.append("RESUMEN FINAL DE LA SESIÓN DE TRADING".center(80))
         content.append(f"Finalizada el: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}".center(80))
         content.append("="*80)
 
-        # --- Configuración del Bot ---
         content.append("\n--- Configuración del Bot ---")
         bot_cfg = config_module.BOT_CONFIG
         modo_trading_str = "Paper Trading" if bot_cfg["PAPER_TRADING_MODE"] else "Live Trading"
@@ -49,24 +43,18 @@ def _write_session_summary_to_file(
         max_bot_key_len = max(len(k) for k in bot_params_to_show.keys())
         for key, value in bot_params_to_show.items():
             content.append(f"  {key:<{max_bot_key_len}} : {value}")
-
-        # --- Rendimiento General ---
-        content.append("\n--- Rendimiento General ---")
-        realized_pnl = final_summary.get('total_session_pnl', 0.0)
-        initial_capital = final_summary.get('total_session_initial_capital', 0.0)
-        final_roi = (realized_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la sección "Rendimiento General" y se añade solo la duración.
         start_time_obj = pm_api.get_session_start_time()
         duration_str = "N/A"
         if start_time_obj:
             duration = now - start_time_obj
             duration_str = str(datetime.timedelta(seconds=int(duration.total_seconds())))
 
-        content.append(f"  PNL Realizado Total : {realized_pnl:+.4f} USDT")
-        content.append(f"  ROI Final (Realizado) : {final_roi:+.2f}%")
-        content.append(f"  Duración Total      : {duration_str}")
+        content.append(f"\nDuración Total de la Sesión: {duration_str}")
+        # --- FIN DE LA MODIFICACIÓN ---
 
-        # --- Estado Final de las Operaciones ---
         content.append("\n--- Estado Final de las Operaciones ---")
         sides = ['long', 'short']
         for side in sides:
@@ -78,7 +66,6 @@ def _write_session_summary_to_file(
             capital_usado = balance_info.get('used_margin', 0.0)
             capital_operativo = balance_info.get('operational_margin', 0.0)
             pos_count = final_summary.get(f'open_{side}_positions_count', 0)
-            # max_pos no está disponible de forma fiable aquí, lo omitimos para evitar errores
             
             content.append(f"\n  Operación {side.upper()}:")
             content.append(f"    - Estado Final          : {op_info.get('estado', 'DETENIDA').upper()}")
@@ -88,7 +75,6 @@ def _write_session_summary_to_file(
             content.append(f"    - PNL (Realizado+No R.) : {pnl:+.4f} USDT")
             content.append(f"    - ROI                   : {roi:+.2f}%")
         
-        # --- Parámetros de la Sesión ---
         content.append("\n" + "="*80)
         content.append("Parámetros Clave de la Sesión".center(80))
         content.append("="*80)
