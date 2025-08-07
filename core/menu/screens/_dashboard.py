@@ -27,11 +27,8 @@ from . import _log_viewer, operation_manager
 try:
     from core.strategy.sm import api as sm_api
     from core.strategy.pm import api as pm_api
-    # --- INICIO DE LA MODIFICACIÓN #1 ---
-    # Importamos dependencias necesarias para los cálculos
     from core.strategy.om import api as om_api
     from core import utils
-    # --- FIN DE LA MODIFICACIÓN #1 ---
 except ImportError:
     sm_api = pm_api = om_api = utils = None
 
@@ -129,24 +126,21 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     print("\n--- Estado Final de las Operaciones ---")
     sides = ['long', 'short']
     for side in sides:
-        op_info = summary.get('operations_info', {}).get(side, {})
-        balance_info = summary.get('logical_balances', {}).get(side, {})
-        pnl = summary.get(f'operation_{side}_pnl', 0.0)
-        roi = summary.get(f'operation_{side}_roi', 0.0)
-        ganancias_netas = pnl - summary.get(f'comisiones_totales_usdt_{side}', 0.0)
-        capital_usado = balance_info.get('used_margin', 0.0)
-        capital_operativo = balance_info.get('operational_margin', 0.0)
-        pos_count = summary.get(f'open_{side}_positions_count', 0)
-        max_pos_op = _deps.get("operation_manager_api_module").get_operation_by_side(side)
-        max_pos = max_pos_op.max_posiciones_logicas if max_pos_op else 'N/A'
+        op_obj = om_api.get_operation_by_side(side) if om_api else None
+        if not op_obj: continue
+
+        pnl_realizado = op_obj.pnl_realizado_usdt
+        ganancias_netas = pnl_realizado - op_obj.comisiones_totales_usdt
+        roi = utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100 if utils else 0.0
         
         print(f"\n  Operación {side.upper()}:")
-        print(f"    - Estado Final          : {op_info.get('estado', 'DETENIDA').upper()}")
-        print(f"    - Posiciones Abiertas   : {pos_count} / {max_pos}")
-        print(f"    - Capital (Usado/Total) : ${capital_usado:.2f} / ${capital_operativo:.2f}")
+        print(f"    - Estado Final          : {op_obj.estado.upper()}")
+        print(f"    - Trades Cerrados       : {op_obj.comercios_cerrados_contador}")
+        print(f"    - Capital Inicial       : ${op_obj.capital_inicial_usdt:.2f}")
+        print(f"    - Equity Total (Final)  : ${op_obj.equity_total_usdt:.2f}")
         print(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
-        print(f"    - PNL (Realizado+No R.) : {pnl:+.4f} USDT")
-        print(f"    - ROI                   : {roi:+.2f}%")
+        print(f"    - PNL (Realizado)       : {pnl_realizado:+.4f} USDT")
+        print(f"    - ROI (Realizado)       : {roi:+.2f}%")
 
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
@@ -164,22 +158,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     else:
         print("\n--- No quedaron posiciones abiertas ---")
         
-    if config_module:
-        print("\n--- Parámetros Clave de la Sesión ---")
-        session_cfg = config_module.SESSION_CONFIG
-        
-        params_to_show = {
-            "Intervalo Ticker (s)": session_cfg['TICKER_INTERVAL_SECONDS'],
-            "Período EMA": session_cfg['TA']['EMA_WINDOW'],
-            "Margen Compra (%)": session_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'],
-            "Margen Venta (%)": session_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'],
-            "Comisión (%)": f"{session_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
-            "Reinvertir Ganancias (%)": session_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
-        }
-        max_key_len = max(len(k) for k in params_to_show.keys())
-        for key, value in params_to_show.items():
-            print(f"  {key:<{max_key_len}} : {value}")
-
     press_enter_to_continue()
 
 
@@ -195,19 +173,22 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         duration_seconds = (now_utc - start_time_utc).total_seconds()
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
     
-    total_capital_actual = 0.0
+    total_equity = 0.0
+    transferido_val = 0.0
     if om_api:
         long_op = om_api.get_operation_by_side('long')
         short_op = om_api.get_operation_by_side('short')
-        if long_op: total_capital_actual += long_op.capital_actual_usdt
-        if short_op: total_capital_actual += short_op.capital_actual_usdt
+        if long_op: 
+            total_equity += long_op.equity_total_usdt
+            transferido_val += long_op.balances.profit_balance
+        if short_op: 
+            total_equity += short_op.equity_total_usdt
+            transferido_val += short_op.balances.profit_balance
         
-    transferido_val = summary.get('total_realized_pnl_session', 0.0)
-
     data = {
         "Inicio Sesión": start_time_str,
         "Duración": duration_str,
-        "Total Capital Actual": f"${total_capital_actual:.2f} USDT",
+        "Equity Total (Ambas Ops)": f"${total_equity:.2f} USDT",
         "Total Transferido a PROFIT": f"{transferido_val:+.4f} USDT"
     }
     
@@ -264,9 +245,8 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
         
     print("└" + "─" * (box_width - 2) + "┘")
 
-
 def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
-    """Imprime el bloque de Estado de Operaciones con el desglose de PNL y ROI."""
+    """Imprime el bloque de Estado de Operaciones incluyendo el 'Total Reinvertido'."""
     if not all([om_api, utils]):
         print("Error: Dependencias om_api o utils no disponibles.")
         return
@@ -281,10 +261,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             data[side]['Estado'] = 'NO_DISPONIBLE'
             continue
             
-        # Obtener datos de balances del resumen del SM
-        balance_info = summary.get('logical_balances', {}).get(side, {})
-        
-        # Calcular PNL No Realizado
         pnl_no_realizado = 0.0
         for pos_data in summary.get(f'open_{side}_positions', []):
             entry = pos_data.get('entry_price', 0.0)
@@ -292,23 +268,30 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             if side == 'long': pnl_no_realizado += (current_price - entry) * size
             else: pnl_no_realizado += (entry - current_price) * size
         
-        # Calcular ROI Total
         pnl_total = operacion.pnl_realizado_usdt + pnl_no_realizado
-        capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
-        roi_total = utils.safe_division(pnl_total, capital_promedio) * 100
+        
+        # El ROI se calcula sobre el capital inicial para consistencia
+        roi_total = utils.safe_division(pnl_total, operacion.capital_inicial_usdt) * 100
 
         def get_color(value):
             return "\033[92m" if value >= 0 else "\033[91m"
         reset = "\033[0m"
 
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Calcular capital lógico en uso y disponible para consistencia con la otra pantalla.
+        open_positions_count = summary.get(f'open_{side}_positions_count', 0)
+        capital_logico_en_uso = open_positions_count * operacion.tamaño_posicion_base_usdt
+        capital_logico_disponible = operacion.capital_logico_disponible_usdt
+        # --- FIN DE LA MODIFICACIÓN ---
+
         data[side] = {
             'Estado': operacion.estado.upper(),
-            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)} / {operacion.max_posiciones_logicas}",
+            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)}/{operacion.max_posiciones_logicas}",
             'Capital Inicial': f"${operacion.capital_inicial_usdt:.2f}",
-            'Capital Actual': f"${operacion.capital_actual_usdt:.2f}",
-            'Margen En Uso': f"${balance_info.get('used_margin', 0.0):.2f}",
-            'Margen Disponible': f"${balance_info.get('available_margin', 0.0):.2f}",
-            'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f} USDT{reset}",
+            'Equity Total (Hist.)': f"${operacion.equity_total_usdt:.2f}",
+            'Cap. Lógico (Uso/Disp.)': f"${capital_logico_en_uso:.2f} / ${capital_logico_disponible:.2f}",
+            'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f}{reset}",
+            'Total Reinvertido': f"${operacion.total_reinvertido_usdt:.4f}",
             'ROI Total': f"{get_color(roi_total)}{roi_total:+.2f}%{reset}",
         }
 
@@ -319,8 +302,9 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
     
     labels = [
-        'Estado', 'Posiciones', 'Capital Inicial', 'Capital Actual',
-        'Margen En Uso', 'Margen Disponible', 'Transferido a PROFIT', 'ROI Total'
+        'Estado', 'Posiciones', 'Capital Inicial', 'Equity Total (Hist.)',
+        'Cap. Lógico (Uso/Disp.)', 'Transferido a PROFIT', 
+        'Total Reinvertido', 'ROI Total'
     ]
     max_label_len = min(max(len(k) for k in labels), width_col - 12) 
     

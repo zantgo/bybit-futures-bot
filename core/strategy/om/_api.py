@@ -1,3 +1,5 @@
+# ./core/strategy/om/_api.py
+
 """
 Interfaz Pública del Operation Manager (OM API).
 
@@ -11,7 +13,8 @@ from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
 # pero permitiendo que los analizadores de código estático entiendan los tipos.
 if TYPE_CHECKING:
     from ._manager import OperationManager
-    from ._entities import Operacion
+    # La ruta de importación ya está corregida a la ubicación centralizada.
+    from core.strategy.entities import Operacion
 
 # --- Instancia Global del Módulo (Privada) ---
 # Esta variable contendrá la única instancia del OperationManager para toda la sesión.
@@ -83,17 +86,29 @@ def detener_operacion(side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, 
         return False, "OM no instanciado"
     return _om_instance.detener_operacion(side, forzar_cierre_posiciones)
 
+# --- Funciones de Actualización de Estado ---
+
 def actualizar_pnl_realizado(side: str, pnl_amount: float):
     """Delega la llamada para actualizar el PNL realizado de una operación."""
     if _om_instance:
         _om_instance.actualizar_pnl_realizado(side, pnl_amount)
 
-# --- INICIO DE LA MODIFICACIÓN: Añadir nueva función para comisiones ---
+# --- INICIO DE LA MODIFICACIÓN: Añadir nuevas funciones de actualización ---
+def actualizar_margen_operativo(side: str, amount: float):
+    """Delega la llamada para añadir fondos (ej. ganancias) al margen operativo."""
+    if _om_instance:
+        _om_instance.actualizar_margen_operativo(side, amount)
+
+def actualizar_total_reinvertido(side: str, amount: float):
+    """Delega la llamada para actualizar el contador de total reinvertido para métricas."""
+    if _om_instance:
+        _om_instance.actualizar_total_reinvertido(side, amount)
+# --- FIN DE LA MODIFICACIÓN ---
+
 def actualizar_comisiones_totales(side: str, fee_amount: float):
     """Delega la llamada para actualizar las comisiones totales de una operación."""
     if _om_instance:
         _om_instance.actualizar_comisiones_totales(side, fee_amount)
-# --- FIN DE LA MODIFICACIÓN ---
 
 def revisar_y_transicionar_a_detenida(side: str):
     """Delega la llamada para revisar si una operación pausada debe detenerse."""

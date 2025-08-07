@@ -1,3 +1,5 @@
+# ./core/strategy/entities/__init__.py
+
 """
 Paquete Central de Entidades de Dominio.
 
@@ -100,31 +102,57 @@ class Operacion:
         self.valor_cond_salida: Optional[float] = None
         self.accion_al_finalizar: str = 'PAUSAR'
         
-        # Atributos para el seguimiento de capital y rendimiento (ENFOQUE SIMPLIFICADO)
-        self.capital_inicial_usdt: float = 0.0  # Guarda el primer capital asignado.
-        self.capital_actual_usdt: float = 0.0   # Se actualiza con cada modificación.
-        
+        self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
+        self.total_reinvertido_usdt: float = 0.0
         self.comercios_cerrados_contador: int = 0
+        self.comisiones_totales_usdt: float = 0.0
         self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
         self.posiciones_activas: Dict[str, List['LogicalPosition']] = {'long': [], 'short': []}
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
-        self.comisiones_totales_usdt: float = 0.0
         self.balances: LogicalBalances = LogicalBalances()
+
+    # <-- CAMBIO: Se renombra la propiedad para mayor claridad.
+    @property
+    def equity_total_usdt(self) -> float:
+        """
+        Calcula el Equity Total (valor contable) de la operación.
+        Es el Capital Inicial más todas las ganancias/pérdidas ya realizadas.
+        Este valor representa el rendimiento histórico de la operación.
+        """
+        return self.capital_inicial_usdt + self.pnl_realizado_usdt
+    # <-- ANTERIOR:
+    # @property
+    # def capital_total_generado_usdt(self) -> float:
+    # ...
+
+    @property
+    def capital_logico_disponible_usdt(self) -> float:
+        """
+        Calcula el capital que está lógicamente disponible para abrir nuevas posiciones (slots).
+        Es el número de slots libres multiplicado por el tamaño base.
+        """
+        side = 'long' if self.tendencia == 'LONG_ONLY' else 'short'
+        open_positions_count = len(self.posiciones_activas.get(side, []))
+        
+        slots_disponibles = self.max_posiciones_logicas - open_positions_count
+        
+        # Devuelve el capital lógico disponible, asegurándose de que no sea negativo.
+        return max(0.0, slots_disponibles * self.tamaño_posicion_base_usdt)
 
     def reset(self):
         """Resetea el estado dinámico de la operación a sus valores por defecto."""
         self.estado = 'DETENIDA'
         self.capital_inicial_usdt = 0.0
-        self.capital_actual_usdt = 0.0
         self.pnl_realizado_usdt = 0.0
+        self.total_reinvertido_usdt = 0.0
         self.comercios_cerrados_contador = 0
         self.tiempo_inicio_ejecucion = None
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
         self.comisiones_totales_usdt = 0.0
-        if hasattr(self, 'balances') and self.balances and hasattr(self.balances, 'reset'):
+        if hasattr(self, 'balances') and self.balances:
             self.balances.reset()
         else:
             self.balances = LogicalBalances()

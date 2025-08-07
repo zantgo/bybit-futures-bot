@@ -1,16 +1,11 @@
 # ./core/strategy/pm/manager/_private_logic.py
-
 import datetime
 import uuid
 from typing import Any
-from collections import defaultdict
 from dataclasses import asdict
 
 try:
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se unifica la importación de entidades desde la ubicación central.
     from core.strategy.entities import Operacion, LogicalPosition
-    # --- FIN DE LA MODIFICACIÓN ---
     from .. import _transfer_executor
 except ImportError:
     class Operacion: pass
@@ -22,8 +17,6 @@ class _PrivateLogic:
 
     def _can_open_new_position(self, side: str) -> bool:
         """Verifica si se puede abrir una nueva posición para un lado específico."""
-        # Se ha eliminado la comprobación de _session_tp_hit ya que esa lógica
-        # se gestionará a un nivel superior o a través de los estados de la operación.
         operacion = self._om_api.get_operation_by_side(side)
         if not operacion or operacion.estado != 'ACTIVA':
             return False
@@ -98,11 +91,11 @@ class _PrivateLogic:
                 current_op = self._om_api.get_operation_by_side(side)
                 if current_op:
                     current_op.balances.decrease_available_margin(margin_to_use)
-                    new_positions = current_op.posiciones_activas
-                    new_positions[side].append(new_pos_obj)
+                    # Es seguro modificar la copia local antes de enviarla
+                    current_op.posiciones_activas[side].append(new_pos_obj)
                     
                     self._om_api.create_or_update_operation(side, {
-                        'posiciones_activas': new_positions,
+                        'posiciones_activas': current_op.posiciones_activas,
                         'balances': current_op.balances
                     })
                     self._position_state.add_logical_position_obj(side, new_pos_obj)
@@ -139,49 +132,61 @@ class _PrivateLogic:
 
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         """Cierra una posición lógica específica y actualiza el estado de la operación correspondiente."""
-        operacion_before_close = self._om_api.get_operation_by_side(side)
-        if not self._executor or not operacion_before_close or index >= len(operacion_before_close.posiciones_activas.get(side, [])):
-            return {'success': False, 'message': 'Executor, operación o índice no válido'}
+        op_before = self._om_api.get_operation_by_side(side)
+        if not self._executor or not op_before or index >= len(op_before.posiciones_activas.get(side, [])):
+            return {'success': False, 'message': 'Índice o executor no válido'}
 
-        pos_to_close = operacion_before_close.posiciones_activas[side][index]
+        pos_to_close = op_before.posiciones_activas[side][index]
         result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
 
         if result and result.get('success', False):
             margin_original = pos_to_close.margin_usdt
             pnl = result.get('pnl_net_usdt', 0.0)
-            reinvested_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
-            total_margin_to_release = margin_original + reinvested_amount
-            operacion_before_close.balances.increase_available_margin(total_margin_to_release)
-
-            transferable_amount = result.get('amount_transferable_to_profit', 0.0)
-            if transferable_amount > 0:
-                operacion_before_close.balances.record_profit_transfer(transferable_amount)
-
-            # --- CORRECCIÓN IMPORTANTE ---
-            # Se debe eliminar la posición de la lista ANTES de actualizar el OM
-            # para evitar condiciones de carrera.
-            if index < len(operacion_before_close.posiciones_activas.get(side, [])):
-                operacion_before_close.posiciones_activas[side].pop(index)
+            reinvest_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
+            transfer_amount = result.get('amount_transferable_to_profit', 0.0)
             
-            new_pnl_realizado = operacion_before_close.pnl_realizado_usdt + pnl
-            new_trade_count = operacion_before_close.comercios_cerrados_contador + 1
+            # --- INICIO DE LA MODIFICACIÓN (Lógica Definitiva) ---
+            # En lugar de agrupar todo en un gran `create_or_update`, usamos las nuevas funciones atómicas.
+            
+            # 1. Actualizar contadores centrales de forma atómica.
+            self._om_api.actualizar_pnl_realizado(side, pnl)
+            self._om_api.actualizar_margen_operativo(side, reinvest_amount) # Suma la ganancia al "dinero para jugar".
+            self._om_api.actualizar_total_reinvertido(side, reinvest_amount) # Suma al contador visual de reinversión.
+            
+            # 2. Obtener el estado actualizado después de las operaciones atómicas.
+            op_after = self._om_api.get_operation_by_side(side)
+            
+            # 3. Realizar las actualizaciones restantes en la copia local.
+            if transfer_amount > 0:
+                op_after.balances.record_profit_transfer(transfer_amount)
+            
+            # Libera el margen original que estaba en uso.
+            op_after.balances.increase_available_margin(margin_original)
+            
+            # Elimina la posición de la lista.
+            if index < len(op_after.posiciones_activas.get(side, [])):
+                op_after.posiciones_activas[side].pop(index)
+            
+            # 4. Actualizar el estado de la operación en lote con los cambios restantes.
+            params = {
+                'posiciones_activas': op_after.posiciones_activas,
+                'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
+                'balances': op_after.balances
+            }
+            self._om_api.create_or_update_operation(side, params)
+            # --- FIN DE LA MODIFICACIÓN ---
 
+            # --- Lógica Post-Cierre (sin cambios) ---
+            self._position_state.remove_logical_position(side, index)
             if side == 'long':
                 self._total_realized_pnl_long += pnl
             else:
                 self._total_realized_pnl_short += pnl
-            
-            params_to_update = {
-                'posiciones_activas': operacion_before_close.posiciones_activas,
-                'pnl_realizado_usdt': new_pnl_realizado,
-                'comercios_cerrados_contador': new_trade_count,
-                'balances': operacion_before_close.balances
-            }
-            self._om_api.create_or_update_operation(side, params_to_update)
-            self._position_state.remove_logical_position(side, index)
-
-            if _transfer_executor and transferable_amount >= self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]:
-                _transfer_executor.execute_transfer(amount=transferable_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
+                
+            # La condición de monto mínimo se gestiona mejor aquí, antes de la llamada.
+            min_transfer = self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]
+            if _transfer_executor and transfer_amount > 0 and transfer_amount >= min_transfer:
+                _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
             
             self._om_api.revisar_y_transicionar_a_detenida(side)
         

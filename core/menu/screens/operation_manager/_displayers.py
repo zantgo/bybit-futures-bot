@@ -33,10 +33,9 @@ except ImportError:
             self.accion_al_finalizar = 'N/A'
             self.pnl_realizado_usdt = 0.0
             self.capital_inicial_usdt = 0.0
-            self.capital_actual_usdt = 0.0
             self.comercios_cerrados_contador = 0
             self.comisiones_totales_usdt = 0.0
-            self.total_reinvertido_usdt = 0.0 # Añadido para el nuevo layout
+            self.total_reinvertido_usdt = 0.0 
             self.tipo_cond_entrada = 'N/A'
             self.valor_cond_entrada = 0.0
             self.tipo_cond_salida = None
@@ -48,14 +47,24 @@ except ImportError:
             self.sl_roi_pct = None
             self.tiempo_maximo_min = None
             self.max_comercios = None
+            self.posiciones_activas = {} 
             class Balances:
                 def __init__(self):
+                    self.operational_margin = 0.0
                     self.profit_balance = 0.0
                     self.used_margin = 0.0
                 @property
                 def available_margin(self):
                     return 0.0
             self.balances = Balances()
+        
+        @property
+        def equity_total_usdt(self) -> float:
+            return self.capital_inicial_usdt + self.pnl_realizado_usdt
+
+        @property 
+        def capital_logico_disponible_usdt(self):
+            return 0.0
 
 
 # --- Inyección de Dependencias ---
@@ -148,7 +157,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     tiempo_ejecucion_str = "N/A"
     if operacion.tiempo_inicio_ejecucion:
         fecha_activacion_str = operacion.tiempo_inicio_ejecucion.strftime('%H:%M:%S %d-%m-%Y (UTC)')
-        # El tiempo solo se calcula y muestra si la operación está ACTIVA
         if operacion.estado == 'ACTIVA':
             duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
             total_seconds = int(duration.total_seconds())
@@ -197,17 +205,17 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     pnl_total = pnl_realizado + pnl_no_realizado
     
     capital_inicial = operacion.capital_inicial_usdt
-    capital_actual = operacion.capital_actual_usdt
-    capital_promedio = (capital_inicial + capital_actual) / 2
     
-    safe_division = utils.safe_division if utils else lambda n, d: n / d if d != 0 else 0
-    roi_realizado = safe_division(pnl_realizado, capital_promedio) * 100
-    roi_no_realizado = safe_division(pnl_no_realizado, capital_promedio) * 100
-    roi_total = safe_division(pnl_total, capital_promedio) * 100
+    equity_total = operacion.equity_total_usdt 
+    
+    safe_division = utils.safe_division if utils else lambda n, d: n / d if d != 0 else 0.0
+    
+    roi_total = safe_division(pnl_total, capital_inicial) * 100
 
-    margen_uso = operacion.balances.used_margin
-    margen_disp = operacion.balances.available_margin
-    
+    open_positions_count = len(operacion.posiciones_activas.get(side, []))
+    capital_logico_en_uso = open_positions_count * operacion.tamaño_posicion_base_usdt
+    capital_logico_disponible = operacion.capital_logico_disponible_usdt
+
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
     total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
     profit_balance = getattr(operacion.balances, 'profit_balance', 0.0)
@@ -217,48 +225,31 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
 
-    # 2. Ensamblar los datos en secciones
-    data_capital = {
-        "Capital Inicial / Actual": f"${capital_inicial:.2f} / ${capital_actual:.2f}",
-        "Margen En Uso / Disponible": f"${margen_uso:.2f} / ${margen_disp:.2f}",
-        "Capital Base (Promedio)": f"${capital_promedio:.2f}",
-    }
-    data_pnl = {
-        "PNL Realizado": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset}",
-        "PNL No Realizado": f"{get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
-        "PNL Total": f"{get_color(pnl_total)}{pnl_total:+.4f}${reset}",
-    }
-    data_roi = {
-        "ROI Realizado": f"{get_color(roi_realizado)}{roi_realizado:+.2f}%{reset}",
-        "ROI No Realizado": f"{get_color(roi_no_realizado)}{roi_no_realizado:+.2f}%{reset}",
+    # 2. Ensamblar los datos en secciones con las etiquetas corregidas para mayor claridad
+    data = {
+        "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
+        "Equity Total (Hist.)": f"${equity_total:.2f}",
+        # "Capital Operativo (Total)" ha sido eliminado por ser redundante y confuso.
+        "Capital Lógico (En Uso / Disponible)": f"${capital_logico_en_uso:.2f} / ${capital_logico_disponible:.2f}",
+        "--- RENDIMIENTO ---": "---",
+        "PNL Total (Realiz.+No Realiz.)": f"{get_color(pnl_total)}{pnl_total:+.4f}${reset}",
         "ROI Total": f"{get_color(roi_total)}{roi_total:+.2f}%{reset}",
-    }
-    data_otros = {
-        "Comisiones Totales": f"${comisiones_totales:.4f}",
+        "--- CONTADORES ---": "---",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
+        "Comisiones Totales": f"${comisiones_totales:.4f}",
         "Transferido a PROFIT": f"{get_color(profit_balance)}{profit_balance:+.4f}{reset}",
         "Trades Cerrados": str(trades_cerrados),
     }
 
-    all_keys = list(data_capital.keys()) + list(data_pnl.keys()) + list(data_roi.keys()) + list(data_otros.keys())
-    max_key_len = max(len(_clean_ansi_codes(k)) for k in all_keys)
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
 
     # 3. Renderizar secciones
-    for key, value in data_capital.items():
-        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
-    
-    print("├" + "─" * (box_width - 2) + "┤")
-    for key, value in data_pnl.items():
-        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
-        
-    print("├" + "─" * (box_width - 2) + "┤")
-    for key, value in data_roi.items():
-        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
-
-    print("├" + "─" * (box_width - 2) + "┤")
-    for key, value in data_otros.items():
-        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
-
+    for key, value in data.items():
+        if "---" in key:
+            print("├" + "─" * (box_width - 2) + "┤")
+        else:
+            print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
+            
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
@@ -359,13 +350,10 @@ def _display_operation_conditions(operacion: Operacion):
         exit_conditions.append(tsl_config_str)
 
     if operacion.sl_roi_pct is not None:
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Lógica de visualización para SL/TP unificado
         if operacion.sl_roi_pct < 0:
             exit_conditions.append(f"SL-ROI <= {operacion.sl_roi_pct}%")
         else:
             exit_conditions.append(f"TP-ROI >= {operacion.sl_roi_pct}%")
-        # --- FIN DE LA MODIFICACIÓN ---
     
     if operacion.tiempo_maximo_min is not None: 
         exit_conditions.append(f"Tiempo >= {operacion.tiempo_maximo_min} min")
