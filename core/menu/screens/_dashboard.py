@@ -6,7 +6,7 @@ Módulo para la Pantalla del Dashboard de Sesión.
 import time
 import datetime
 from datetime import timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 import re
 import os
 import shutil
@@ -28,10 +28,10 @@ try:
     from core.strategy.sm import api as sm_api
     from core.strategy.pm import api as pm_api
     from core.strategy.om import api as om_api
+    from core.strategy.entities import Operacion
     from core import utils
 except ImportError:
     sm_api = pm_api = om_api = utils = None
-
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -131,7 +131,8 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
 
         pnl_realizado = op_obj.pnl_realizado_usdt
         ganancias_netas = pnl_realizado - op_obj.comisiones_totales_usdt
-        roi = utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100 if utils else 0.0
+        # <<-- CAMBIO: El ROI ahora se lee de la propiedad TWRR
+        roi = op_obj.twrr_roi if hasattr(op_obj, 'twrr_roi') else utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100 if utils else 0.0
 
         print(f"\n  Operación {side.upper()}:")
         print(f"    - Estado Final          : {op_obj.estado.upper()}")
@@ -140,7 +141,7 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         print(f"    - Equity Total (Final)  : ${op_obj.equity_total_usdt:.2f}")
         print(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
         print(f"    - PNL (Realizado)       : {pnl_realizado:+.4f} USDT")
-        print(f"    - ROI (Realizado)       : {roi:+.2f}%")
+        print(f"    - ROI (TWRR)            : {roi:+.2f}%")
 
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
@@ -150,11 +151,11 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         if open_longs:
             print(f"  LONGs ({len(open_longs)}):")
             for pos in open_longs:
-                print(f"    - ID: {pos.get('id', 'N/A')}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}")
+                print(f"    - ID: {str(pos.get('id', 'N/A'))[-6:]}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}")
         if open_shorts:
             print(f"  SHORTs ({len(open_shorts)}):")
             for pos in open_shorts:
-                print(f"    - ID: {pos.get('id', 'N/A')}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}")
+                print(f"    - ID: {str(pos.get('id', 'N/A'))[-6:]}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}")
     else:
         print("\n--- No quedaron posiciones abiertas ---")
 
@@ -174,17 +175,33 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
 
     total_equity = 0.0
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se reemplaza el acceso al obsoleto 'balances' por el nuevo atributo.
     transferido_val = 0.0
     if om_api:
         long_op = om_api.get_operation_by_side('long')
         short_op = om_api.get_operation_by_side('short')
         if long_op:
             total_equity += long_op.equity_total_usdt
-            transferido_val += long_op.balances.profit_balance
+            # Accedemos al nuevo campo directo de la operación
+            transferido_val += getattr(long_op, 'profit_balance_acumulado', 0.0)
         if short_op:
             total_equity += short_op.equity_total_usdt
-            transferido_val += short_op.balances.profit_balance
-
+            # Usamos getattr por seguridad, devolviendo 0.0 si el atributo no existiera
+            transferido_val += getattr(short_op, 'profit_balance_acumulado', 0.0)
+    # --- FIN DE LA CORRECCIÓN ---
+    # --- ANTERIOR (Código con el error) ---
+    # transferido_val = 0.0
+    # if om_api:
+    #     long_op = om_api.get_operation_by_side('long')
+    #     short_op = om_api.get_operation_by_side('short')
+    #     if long_op:
+    #         total_equity += long_op.equity_total_usdt
+    #         transferido_val += long_op.balances.profit_balance
+    #     if short_op:
+    #         total_equity += short_op.equity_total_usdt
+    #         transferido_val += short_op.balances.profit_balance
+    
     data = {
         "Inicio Sesión": start_time_str,
         "Duración": duration_str,
@@ -261,13 +278,17 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             data[side]['Estado'] = 'NO_DISPONIBLE'
             continue
 
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de capital unificada y expandida ---
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de capital actualizada para usar las nuevas propiedades. ---
         pnl_no_realizado = 0.0
-        for pos_data in summary.get(f'open_{side}_positions', []):
-            entry = pos_data.get('entry_price', 0.0)
-            size = pos_data.get('size_contracts', 0.0)
-            if side == 'long': pnl_no_realizado += (current_price - entry) * size
-            else: pnl_no_realizado += (entry - current_price) * size
+        # El PNL no realizado se calcula ahora externamente y se almacena en la operación.
+        if hasattr(operacion, 'pnl_no_realizado_usdt_vivo'):
+            pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
+        else: # Fallback por si el atributo no está
+            for pos_data in summary.get(f'open_{side}_positions', []):
+                entry = pos_data.get('entry_price', 0.0)
+                size = pos_data.get('size_contracts', 0.0)
+                if side == 'long': pnl_no_realizado += (current_price - entry) * size
+                else: pnl_no_realizado += (entry - current_price) * size
 
         capital_inicial = operacion.capital_inicial_usdt
         equity_total_hist = operacion.equity_total_usdt
@@ -279,16 +300,21 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
 
         data[side] = {
             'Estado': operacion.estado.upper(),
-            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)}/{operacion.max_posiciones_logicas}",
+            'Posiciones': f"{operacion.posiciones_abiertas_count}/{len(operacion.posiciones)}",
             'Capital Inicial': f"${capital_inicial:.2f}",
-            'Capital Operativo': f"${operacion.balances.operational_margin:.2f}",
-            'Capital en Uso': f"${operacion.balances.used_margin:.2f}",
+            'Capital Operativo': f"${operacion.capital_operativo_logico_actual:.2f}",
+            'Capital en Uso': f"${operacion.capital_en_uso:.2f}",
             'Equity Total (Hist.)': f"${equity_total_hist:.2f}",
             'Equity Actual (Vivo)': f"{get_color(equity_actual_vivo - capital_inicial)}${equity_actual_vivo:.2f}{reset}",
             'PNL Realizado': f"{get_color(operacion.pnl_realizado_usdt)}{operacion.pnl_realizado_usdt:+.4f}${reset}",
-            'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f}{reset}",
+            'Transferido a PROFIT': f"{get_color(getattr(operacion, 'profit_balance_acumulado', 0.0))}{getattr(operacion, 'profit_balance_acumulado', 0.0):+.4f}{reset}",
         }
         # --- FIN DE LA MODIFICACIÓN ---
+        # --- ANTERIOR (Código con errores) ---
+        # 'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)}/{operacion.max_posiciones_logicas}",
+        # 'Capital Operativo': f"${operacion.balances.operational_margin:.2f}",
+        # 'Capital en Uso': f"${operacion.balances.used_margin:.2f}",
+        # 'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f}{reset}",
 
     width_col = (box_width - 3) // 2
 
@@ -296,13 +322,11 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     print(f"│{'Operación LONG':^{width_col}}│{'Operación SHORT':^{width_col}}│")
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
 
-    # --- INICIO DE LA MODIFICACIÓN: Lista de etiquetas unificada ---
     labels = [
         'Estado', 'Posiciones', 'Capital Inicial', 'Capital Operativo',
         'Capital en Uso', 'Equity Total (Hist.)', 'Equity Actual (Vivo)',
         'PNL Realizado', 'Transferido a PROFIT'
     ]
-    # --- FIN DE LA MODIFICACIÓN ---
     max_label_len = min(max(len(k) for k in labels), width_col - 12)
 
     for label in labels:

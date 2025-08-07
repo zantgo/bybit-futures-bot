@@ -171,8 +171,12 @@ class EventProcessor:
                         
                         pnl_total_side = operacion.pnl_realizado_usdt + unrealized_pnl_side
                         
-                        capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
-                        roi = self._utils.safe_division(pnl_total_side, capital_promedio) * 100
+                        # capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
+                        # roi = self._utils.safe_division(pnl_total_side, capital_promedio) * 100
+                        
+                        # Corrección: El ROI siempre se calcula sobre el capital inicial para consistencia.
+                        # Esto elimina el "capital promedio" y el atributo 'capital_actual_usdt' que causaba el crash.
+                        roi = self._utils.safe_division(pnl_total_side, operacion.capital_inicial_usdt) * 100
 
                         tsl_act_pct = operacion.tsl_roi_activacion_pct
                         tsl_dist_pct = operacion.tsl_roi_distancia_pct

@@ -6,10 +6,7 @@ from dataclasses import asdict
 try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Importamos desde la nueva ubicación central y única.
     from core.strategy.entities import LogicalPosition
-    # --- FIN DE la MODIFICACIÓN ---
 except ImportError as e:
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
@@ -53,10 +50,13 @@ class PositionExecutor:
     def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float, tsl_activation_pct: float, tsl_distance_pct: float) -> Dict[str, Any]:
         """Orquesta la apertura de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'api_order_id': None, 'logical_position_object': None, 'message': 'Error no especificado'}
+        
         operacion = self._state_manager._om_api.get_operation_by_side(side)
         if not operacion:
             result['message'] = f"Error: No se pudo obtener la operación para el lado '{side}'."
             return result
+        
+        # <<-- CAMBIO: El apalancamiento se obtiene de la operación, no de la posición.
         leverage = operacion.apalancamiento
 
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
@@ -91,19 +91,16 @@ class PositionExecutor:
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
+        # <<-- CAMBIO: Se elimina 'leverage' de la creación del objeto LogicalPosition.
         new_position_obj = LogicalPosition(
-            id=logical_position_id, 
+            id=logical_position_id,
+            capital_asignado=margin_to_use, # El capital asignado es el margen que se intenta usar
             entry_timestamp=timestamp, 
             entry_price=entry_price,
-            margin_usdt=margin_to_use, 
+            margin_usdt=margin_to_use, # Se actualizará con el valor real si es necesario
             size_contracts=size_contracts_float,
-            leverage=leverage, 
             stop_loss_price=stop_loss_price,
             est_liq_price=est_liq_price, 
-            ts_is_active=False,
-            ts_peak_price=None, 
-            ts_stop_price=None, 
-            api_order_id=None,
             tsl_activation_pct_at_open=tsl_activation_pct,
             tsl_distance_pct_at_open=tsl_distance_pct
         )
