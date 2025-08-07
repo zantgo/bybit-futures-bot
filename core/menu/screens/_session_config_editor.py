@@ -115,7 +115,7 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
         },
         "Gestión de Profit": {
             "Tarifa Comisión (%)": f"{temp_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
-            "% Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
+            "Porcentaje Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
             "Monto Mín. Transferencia": f"${temp_cfg['PROFIT']['MIN_TRANSFER_AMOUNT_USDT']:.4f}",
         }
     }
@@ -267,7 +267,7 @@ def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
     while True:
         menu_items = [
             f"[1] Tarifa Comisión (%) ({profit_cfg['COMMISSION_RATE'] * 100:.3f})",
-            f"[2] % Reinversión Ganancias ({profit_cfg['REINVEST_PROFIT_PCT']})",
+            f"[2] Porcentaje Reinversión Ganancias ({profit_cfg['REINVEST_PROFIT_PCT']})",
             f"[3] Monto Mín. Transferencia (${profit_cfg['MIN_TRANSFER_AMOUNT_USDT']:.4f})",
             None,
             "[b] Volver"
@@ -279,7 +279,7 @@ def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
             if new_val / 100 != original: changed_keys['COMMISSION_RATE'] = profit_cfg['COMMISSION_RATE'] = new_val / 100
         elif submenu == 1:
             original = profit_cfg['REINVEST_PROFIT_PCT']
-            new_val = get_input("% Reinversión de Ganancias", float, original, min_val=0.0, max_val=100.0)
+            new_val = get_input("Porcentaje Reinversión de Ganancias", float, original, min_val=0.0, max_val=100.0)
             if new_val != original: changed_keys['REINVEST_PROFIT_PCT'] = profit_cfg['REINVEST_PROFIT_PCT'] = new_val
         elif submenu == 2:
             original = profit_cfg['MIN_TRANSFER_AMOUNT_USDT']

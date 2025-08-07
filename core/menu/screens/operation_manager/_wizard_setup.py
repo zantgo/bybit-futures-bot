@@ -31,7 +31,6 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# --- INICIO DE LA MODIFICACIÓN #1: Actualizar la visualización ---
 def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     """Muestra la caja con la configuración actual de la operación."""
     action = "Modificando" if is_modification else "Creando Nueva"
@@ -51,9 +50,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     max_pos = params.get('max_posiciones_logicas', 0)
     capital_requerido = tamaño_base * max_pos
 
-    # Comprobación visual para el usuario
     capital_suficiente = capital_operativo >= capital_requerido
-    color_requerido = "\033[92m" if capital_suficiente else "\033[91m" # Verde si OK, Rojo si no
+    color_requerido = "\033[92m" if capital_suficiente else "\033[91m"
     reset_color = "\033[0m"
     
     print(_create_config_box_line("Capital y Apalancamiento", box_width))
@@ -67,9 +65,7 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     max_key_len = max(len(k) for k in capital_data.keys())
     for label, value in capital_data.items():
         _print_line(label, value, max_key_len)
-    # --- FIN DE LA MODIFICACIÓN #1 ---
-
-    # --- El resto de la función de visualización no cambia ---
+    
     print("├" + "─" * (box_width - 2) + "┤")
     print(_create_config_box_line("Riesgo por Posición", box_width))
     risk_data = {
@@ -144,7 +140,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         max_pos = defaults["CAPITAL"]["MAX_POSITIONS"]
         temp_params = {
             'tendencia': "LONG_ONLY" if side == 'long' else "SHORT_ONLY",
-            'tamaño_posicion_base_usdt': base_size, # Ahora es un valor por defecto
+            'tamaño_posicion_base_usdt': base_size,
             'operational_margin': base_size * max_pos,
             'max_posiciones_logicas': max_pos,
             'apalancamiento': defaults["CAPITAL"]["LEVERAGE"],
@@ -188,49 +184,85 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         choice = menu.show()
 
         try:
-            if choice == 0: # Capital
-                # --- INICIO DE LA MODIFICACIÓN #3: Nuevo flujo de entrada con validación ---
-                while True: # Bucle para la validación del capital
-                    temp_params['operational_margin'] = get_input("Nuevo Capital Operativo (USDT)", float, temp_params['operational_margin'])
-                    temp_params['tamaño_posicion_base_usdt'] = get_input("Nuevo Tamaño Base por Posición (USDT)", float, temp_params['tamaño_posicion_base_usdt'])
-                    temp_params['max_posiciones_logicas'] = get_input("Nuevo Máx. de Posiciones", int, temp_params['max_posiciones_logicas'])
-                    temp_params['apalancamiento'] = get_input("Nuevo Apalancamiento", float, temp_params['apalancamiento'])
+            # --- INICIO DE LA MODIFICACIÓN #3: Corrección de controles y lógica ---
+            if choice == 0: # Capital y Apalancamiento
+                while True:
+                    print("\n--- Editando Capital y Apalancamiento ---")
+                    temp_params['operational_margin'] = get_input("Nuevo Capital Operativo (USDT)", float, temp_params['operational_margin'], min_val=0.1)
+                    temp_params['tamaño_posicion_base_usdt'] = get_input("Nuevo Tamaño Base por Posición (USDT)", float, temp_params['tamaño_posicion_base_usdt'], min_val=0.1)
+                    temp_params['max_posiciones_logicas'] = get_input("Nuevo Máx. de Posiciones", int, temp_params['max_posiciones_logicas'], min_val=1)
+                    temp_params['apalancamiento'] = get_input("Nuevo Apalancamiento", float, temp_params['apalancamiento'], min_val=1.0)
                     
                     capital_requerido = temp_params['tamaño_posicion_base_usdt'] * temp_params['max_posiciones_logicas']
                     
                     if temp_params['operational_margin'] >= capital_requerido:
                         params_changed = True
-                        break # Salir del bucle si la validación es exitosa
+                        break 
                     else:
                         print(f"\n\033[91mERROR DE VALIDACIÓN:\033[0m")
                         print(f"El Capital Requerido (${capital_requerido:.2f}) no puede ser mayor que el Capital Asignado (${temp_params['operational_margin']:.2f}).")
                         print("Por favor, ajusta los valores.")
                         time.sleep(4)
-                # --- FIN DE LA MODIFICACIÓN #3 ---
-            elif choice == 1:
-                # ... Lógica de Riesgo sin cambios ...
+                        # Limpia la pantalla para volver a preguntar
+                        clear_screen()
+                        print_tui_header(f"Asistente de Operación {side.upper()}")
+                        _display_setup_box(temp_params, box_width, is_modification)
+
+
+            elif choice == 1: # Riesgo por Posición
+                print("\n--- Editando Riesgo por Posición ---")
+                temp_params['sl_posicion_individual_pct'] = get_input("Nuevo SL Individual (%)", float, temp_params.get('sl_posicion_individual_pct'), min_val=0.0, is_optional=True)
+                temp_params['tsl_activacion_pct'] = get_input("Nueva Activación TSL (%)", float, temp_params.get('tsl_activacion_pct'), min_val=0.0, is_optional=True)
+                if temp_params.get('tsl_activacion_pct'):
+                    temp_params['tsl_distancia_pct'] = get_input("Nueva Distancia TSL (%)", float, temp_params.get('tsl_distancia_pct'), min_val=0.01, is_optional=False)
+                else:
+                    temp_params['tsl_distancia_pct'] = None
                 params_changed = True
-            elif choice == 2:
-                # ... Lógica de Entrada sin cambios ...
+
+            elif choice == 2: # Condición de Entrada
+                entry_menu = TerminalMenu(["[1] Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a"], title="\nSelecciona la Condición de Entrada:").show()
+                if entry_menu == 0: temp_params.update({'tipo_cond_entrada': 'MARKET', 'valor_cond_entrada': 0.0})
+                elif entry_menu == 1: temp_params.update({'tipo_cond_entrada': 'PRICE_ABOVE', 'valor_cond_entrada': get_input("Activar si precio >", float)})
+                elif entry_menu == 2: temp_params.update({'tipo_cond_entrada': 'PRICE_BELOW', 'valor_cond_entrada': get_input("Activar si precio <", float)})
                 params_changed = True
-            elif choice == 3:
-                # ... Lógica de Salida sin cambios ...
+
+            elif choice == 3: # Condiciones y Límites de Salida
+                print("\n--- Editando Condiciones y Límites de Salida ---")
+                exit_price_menu = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si precio SUPERIOR a", "[3] Salir si precio INFERIOR a"], title="Condición de Salida por Precio:").show()
+                if exit_price_menu == 0: temp_params.update({'tipo_cond_salida': None, 'valor_cond_salida': None})
+                elif exit_price_menu == 1: temp_params.update({'tipo_cond_salida': 'PRICE_ABOVE', 'valor_cond_salida': get_input("Salir si precio >", float)})
+                elif exit_price_menu == 2: temp_params.update({'tipo_cond_salida': 'PRICE_BELOW', 'valor_cond_salida': get_input("Salir si precio <", float)})
+                
                 sl_roi_val = get_input("Límite SL/TP por ROI (%) (negativo para SL, positivo para TP)", float, temp_params.get('sl_roi_pct'), is_optional=True)
                 temp_params['sl_roi_pct'] = sl_roi_val
+                
+                tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_params.get('tsl_roi_activacion_pct'), min_val=0.0, is_optional=True)
+                if tsl_act:
+                    temp_params['tsl_roi_activacion_pct'] = tsl_act
+                    temp_params['tsl_roi_distancia_pct'] = get_input("Límite TSL-ROI Distancia (%)", float, temp_params.get('tsl_roi_distancia_pct'), min_val=0.01)
+                else:
+                    temp_params['tsl_roi_activacion_pct'] = None
+                    temp_params['tsl_roi_distancia_pct'] = None
+                
+                temp_params['tiempo_maximo_min'] = get_input("Límite de Duración (min)", int, temp_params.get('tiempo_maximo_min'), min_val=1, is_optional=True)
+                temp_params['max_comercios'] = get_input("Límite de Trades", int, temp_params.get('max_comercios'), min_val=1, is_optional=True)
+                
+                action_menu = TerminalMenu(["[1] Pausar Operación", "[2] Detener y Resetear"], title="Acción al Cumplir CUALQUIER Límite:").show()
+                if action_menu == 0: temp_params['accion_al_finalizar'] = 'PAUSAR'
+                elif action_menu == 1: temp_params['accion_al_finalizar'] = 'DETENER'
+                
                 params_changed = True
-            
+
             elif choice == 5: # Guardar
                 if not params_changed and is_modification:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     break
                 
-                # --- INICIO DE LA MODIFICACIÓN #4: Validación final antes de guardar ---
                 capital_requerido = temp_params['tamaño_posicion_base_usdt'] * temp_params['max_posiciones_logicas']
                 if temp_params['operational_margin'] < capital_requerido:
-                    print("\n\033[91mERROR: No se puede guardar. El capital asignado es insuficiente para el tamaño y número de posiciones.\033[0m")
+                    print("\n\033[91mERROR: No se puede guardar. El capital asignado es insuficiente.\033[0m")
                     time.sleep(4)
-                    continue # Vuelve al menú de edición para corregir
-                # --- FIN DE LA MODIFICACIÓN #4 ---
+                    continue
                 
                 clear_screen()
                 print_tui_header("Confirmar Cambios")
@@ -242,7 +274,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     print(f"\n{msg}"); time.sleep(2.5)
                     break
             
-            elif choice == 6 or choice is None:
+            elif choice == 6 or choice is None: # Cancelar
                 if params_changed:
                     cancel_confirm = TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show()
                     if cancel_confirm == 0:
@@ -251,6 +283,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 else:
                     print("\nAsistente cancelado."); time.sleep(1.5)
                     break
+            # --- FIN DE LA MODIFICACIÓN #3 ---
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
