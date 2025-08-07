@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import PositionManager
-    from core.strategy.om._entities import Operacion
+    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
 
 # --- Módulos API de Dependencia ---
 # El PM API ahora necesita conocer al SM API para obtener el precio

@@ -1,27 +1,41 @@
-# ./core/strategy/om/_manager.py
-
 import datetime
 import uuid
 import threading
 from typing import Optional, Dict, Any, Tuple
 
 try:
-    from ._entities import Operacion, LogicalBalances # Se importa LogicalBalances desde aquí
+    # --- INICIO DE LA MODIFICACIÓN #1 ---
+    # Se corrige la importación para apuntar a la ubicación centralizada.
+    from core.strategy.entities import Operacion, LogicalBalances
+    # --- FIN DE LA MODIFICACIÓN #1 ---
     from core.logging import memory_logger
     import config as config_module
 except ImportError:
-    class Operacion: pass
-    class LogicalBalances: pass
+    # Fallback for isolated testing or type checking
+    class Operacion:
+        def __init__(self, id: str):
+            self.estado = 'DETENIDA'
+            self.balances = LogicalBalances()
+            self.capital_inicial_usdt = 0.0
+            self.capital_actual_usdt = 0.0
+            self.tipo_cond_entrada = None
+            self.valor_cond_entrada = None
+            self.tiempo_inicio_ejecucion = None
+        def reset(self): pass
+
+    class LogicalBalances:
+        def __init__(self):
+            self.operational_margin = 0.0
+            
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
     config_module = None
 
 class OperationManager:
-    # ... (El resto del código de esta clase NO cambia) ...
     """
-    Gestiona el estado y la lógica de negocio de las operaciones estratégicas
-    independientes para LONG y SHORT.
+    Gestiona el ciclo de vida y la configuración de las operaciones estratégicas
+    (LONG y SHORT).
     """
     def __init__(self, config: Any, memory_logger_instance: Any):
         self._config = config
@@ -36,9 +50,7 @@ class OperationManager:
         self.initialize()
 
     def initialize(self):
-        """
-        Crea las operaciones iniciales para LONG y SHORT, ambas en estado DETENIDA.
-        """
+        """Inicializa las instancias de operación para LONG y SHORT."""
         with self._lock:
             if not self.long_operation:
                 self.long_operation = Operacion(id=f"op_long_{uuid.uuid4()}")
@@ -48,9 +60,11 @@ class OperationManager:
         self._memory_logger.log("OperationManager inicializado con operaciones LONG y SHORT en estado DETENIDA.", level="INFO")
 
     def is_initialized(self) -> bool:
+        """Verifica si el gestor ha sido inicializado."""
         return self._initialized
 
     def _get_operation_by_side_internal(self, side: str) -> Optional[Operacion]:
+        """Obtiene el objeto de operación interno (sin copia) para un lado específico."""
         if side == 'long':
             return self.long_operation
         elif side == 'short':
@@ -59,6 +73,7 @@ class OperationManager:
         return None
 
     def get_operation_by_side(self, side: str) -> Optional[Operacion]:
+        """Obtiene una copia segura del estado de la operación para un lado específico."""
         with self._lock:
             operation = self._get_operation_by_side_internal(side)
             if operation:
@@ -67,6 +82,11 @@ class OperationManager:
         return None
 
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Crea o actualiza una operación. Si la operación está DETENIDA, la configura
+        y la transiciona a EN_ESPERA o ACTIVA. Si ya está activa, solo actualiza
+        los parámetros.
+        """
         from core.strategy.sm import api as sm_api
         
         with self._lock:
@@ -77,7 +97,7 @@ class OperationManager:
             estado_original = target_operation.estado
             changes_log = []
             
-            capital_logico_anterior = target_operation.balances.operational_margin
+            capital_anterior = target_operation.capital_actual_usdt
             
             for key, value in params.items():
                 if hasattr(target_operation, key):
@@ -91,18 +111,27 @@ class OperationManager:
                 if not hasattr(target_operation, 'balances') or not target_operation.balances:
                     target_operation.balances = LogicalBalances()
                 
+                # --- INICIO DE LA MODIFICACIÓN #2 ---
+                # Lógica simplificada para gestionar capital inicial y actual.
                 if estado_original == 'DETENIDA':
-                    target_operation.balances.operational_margin = float(operational_margin_nuevo)
+                    # Es la primera asignación de capital.
                     target_operation.capital_inicial_usdt = float(operational_margin_nuevo)
-                    changes_log.append(f"'capital_logico': {target_operation.capital_inicial_usdt:.2f}$ (asignado)")
+                    target_operation.capital_actual_usdt = float(operational_margin_nuevo)
+                    target_operation.balances.operational_margin = float(operational_margin_nuevo)
+                    changes_log.append(f"'capital_operativo': {target_operation.capital_actual_usdt:.2f}$ (asignado)")
+                
                 elif estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA']:
-                    diferencia_capital = float(operational_margin_nuevo) - capital_logico_anterior
-                    if abs(diferencia_capital) > 1e-9:
+                    # Es una modificación de capital.
+                    diferencia_capital = float(operational_margin_nuevo) - capital_anterior
+                    if abs(diferencia_capital) > 1e-9: # Usar tolerancia para flotantes
+                        target_operation.capital_actual_usdt = float(operational_margin_nuevo)
                         target_operation.balances.operational_margin = float(operational_margin_nuevo)
-                        target_operation.capital_inicial_usdt += diferencia_capital
-                        changes_log.append(f"'capital_logico': {capital_logico_anterior:.2f}$ -> {target_operation.balances.operational_margin:.2f}$")
-                        self._memory_logger.log(f"CAPITAL LÓGICO AJUSTADO ({side.upper()}): {diferencia_capital:+.2f}$. Nuevo capital base ROI: {target_operation.capital_inicial_usdt:.2f}$", "WARN")
+                        changes_log.append(f"'capital_operativo': {capital_anterior:.2f}$ -> {target_operation.capital_actual_usdt:.2f}$")
+                        self._memory_logger.log(f"CAPITAL LÓGICO AJUSTADO ({side.upper()}): {diferencia_capital:+.2f}$", "WARN")
+                # --- FIN DE LA MODIFICACIÓN #2 ---
 
+
+            # --- Lógica de Transición de Estado (SIN CAMBIOS) ---
             if estado_original == 'DETENIDA' and params:
                 if target_operation.tipo_cond_entrada == 'MARKET':
                     target_operation.estado = 'ACTIVA'
@@ -136,6 +165,7 @@ class OperationManager:
         return True, f"Operación {side.upper()} actualizada con éxito."
 
     def pausar_operacion(self, side: str) -> Tuple[bool, str]:
+        """Pausa una operación, impidiendo la apertura de nuevas posiciones."""
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
             if not target_operation or target_operation.estado not in ['ACTIVA', 'EN_ESPERA']:
@@ -148,6 +178,7 @@ class OperationManager:
         return True, msg
 
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
+        """Reanuda una operación que estaba en estado PAUSADA."""
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
             if not target_operation or target_operation.estado != 'PAUSADA':
@@ -162,6 +193,7 @@ class OperationManager:
         return True, msg
 
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
+        """Fuerza la activación de una operación que está EN_ESPERA."""
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
             if not target_operation or target_operation.estado != 'EN_ESPERA':
@@ -176,6 +208,7 @@ class OperationManager:
         return True, msg
         
     def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
+        """Activa una operación porque su condición de entrada de precio se ha cumplido."""
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
             if not target_operation or target_operation.estado != 'EN_ESPERA':
@@ -190,6 +223,7 @@ class OperationManager:
         return True, msg
 
     def detener_operacion(self, side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
+        """Inicia el proceso de detención de una operación."""
         from core.strategy.pm import api as pm_api
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
@@ -199,6 +233,7 @@ class OperationManager:
             target_operation.estado = 'DETENIENDO'
             self._memory_logger.log(f"OPERACIÓN {side.upper()} en estado DETENIENDO. Esperando cierre de posiciones por PM.", "WARN")
 
+            # Si no hay posiciones, podemos detenerla inmediatamente.
             if not target_operation.posiciones_activas.get(side):
                 self.revisar_y_transicionar_a_detenida(side)
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
@@ -206,12 +241,14 @@ class OperationManager:
         return True, f"Proceso de detención para {side.upper()} iniciado. Se cerrarán posiciones existentes."
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
+        """Acumula el PNL realizado de las posiciones cerradas."""
         with self._lock:
             operacion = self._get_operation_by_side_internal(side)
             if operacion:
                 operacion.pnl_realizado_usdt += pnl_amount
 
     def actualizar_comisiones_totales(self, side: str, fee_amount: float):
+        """Acumula las comisiones totales de las operaciones."""
         with self._lock:
             operacion = self._get_operation_by_side_internal(side)
             if operacion:
@@ -219,6 +256,10 @@ class OperationManager:
                     operacion.comisiones_totales_usdt += abs(fee_amount)
     
     def revisar_y_transicionar_a_detenida(self, side: str):
+        """
+        Revisa si una operación en PAUSADA o DETENIENDO ya no tiene posiciones
+        abiertas para resetear su estado a DETENIDA.
+        """
         with self._lock:
             target_operation = self._get_operation_by_side_internal(side)
             if not target_operation or target_operation.estado not in ['PAUSADA', 'DETENIENDO']:

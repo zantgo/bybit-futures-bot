@@ -1,19 +1,7 @@
+# ./core/strategy/event_processor.py
+
 """
 Orquestador Principal del Procesamiento de Eventos.
-
-v8.3 (Dashboard Enriquecido):
-- Se añade el atributo `_latest_signal_data` para almacenar la última señal.
-- Se añade el método `get_latest_signal_data` para exponerla.
-
-v8.2 (Refactor Signal Generator):
-- Se actualiza el constructor para recibir una instancia de la clase SignalGenerator.
-- La generación de señales ahora se delega al método de la instancia inyectada.
-
-v8.1 (Refactor TA Manager):
-- Se actualiza el constructor para recibir una instancia de la clase TAManager.
-
-v8.0 (Refactor a Clase):
-- Toda la lógica del módulo se ha encapsulado en la clase `EventProcessor`.
 """
 import sys
 import os
@@ -42,13 +30,6 @@ except ImportError as e:
     traceback.print_exc()
     sys.exit(1)
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Se elimina la excepción personalizada, ya que no se usará.
-# class GlobalStopLossException(Exception):
-#     """Excepción para ser lanzada cuando se activa el Global Stop Loss."""
-#     pass
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 class EventProcessor:
     """
@@ -76,22 +57,11 @@ class EventProcessor:
         self._pm_instance: Optional['PositionManager'] = None
         self._previous_raw_event_price: float = np.nan
         self._is_first_event: bool = True
-        
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se eliminan los atributos relacionados con los disyuntores de sesión.
-        # self._global_stop_loss_event: Optional[threading.Event] = None
-        # self._global_stop_loss_triggered: bool = False
-        # --- FIN DE LA MODIFICACIÓN ---
-
 
     def initialize(
         self,
         operation_mode: str,
         pm_instance: 'PositionManager',
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina el argumento global_stop_loss_event
-        # global_stop_loss_event: Optional[threading.Event] = None
-        # --- FIN DE LA MODIFICACIÓN ---
     ):
         """
         Inicializa el orquestador para una nueva sesión, reseteando su estado.
@@ -101,12 +71,6 @@ class EventProcessor:
         self._operation_mode = operation_mode
         self._pm_instance = pm_instance
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la asignación de los atributos de disyuntores.
-        # self._global_stop_loss_event = global_stop_loss_event
-        # self._global_stop_loss_triggered = False
-        # --- FIN DE LA MODIFICACIÓN ---
-
         self._latest_signal_data = {}
         self._previous_raw_event_price = np.nan
         self._is_first_event = True
@@ -123,24 +87,13 @@ class EventProcessor:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se elimina el método has_global_stop_loss_triggered
-    # def has_global_stop_loss_triggered(self) -> bool:
-    #     """
-    #     Devuelve si el Global Stop Loss se ha activado para esta instancia.
-    #     """
-    #     return self._global_stop_loss_triggered
-    # --- FIN DE LA MODIFICACIÓN ---
-
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
         Orquesta el flujo de trabajo completo para procesar un único evento de precio.
         """
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la comprobación de _global_stop_loss_triggered
+        
         if not self._pm_instance:
             return
-        # --- FIN DE LA MODIFICACIÓN ---
 
         if not final_price_info:
             self._memory_logger.log("Evento de precio final vacío, saltando tick.", level="WARN")
@@ -168,16 +121,6 @@ class EventProcessor:
                     timestamp=current_timestamp
                 )
 
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # 4. Se elimina la llamada a la comprobación de límites de sesión
-            # self._check_session_limits(current_price, current_timestamp)
-            # --- FIN DE LA MODIFICACIÓN ---
-
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la captura de GlobalStopLossException
-        # except GlobalStopLossException as e:
-        #     self._memory_logger.log(f"GlobalStopLossException capturada en Event Processor: {e}", level="ERROR")
-        # --- FIN DE LA MODIFICACIÓN ---
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
@@ -196,6 +139,10 @@ class EventProcessor:
                 if not operacion:
                     continue
 
+                # --- INICIO DE LA MODIFICACIÓN ---
+                # La lógica ahora se estructura por estado para mayor claridad.
+
+                # 1. Lógica de ENTRADA (solo aplica si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
@@ -207,27 +154,26 @@ class EventProcessor:
                         elif cond_type == 'PRICE_BELOW' and current_price < cond_value: entry_condition_met = True
                     if entry_condition_met: self._om_api.activar_por_condicion(side)
 
-                elif operacion.estado == 'ACTIVA':
+                # 2. Lógica de SALIDA y GESTIÓN (aplica a todos los estados activos o pausados)
+                if operacion.estado in ['ACTIVA', 'PAUSADA', 'EN_ESPERA']:
                     exit_condition_met = False
                     reason = ""
                     summary = self._pm_api.get_position_summary()
                     
-                    # --- INICIO DE LA CORRECCIÓN ---
-                    # Asegurarse de que el ROI es un número antes de usarlo.
                     roi = 0.0
                     if summary and 'error' not in summary:
                         unrealized_pnl_side = 0.0
-                        open_positions_side = summary.get(f'open_{side}_positions', [])
-                        for pos in open_positions_side:
+                        for pos in summary.get(f'open_{side}_positions', []):
                             entry = pos.get('entry_price', 0.0)
                             size = pos.get('size_contracts', 0.0)
                             if side == 'long': unrealized_pnl_side += (current_price - entry) * size
                             else: unrealized_pnl_side += (entry - current_price) * size
                         
-                        total_pnl_side = operacion.pnl_realizado_usdt + unrealized_pnl_side
-                        roi = self._utils.safe_division(total_pnl_side, operacion.capital_inicial_usdt) * 100
+                        pnl_total_side = operacion.pnl_realizado_usdt + unrealized_pnl_side
+                        
+                        capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
+                        roi = self._utils.safe_division(pnl_total_side, capital_promedio) * 100
 
-                        # Ahora que ROI es seguro, procedemos con las comprobaciones
                         tsl_act_pct = operacion.tsl_roi_activacion_pct
                         tsl_dist_pct = operacion.tsl_roi_distancia_pct
                         
@@ -235,20 +181,24 @@ class EventProcessor:
                             if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
                                 operacion.tsl_roi_activo = True
                                 operacion.tsl_roi_peak_pct = roi
+                                self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
                                 self._memory_logger.log(f"TSL-ROI para Operación {side.upper()} ACTIVADO. ROI: {roi:.2f}%, Pico: {operacion.tsl_roi_peak_pct:.2f}%", "INFO")
                             
                             if operacion.tsl_roi_activo:
                                 if roi > operacion.tsl_roi_peak_pct: 
                                     operacion.tsl_roi_peak_pct = roi
+                                    self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
                                 
                                 umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
                                 if roi <= umbral_disparo: 
                                     exit_condition_met, reason = True, f"TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
 
                         sl_roi_pct = operacion.sl_roi_pct
-                        if not exit_condition_met and sl_roi_pct is not None and roi <= -abs(sl_roi_pct):
-                            exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}%)"
-                    # --- FIN DE LA CORRECCIÓN ---
+                        if not exit_condition_met and sl_roi_pct is not None:
+                            if sl_roi_pct < 0 and roi <= sl_roi_pct:
+                                exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
+                            elif sl_roi_pct > 0 and roi >= sl_roi_pct:
+                                exit_condition_met, reason = True, f"TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
 
                     if not exit_condition_met and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_condition_met, reason = True, f"Límite de {operacion.max_comercios} trades"
@@ -270,6 +220,7 @@ class EventProcessor:
                         if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side)
                         elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
                         else: self._om_api.pausar_operacion(side)
+                # --- FIN DE LA MODIFICACIÓN ---
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")

@@ -1,3 +1,5 @@
+# ./core/strategy/pm/_position_state.py
+
 """
 Módulo del PositionState.
 
@@ -16,18 +18,15 @@ import traceback
 from typing import List, Dict, Optional, Any
 
 # --- Dependencias del Proyecto ---
-# EN: core/strategy/pm/_position_state.py
-
-# --- Dependencias del Proyecto ---
 try:
     from ._logical_table import LogicalPositionTable
-    # ANTES: from ._entities import LogicalPosition, PhysicalPosition
-    # AHORA:
-    from core.strategy.pm._entities import LogicalPosition, PhysicalPosition
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se corrige la importación para apuntar a la ubicación centralizada.
+    from core.strategy.entities import LogicalPosition, PhysicalPosition
+    # --- FIN DE LA MODIFICACIÓN ---
     from core.exchange import AbstractExchange
     from core.logging import memory_logger
 except ImportError:
-    # ... el resto del bloque except se mantiene igual ...
     # Fallbacks
     class LogicalPositionTable: pass
     class LogicalPosition: pass
@@ -102,7 +101,7 @@ class PositionState:
             memory_logger.log(traceback.format_exc(), level="ERROR")
             self._initialized = False
 
-    # --- INICIO DE LA MODIFICACIÓN: Implementación del método faltante ---
+    # --- INICIO DE LA MODIFICACIÓN: Implementación del método ---
     def sync_logical_positions(self, all_positions: Dict[str, List[LogicalPosition]]):
         """
         Sincroniza el estado de las tablas lógicas con un nuevo conjunto completo de posiciones.

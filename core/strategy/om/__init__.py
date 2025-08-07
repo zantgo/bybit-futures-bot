@@ -15,7 +15,11 @@ from . import _api as api
 # Se exponen las clases para que puedan ser instanciadas por el 'runner' o el
 # ensamblador de dependencias en una capa superior.
 from ._manager import OperationManager
-from ._entities import Operacion
+
+# --- INICIO DE LA MODIFICACIÓN ---
+# Se corrige la importación para apuntar a la nueva ubicación centralizada.
+from ..entities import Operacion
+# --- FIN DE LA MODIFICACIÓN ---
 
 # --- Control de lo que se exporta con 'from core.strategy.om import *' ---
 # Definir __all__ para una API de paquete limpia y explícita.

@@ -4,7 +4,8 @@ from typing import Optional, Dict, Any, List
 from dataclasses import asdict
 
 try:
-    from .._entities import Operacion
+   
+    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
 except ImportError:
     class Operacion: pass
 

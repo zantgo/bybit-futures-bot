@@ -8,9 +8,8 @@ from dataclasses import asdict
 
 try:
     # --- INICIO DE LA MODIFICACIÓN ---
-    # Se importa la entidad Operacion desde 'om' y las entidades de PM desde su propio paquete.
-    from core.strategy.om._entities import Operacion
-    from .._entities import LogicalPosition
+    # Se unifica la importación de entidades desde la ubicación central.
+    from core.strategy.entities import Operacion, LogicalPosition
     # --- FIN DE LA MODIFICACIÓN ---
     from .. import _transfer_executor
 except ImportError:
@@ -23,9 +22,8 @@ class _PrivateLogic:
 
     def _can_open_new_position(self, side: str) -> bool:
         """Verifica si se puede abrir una nueva posición para un lado específico."""
-        if self._session_tp_hit:
-            return False
-            
+        # Se ha eliminado la comprobación de _session_tp_hit ya que esa lógica
+        # se gestionará a un nivel superior o a través de los estados de la operación.
         operacion = self._om_api.get_operation_by_side(side)
         if not operacion or operacion.estado != 'ACTIVA':
             return False

@@ -2,13 +2,14 @@
 import datetime, uuid, traceback
 from typing import Optional, Dict, Any
 from dataclasses import asdict
+
 try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
     # --- INICIO DE LA MODIFICACIÓN ---
     # Importamos desde la nueva ubicación central y única.
     from core.strategy.entities import LogicalPosition
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- FIN DE la MODIFICACIÓN ---
 except ImportError as e:
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
@@ -20,7 +21,6 @@ except ImportError as e:
     memory_logger = MemoryLoggerFallback()
 
 class PositionExecutor:
-    # ... EL RESTO DEL CÓDIGO DE LA CLASE NO CAMBIA ...
     """
     Clase responsable de la ejecución mecánica de apertura y cierre de posiciones
     y de la sincronización del estado físico a través de una interfaz de exchange.

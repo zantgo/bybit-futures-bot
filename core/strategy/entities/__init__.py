@@ -1,5 +1,3 @@
-# ./core/strategy/entities/__init__.py
-
 """
 Paquete Central de Entidades de Dominio.
 
@@ -66,6 +64,15 @@ class LogicalPosition:
     api_avg_fill_price: Optional[float] = None
     api_filled_qty: Optional[float] = None
 
+@dataclass
+class PhysicalPosition:
+    """Representa el estado agregado de todas las posiciones lógicas de un lado."""
+    avg_entry_price: float = 0.0
+    total_size_contracts: float = 0.0
+    total_margin_usdt: float = 0.0
+    est_liq_price: Optional[float] = None
+    last_update_ts: Optional[datetime.datetime] = None
+
 # --- Entidad de Operación (Usada por OM) ---
 
 class Operacion:
@@ -92,52 +99,32 @@ class Operacion:
         self.tipo_cond_salida: Optional[str] = None
         self.valor_cond_salida: Optional[float] = None
         self.accion_al_finalizar: str = 'PAUSAR'
-        self.posiciones_activas: Dict[str, List['LogicalPosition']] = {'long': [], 'short': []}
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Atributos clave para el seguimiento de capital y rendimiento
-        self.capital_inicial_usdt: float = 0.0
+        # Atributos para el seguimiento de capital y rendimiento (ENFOQUE SIMPLIFICADO)
+        self.capital_inicial_usdt: float = 0.0  # Guarda el primer capital asignado.
+        self.capital_actual_usdt: float = 0.0   # Se actualiza con cada modificación.
+        
         self.pnl_realizado_usdt: float = 0.0
         self.comercios_cerrados_contador: int = 0
-        self.comisiones_totales_usdt: float = 0.0
-        
-        # Atributos para el TSL por ROI
+        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
+        self.posiciones_activas: Dict[str, List['LogicalPosition']] = {'long': [], 'short': []}
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
-        
-        # Objeto para gestionar el capital operativo
+        self.comisiones_totales_usdt: float = 0.0
         self.balances: LogicalBalances = LogicalBalances()
-        
-        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
-        # --- FIN DE LA MODIFICACIÓN ---
 
     def reset(self):
         """Resetea el estado dinámico de la operación a sus valores por defecto."""
         self.estado = 'DETENIDA'
-        # --- INICIO DE LA MODIFICACIÓN ---
         self.capital_inicial_usdt = 0.0
+        self.capital_actual_usdt = 0.0
         self.pnl_realizado_usdt = 0.0
         self.comercios_cerrados_contador = 0
-        self.comisiones_totales_usdt = 0.0
+        self.tiempo_inicio_ejecucion = None
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
-        self.tiempo_inicio_ejecucion = None
-        
-        # Resetea el objeto de balances lógicos
+        self.comisiones_totales_usdt = 0.0
         if hasattr(self, 'balances') and self.balances and hasattr(self.balances, 'reset'):
             self.balances.reset()
         else:
             self.balances = LogicalBalances()
-        # --- FIN DE LA MODIFICACIÓN ---
-
-
-# AÑADIR ESTO EN: core/strategy/entities/__init__.py
-
-@dataclass
-class PhysicalPosition:
-    """Representa el estado agregado de una posición física en el exchange."""
-    avg_entry_price: float = 0.0
-    total_size_contracts: float = 0.0
-    total_margin_usdt: float = 0.0
-    est_liq_price: Optional[float] = None
-    last_update_ts: Optional[datetime.datetime] = None

@@ -15,8 +15,10 @@ import re
 import numpy as np
 
 try:
-    from core.strategy.om._entities import Operacion
+    from core.strategy.entities import Operacion
+    from core import utils
 except ImportError:
+    utils = None
     class Operacion:
         def __init__(self):
             self.estado = 'DESCONOCIDO'
@@ -31,8 +33,10 @@ except ImportError:
             self.accion_al_finalizar = 'N/A'
             self.pnl_realizado_usdt = 0.0
             self.capital_inicial_usdt = 0.0
+            self.capital_actual_usdt = 0.0
             self.comercios_cerrados_contador = 0
             self.comisiones_totales_usdt = 0.0
+            self.total_reinvertido_usdt = 0.0 # Añadido para el nuevo layout
             self.tipo_cond_entrada = 'N/A'
             self.valor_cond_entrada = 0.0
             self.tipo_cond_salida = None
@@ -44,6 +48,11 @@ except ImportError:
             self.sl_roi_pct = None
             self.tiempo_maximo_min = None
             self.max_comercios = None
+            class Balances:
+                def __init__(self):
+                    self.profit_balance = 0.0
+            self.balances = Balances()
+
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -62,22 +71,15 @@ def _get_terminal_width():
     except:
         return 90
 
-# --- INICIO DE LA MODIFICACIÓN: Helper para unificar el ancho de las cajas ---
 def _get_unified_box_width() -> int:
     """
     Calcula un ancho unificado para todas las cajas de esta pantalla,
     basado en el contenido más ancho (la tabla de posiciones) y el tamaño del terminal.
     """
     terminal_width = _get_terminal_width()
-    # Ancho mínimo requerido por la cabecera de la tabla de posiciones
-    # 'ID', 'Entrada', 'Tamaño', 'PNL (U)', 'SL', 'TP Act.', 'TS Status'
-    content_width = 7 + 9 + 8 + 10 + 9 + 9 + 20 + (6 * 2) # Suma de anchos + espacios
-    
-    # El ancho de la caja será el menor entre el contenido necesario y el ancho del terminal,
-    # con un máximo absoluto para no ser excesivamente ancho en pantallas grandes.
+    content_width = 7 + 9 + 8 + 10 + 9 + 9 + 20 + (6 * 2) 
     box_width = min(terminal_width - 2, content_width, 120)
     return box_width
-# --- FIN DE LA MODIFICACIÓN ---
 
 def _clean_ansi_codes(text: str) -> str:
     """Función de ayuda para eliminar códigos de color ANSI de un string."""
@@ -116,11 +118,11 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
-# --- Funciones de Visualización (Actualizadas para usar el ancho unificado) ---
+# --- Funciones de Visualización ---
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     """Muestra la sección de parámetros de la operación para un lado específico."""
-    box_width = _get_unified_box_width() # Usar ancho unificado
+    box_width = _get_unified_box_width()
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
@@ -142,11 +144,13 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     tiempo_ejecucion_str = "N/A"
     if operacion.tiempo_inicio_ejecucion:
         fecha_activacion_str = operacion.tiempo_inicio_ejecucion.strftime('%H:%M:%S %d-%m-%Y (UTC)')
-        duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
-        total_seconds = int(duration.total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+        # El tiempo solo se calcula y muestra si la operación está ACTIVA
+        if operacion.estado == 'ACTIVA':
+            duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
+            total_seconds = int(duration.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
     
     data = {
         "Tendencia": f"{color}{tendencia}{reset}",
@@ -164,10 +168,9 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         
     print("└" + "─" * (box_width - 2) + "┘")
 
-
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     """Muestra la sección de estadísticas de capital para un lado específico."""
-    box_width = _get_unified_box_width() # Usar ancho unificado
+    box_width = _get_unified_box_width()
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
@@ -178,73 +181,86 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
 
-    unrealized_pnl = 0.0
+    # 1. Calcular todas las métricas
+    pnl_realizado = operacion.pnl_realizado_usdt
+    pnl_no_realizado = 0.0
     for pos_data in summary.get(f'open_{side}_positions', []):
         entry = pos_data.get('entry_price', 0.0)
         size = pos_data.get('size_contracts', 0.0)
-        if side == 'long': unrealized_pnl += (current_price - entry) * size
-        else: unrealized_pnl += (entry - current_price) * size
+        if side == 'long': pnl_no_realizado += (current_price - entry) * size
+        else: pnl_no_realizado += (entry - current_price) * size
 
-    realized_pnl = operacion.pnl_realizado_usdt
-    total_pnl = realized_pnl + unrealized_pnl
-    initial_capital = operacion.capital_inicial_usdt
-    roi = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0.0
-    pnl_color, reset = ("\033[92m" if total_pnl >= 0 else "\033[91m"), "\033[0m"
+    pnl_total = pnl_realizado + pnl_no_realizado
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # 1. Obtener el balance de profits desde el objeto 'operacion'.
-    # Usamos getattr para seguridad, en caso de que el objeto no lo tuviera (aunque debería).
-    profit_balance = getattr(operacion.balances, 'profit_balance', 0.0)
-    profit_color = "\033[92m" if profit_balance > 0 else "" # Solo colorear si es positivo
-    # --- FIN DE LA MODIFICACIÓN ---
+    capital_inicial = operacion.capital_inicial_usdt
+    capital_actual = operacion.capital_actual_usdt
+    capital_promedio = (capital_inicial + capital_actual) / 2
+    
+    safe_division = utils.safe_division if utils else lambda n, d: n / d if d != 0 else 0
+    roi_realizado = safe_division(pnl_realizado, capital_promedio) * 100
+    roi_no_realizado = safe_division(pnl_no_realizado, capital_promedio) * 100
+    roi_total = safe_division(pnl_total, capital_promedio) * 100
 
-    capital_actual = initial_capital + realized_pnl
     balances_info = summary.get('logical_balances', {}).get(side, {})
     margen_uso = balances_info.get('used_margin', 0.0)
     margen_disp = balances_info.get('available_margin', 0.0)
     
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
-    ganancias_netas = total_pnl - comisiones_totales
-    netas_color = "\033[92m" if ganancias_netas >= 0 else "\033[91m"
-    
-    trades_abiertos = summary.get(f'open_{side}_positions_count', 0)
+    total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
+    profit_balance = getattr(operacion.balances, 'profit_balance', 0.0)
     trades_cerrados = operacion.comercios_cerrados_contador
 
-    data_top = {
-        "Capital Total Inicial": f"${initial_capital:.2f}",
-        "Capital Total Actual": f"${capital_actual:.2f}",
-        "Margen En Uso": f"${margen_uso:.2f}",
-        "Margen Disponible": f"${margen_disp:.2f}",
-        "PNL Operación": f"{pnl_color}{total_pnl:+.4f}${reset}",
-        "ROI Operación": f"{pnl_color}{roi:+.2f}%{reset}"
+    def get_color(value):
+        return "\033[92m" if value >= 0 else "\033[91m"
+    reset = "\033[0m"
+
+    # 2. Ensamblar los datos en secciones
+    data_capital = {
+        "Capital Inicial / Actual": f"${capital_inicial:.2f} / ${capital_actual:.2f}",
+        "Margen En Uso / Disponible": f"${margen_uso:.2f} / ${margen_disp:.2f}",
+        "Capital Base (Promedio)": f"${capital_promedio:.2f}",
     }
-    
-    data_bottom = {
-        "Ganancias Netas": f"{netas_color}{ganancias_netas:+.4f}{reset}",
+    data_pnl = {
+        "PNL Realizado": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset}",
+        "PNL No Realizado": f"{get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
+        "PNL Total": f"{get_color(pnl_total)}{pnl_total:+.4f}${reset}",
+    }
+    data_roi = {
+        "ROI Realizado": f"{get_color(roi_realizado)}{roi_realizado:+.2f}%{reset}",
+        "ROI No Realizado": f"{get_color(roi_no_realizado)}{roi_no_realizado:+.2f}%{reset}",
+        "ROI Total": f"{get_color(roi_total)}{roi_total:+.2f}%{reset}",
+    }
+    data_otros = {
         "Comisiones Totales": f"${comisiones_totales:.4f}",
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # 2. Añadir la nueva métrica al diccionario de datos a mostrar.
-        "Transferido a PROFIT": f"{profit_color}${profit_balance:+.4f}{reset}",
-        # --- FIN DE LA MODIFICACIÓN ---
-        "Trades Abiertos": str(trades_abiertos),
-        "Trades Cerrados": str(trades_cerrados)
+        "Total Reinvertido": f"${total_reinvertido:.4f}",
+        "Transferido a PROFIT": f"{get_color(profit_balance)}{profit_balance:+.4f}{reset}",
+        "Trades Cerrados": str(trades_cerrados),
     }
 
-    max_key_len = max(len(_clean_ansi_codes(k)) for k in list(data_top.keys()) + list(data_bottom.keys()))
-    for key, value in data_top.items():
+    all_keys = list(data_capital.keys()) + list(data_pnl.keys()) + list(data_roi.keys()) + list(data_otros.keys())
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in all_keys)
+
+    # 3. Renderizar secciones
+    for key, value in data_capital.items():
+        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
+    
+    print("├" + "─" * (box_width - 2) + "┤")
+    for key, value in data_pnl.items():
+        print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
+        
+    print("├" + "─" * (box_width - 2) + "┤")
+    for key, value in data_roi.items():
         print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
 
     print("├" + "─" * (box_width - 2) + "┤")
-
-    for key, value in data_bottom.items():
+    for key, value in data_otros.items():
         print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
-        
+
     print("└" + "─" * (box_width - 2) + "┘")
-    
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     """Muestra la tabla de posiciones abiertas y datos agregados."""
-    box_width = _get_unified_box_width() # Usar ancho unificado
+    box_width = _get_unified_box_width()
 
     positions = summary.get(f'open_{side}_positions', [])
     max_pos = operacion.max_posiciones_logicas if operacion else 'N/A'
@@ -258,7 +274,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
     else:
         header = f"  {'ID':<7} {'Entrada':>9} {'Tamaño':>8} {'PNL (U)':>10} {'SL':>9} {'TP Act.':>9} {'TS Status':<20}"
         
-        # Ajustamos el ancho del separador para que coincida con el contenido o el ancho de la caja
         separator_width = min(len(_clean_ansi_codes(header)) -1, box_width - 2)
         print("├" + "─" * separator_width + "┤")
         print(_truncate_text(header, box_width - 2))
@@ -302,7 +317,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
 def _display_operation_conditions(operacion: Operacion):
     """Muestra la sección de condiciones de entrada y salida de la operación."""
-    box_width = _get_unified_box_width() # Usar ancho unificado
+    box_width = _get_unified_box_width()
     
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Condiciones de la Operación", box_width, 'center'))

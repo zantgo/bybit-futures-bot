@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import timezone
 
 try:
-    from .._entities import Operacion
+    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
 except ImportError:
     class Operacion: pass
 

@@ -17,9 +17,6 @@ from . import _api as api
 # --- Exposición de las Clases Principales ---
 # Se exponen las clases para que puedan ser instanciadas por el 'runner' o el
 # ensamblador de dependencias en una capa superior.
-# --- INICIO DE LA MODIFICACIÓN ---
-# from ._balance import BalanceManager # Comentado/Eliminado: Se elimina la importación de BalanceManager
-# --- FIN DE LA MODIFICACIÓN ---
 from ._position_state import PositionState
 from ._executor import PositionExecutor
 from .manager import PositionManager
@@ -29,9 +26,6 @@ from .manager import PositionManager
 __all__ = [
     'api',
     'PositionManager',
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # 'BalanceManager', # Comentado/Eliminado: Se elimina BalanceManager de la API pública del paquete
-    # --- FIN DE LA MODIFICACIÓN ---
     'PositionState',
     'PositionExecutor',
 ]

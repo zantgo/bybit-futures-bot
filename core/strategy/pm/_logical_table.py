@@ -8,7 +8,7 @@ import pandas as pd
 try:
     from core.exchange import AbstractExchange
     from core.logging import memory_logger
-    from ._entities import LogicalPosition
+    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
 except ImportError:
     class AbstractExchange: pass
     class LogicalPosition: pass

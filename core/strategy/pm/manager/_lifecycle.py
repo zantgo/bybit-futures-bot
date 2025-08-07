@@ -8,8 +8,7 @@ from datetime import timezone
 
 try:
     # --- INICIO DE LA MODIFICACIÓN ---
-    # Se importa la entidad Operacion desde su única fuente de verdad en 'om'.
-    from core.strategy.om._entities import Operacion
+    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
     # --- FIN DE LA MODIFICACIÓN ---
     from core.exchange import AbstractExchange
 except ImportError:
@@ -41,13 +40,7 @@ class _LifecycleManager:
         self._total_realized_pnl_long: float = 0.0
         self._total_realized_pnl_short: float = 0.0
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se eliminan los atributos de estado de los disyuntores de sesión.
-        # self._session_tp_hit: bool = False
-        # self._global_stop_loss_roi_pct: Optional[float] = None
-        # self._global_take_profit_roi_pct: Optional[float] = None
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        
     def set_executor(self, executor: Any):
         """Inyecta el executor después de la inicialización para romper la dependencia circular."""
         self._executor = executor
@@ -59,14 +52,7 @@ class _LifecycleManager:
         self._reset_all_states()
         self._operation_mode = operation_mode
         self._session_start_time = datetime.datetime.now(timezone.utc)
-        
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina la carga de la configuración de límites de sesión.
-        # session_limits = self._config.SESSION_CONFIG["SESSION_LIMITS"]
-        # self._global_stop_loss_roi_pct = session_limits["ROI_SL"]["PERCENTAGE"] if session_limits["ROI_SL"]["ENABLED"] else None
-        # self._global_take_profit_roi_pct = session_limits["ROI_TP"]["PERCENTAGE"] if session_limits["ROI_TP"]["ENABLED"] else None
-        # --- FIN DE LA MODIFICACIÓN ---
-
+     
         self._position_state.initialize(is_live_mode=True)
         self._initialized = True
         self._memory_logger.log("PositionManager inicializado. Gestionando estado de posiciones.", level="INFO")
@@ -78,10 +64,3 @@ class _LifecycleManager:
         self._total_realized_pnl_long = 0.0
         self._total_realized_pnl_short = 0.0
         self._session_start_time = None
-
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se eliminan los atributos de estado de los disyuntores de sesión del reseteo.
-        # self._session_tp_hit = False
-        # self._global_stop_loss_roi_pct = None
-        # self._global_take_profit_roi_pct = None
-        # --- FIN DE LA MODIFICACIÓN ---

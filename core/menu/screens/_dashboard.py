@@ -1,3 +1,5 @@
+# ./core/menu/screens/dashboard.py
+
 """
 Módulo para la Pantalla del Dashboard de Sesión.
 """
@@ -25,8 +27,13 @@ from . import _log_viewer, operation_manager
 try:
     from core.strategy.sm import api as sm_api
     from core.strategy.pm import api as pm_api
+    # --- INICIO DE LA MODIFICACIÓN #1 ---
+    # Importamos dependencias necesarias para los cálculos
+    from core.strategy.om import api as om_api
+    from core import utils
+    # --- FIN DE LA MODIFICACIÓN #1 ---
 except ImportError:
-    sm_api = pm_api = None
+    sm_api = pm_api = om_api = utils = None
 
 
 # --- Inyección de Dependencias ---
@@ -176,8 +183,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
     press_enter_to_continue()
 
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Se reintroduce la función _render_session_status_block con la lógica simplificada.
 def _render_session_status_block(summary: Dict[str, Any], box_width: int):
     """Imprime el bloque de Estado de Sesión con el estilo y formato correctos."""
     session_start_time = pm_api.get_session_start_time()
@@ -190,12 +195,19 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         duration_seconds = (now_utc - start_time_utc).total_seconds()
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
     
-    # El PNL total realizado de la sesión se usa para "Total Transferido"
+    total_capital_actual = 0.0
+    if om_api:
+        long_op = om_api.get_operation_by_side('long')
+        short_op = om_api.get_operation_by_side('short')
+        if long_op: total_capital_actual += long_op.capital_actual_usdt
+        if short_op: total_capital_actual += short_op.capital_actual_usdt
+        
     transferido_val = summary.get('total_realized_pnl_session', 0.0)
 
     data = {
         "Inicio Sesión": start_time_str,
         "Duración": duration_str,
+        "Total Capital Actual": f"${total_capital_actual:.2f} USDT",
         "Total Transferido a PROFIT": f"{transferido_val:+.4f} USDT"
     }
     
@@ -210,7 +222,6 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         print(_create_box_line(content, box_width))
     
     print("└" + "─" * (box_width - 2) + "┘")
-# --- FIN DE LA MODIFICACIÓN ---
 
 
 def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box_width: int):
@@ -255,29 +266,50 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
 
 
 def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
-    """Imprime el bloque de Estado de Operaciones con el nuevo formato conciso."""
+    """Imprime el bloque de Estado de Operaciones con el desglose de PNL y ROI."""
+    if not all([om_api, utils]):
+        print("Error: Dependencias om_api o utils no disponibles.")
+        return
+
     sides = ['long', 'short']
     data = {side: {} for side in sides}
+    current_price = summary.get('current_market_price', 0.0)
 
     for side in sides:
-        op_info = summary.get('operations_info', {}).get(side, {})
+        operacion = om_api.get_operation_by_side(side)
+        if not operacion:
+            data[side]['Estado'] = 'NO_DISPONIBLE'
+            continue
+            
+        # Obtener datos de balances del resumen del SM
         balance_info = summary.get('logical_balances', {}).get(side, {})
-        pnl = summary.get(f'operation_{side}_pnl', 0.0)
-        roi = summary.get(f'operation_{side}_roi', 0.0)
-        ganancias_netas = pnl - summary.get(f'comisiones_totales_usdt_{side}', 0.0)
-        capital_usado = balance_info.get('used_margin', 0.0)
-        capital_operativo = balance_info.get('operational_margin', 0.0)
-        max_pos_logicas = 0
-        op = _deps.get("operation_manager_api_module").get_operation_by_side(side)
-        if op: max_pos_logicas = op.max_posiciones_logicas
+        
+        # Calcular PNL No Realizado
+        pnl_no_realizado = 0.0
+        for pos_data in summary.get(f'open_{side}_positions', []):
+            entry = pos_data.get('entry_price', 0.0)
+            size = pos_data.get('size_contracts', 0.0)
+            if side == 'long': pnl_no_realizado += (current_price - entry) * size
+            else: pnl_no_realizado += (entry - current_price) * size
+        
+        # Calcular ROI Total
+        pnl_total = operacion.pnl_realizado_usdt + pnl_no_realizado
+        capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
+        roi_total = utils.safe_division(pnl_total, capital_promedio) * 100
+
+        def get_color(value):
+            return "\033[92m" if value >= 0 else "\033[91m"
+        reset = "\033[0m"
 
         data[side] = {
-            'Estado': op_info.get('estado', 'DETENIDA').upper(),
-            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)} / {max_pos_logicas}",
-            'Capital (Usado/Total)': f"${capital_usado:.2f} / ${capital_operativo:.2f}",
-            'Ganancias Netas': f"${ganancias_netas:.4f}",
-            'PNL': f"{pnl:.4f}",
-            'ROI': f"{roi:+.2f}%",
+            'Estado': operacion.estado.upper(),
+            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)} / {operacion.max_posiciones_logicas}",
+            'Capital Inicial': f"${operacion.capital_inicial_usdt:.2f}",
+            'Capital Actual': f"${operacion.capital_actual_usdt:.2f}",
+            'Margen En Uso': f"${balance_info.get('used_margin', 0.0):.2f}",
+            'Margen Disponible': f"${balance_info.get('available_margin', 0.0):.2f}",
+            'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f} USDT{reset}",
+            'ROI Total': f"{get_color(roi_total)}{roi_total:+.2f}%{reset}",
         }
 
     width_col = (box_width - 3) // 2
@@ -287,10 +319,10 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
     
     labels = [
-        'Estado', 'Posiciones', 'Capital (Usado/Total)',
-        'Ganancias Netas', 'PNL', 'ROI'
+        'Estado', 'Posiciones', 'Capital Inicial', 'Capital Actual',
+        'Margen En Uso', 'Margen Disponible', 'Transferido a PROFIT', 'ROI Total'
     ]
-    max_label_len = min(max(len(k) for k in labels), width_col - 10) 
+    max_label_len = min(max(len(k) for k in labels), width_col - 12) 
     
     for label in labels:
         long_val = data['long'].get(label, 'N/A')
@@ -330,13 +362,9 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     print(f"{now_str:^{box_width}}")
     print(header_line)
     
-    _render_signal_status_block(summary, config_module, box_width)
-    
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se reintroduce la llamada a _render_session_status_block y se mantiene la corrección del TypeError.
     _render_session_status_block(summary, box_width)
+    _render_signal_status_block(summary, config_module, box_width)
     _render_operations_status_block(summary, box_width)
-    # --- FIN DE LA MODIFICACIÓN ---
     
 
 def show_dashboard_screen(session_manager: Any):
