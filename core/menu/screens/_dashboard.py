@@ -278,7 +278,7 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         reset = "\033[0m"
 
         # --- INICIO DE LA MODIFICACIÓN ---
-        # Calcular capital lógico en uso y disponible para consistencia con la otra pantalla.
+        # Calcular capital lógico en uso y disponible directamente desde la operación
         open_positions_count = summary.get(f'open_{side}_positions_count', 0)
         capital_logico_en_uso = open_positions_count * operacion.tamaño_posicion_base_usdt
         capital_logico_disponible = operacion.capital_logico_disponible_usdt
@@ -286,12 +286,11 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
 
         data[side] = {
             'Estado': operacion.estado.upper(),
-            'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)}/{operacion.max_posiciones_logicas}",
+            'Posiciones': f"{open_positions_count}/{operacion.max_posiciones_logicas}",
             'Capital Inicial': f"${operacion.capital_inicial_usdt:.2f}",
             'Equity Total (Hist.)': f"${operacion.equity_total_usdt:.2f}",
             'Cap. Lógico (Uso/Disp.)': f"${capital_logico_en_uso:.2f} / ${capital_logico_disponible:.2f}",
             'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f}{reset}",
-            'Total Reinvertido': f"${operacion.total_reinvertido_usdt:.4f}",
             'ROI Total': f"{get_color(roi_total)}{roi_total:+.2f}%{reset}",
         }
 
@@ -303,8 +302,7 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     
     labels = [
         'Estado', 'Posiciones', 'Capital Inicial', 'Equity Total (Hist.)',
-        'Cap. Lógico (Uso/Disp.)', 'Transferido a PROFIT', 
-        'Total Reinvertido', 'ROI Total'
+        'Cap. Lógico (Uso/Disp.)', 'Transferido a PROFIT', 'ROI Total'
     ]
     max_label_len = min(max(len(k) for k in labels), width_col - 12) 
     
