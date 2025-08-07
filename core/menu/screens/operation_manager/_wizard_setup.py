@@ -21,7 +21,7 @@ from ..._helpers import (
     MENU_STYLE,
     UserInputCancelled,
     _get_terminal_width,
-    _create_config_box_line,
+    _create_config_box_line, # La función importada
     _truncate_text,
     _clean_ansi_codes,
 )
@@ -43,7 +43,7 @@ def init(dependencies: Dict[str, Any]):
 
 def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     """
-    Muestra la caja con la configuración actual de la operación, centrada en la lista de posiciones.
+    Muestra la caja con la configuración actual de la operación, con formato de tabla corregido.
     """
     action = "Modificando" if is_modification else "Creando Nueva"
     tendencia = "LONG" if params.get('tendencia') == 'LONG_ONLY' else "SHORT"
@@ -54,16 +54,20 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         content = f"  {label:<{key_len}} : {value}"
         print(_create_config_box_line(content, box_width))
 
-    print(_create_config_box_line("Configuración de Capital y Posiciones", box_width))
+    # --- INICIO DE LA CORRECCIÓN ---
+    # La función _create_config_box_line ya no acepta 'alignment'.
+    # Para centrar el texto, lo hacemos manualmente antes de pasar el contenido.
+    title_capital = "Configuración de Capital y Posiciones"
+    print(_create_config_box_line(title_capital.center(box_width - 4), box_width))
+    # --- FIN DE LA CORRECCIÓN ---
     
     posiciones = params.get('posiciones', [])
     capital_operativo_total = sum(p.get('capital_asignado', 0.0) for p in posiciones)
     
+    print("├" + "─" * (box_width - 2) + "┤")
     header = f"  {'ID':<10} {'Estado':<12} {'Capital Asignado':>20}"
-    separator_width = min(len(_clean_ansi_codes(header)) - 1, box_width - 2)
-    print("├" + "─" * separator_width + "┤")
-    print(_truncate_text(header, box_width - 2))
-    print("├" + "─" * separator_width + "┤")
+    print(_create_config_box_line(_truncate_text(header, box_width-4), box_width))
+    print("├" + "─" * (box_width - 2) + "┤")
     
     for pos in posiciones:
         estado_val = pos.get('estado', 'N/A')
@@ -74,14 +78,13 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
             f"{color}{estado_val:<12}{reset} "
             f"{pos.get('capital_asignado', 0.0):>20.2f} USDT"
         )
-        print(_truncate_text(line, box_width - 2))
+        print(_create_config_box_line(_truncate_text(line, box_width - 4), box_width))
     
     print("├" + "─" * (box_width - 2) + "┤")
 
     capital_data = {
         "Capital Operativo Total": f"${capital_operativo_total:.2f} USDT",
         "Total de Posiciones": f"{len(posiciones)} ({sum(1 for p in posiciones if p.get('estado') == 'ABIERTA')} Abiertas, {sum(1 for p in posiciones if p.get('estado') == 'PENDIENTE')} Pendientes)",
-        # <<-- CAMBIO: Se muestra el apalancamiento a nivel de operación.
         "Apalancamiento (Fijo)": f"{params.get('apalancamiento', 0.0):.1f}x",
     }
     max_key_len = max(len(k) for k in capital_data.keys())
@@ -89,7 +92,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         _print_line(label, value, max_key_len)
     
     print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_config_box_line("Riesgo por Posición", box_width))
+    title_riesgo = "Riesgo por Posición"
+    print(_create_config_box_line(title_riesgo.center(box_width - 4), box_width))
     risk_data = {
         "SL Individual (%)": params.get('sl_posicion_individual_pct') or "Desactivado",
         "Activación TSL (%)": params.get('tsl_activacion_pct') or "Desactivado",
@@ -100,8 +104,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         _print_line(label, value, max_key_len)
 
     print("├" + "─" * (box_width - 2) + "┤")
-    # ... (el resto de la función de display no cambia)
-    print(_create_config_box_line("Condición de Entrada", box_width))
+    title_entrada = "Condición de Entrada"
+    print(_create_config_box_line(title_entrada.center(box_width - 4), box_width))
     if params.get('tipo_cond_entrada') == 'MARKET':
         entry_cond_str = "Inmediata (Precio de Mercado)"
     elif params.get('tipo_cond_entrada') == 'PRICE_ABOVE':
@@ -113,7 +117,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     _print_line("Condición", entry_cond_str, len("Condición"))
     
     print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_config_box_line("Condiciones y Límites de Salida (Cualquiera activa la salida)", box_width))
+    title_salida = "Condiciones y Límites de Salida"
+    print(_create_config_box_line(title_salida.center(box_width - 4), box_width))
     
     if params.get('tipo_cond_salida'):
         op = ">" if params.get('tipo_cond_salida') == 'PRICE_ABOVE' else "<"
@@ -136,13 +141,11 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         _print_line(label, value, max_key_len)
     
     print("├" + "─" * (box_width - 2) + "┤")
-    _print_line("Acción al Finalizar", params.get('accion_al_finalizar', 'PAUSAR'), max_key_len)
+    _print_line("Acción al Finalizar", params.get('accion_al_finalizar', 'PAUSAR').upper(), max_key_len)
 
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _manage_position_list(params: Dict) -> bool:
-    """Submenú para gestionar la lista de posiciones."""
-    # ... (esta función auxiliar no necesita cambios)
     while True:
         clear_screen()
         print_tui_header("Gestor de Lista de Posiciones")
@@ -167,23 +170,22 @@ def _manage_position_list(params: Dict) -> bool:
         choice = menu.show()
 
         try:
-            if choice == 0: # Añadir
+            if choice == 0:
                 capital = get_input("Capital a asignar para la nueva posición (USDT)", float, 1.0, min_val=0.1)
                 apalancamiento = params.get('apalancamiento', 10.0)
                 new_pos = {
                     'id': f"pos_{uuid.uuid4().hex[:8]}",
                     'estado': 'PENDIENTE',
                     'capital_asignado': capital,
-                    # Ya no se asigna apalancamiento individual
                     'valor_nominal': capital * apalancamiento,
                     'entry_timestamp': None, 'entry_price': None, 'margin_usdt': 0.0,
                     'size_contracts': 0.0, 'tsl_activation_pct_at_open': 0.0,
                     'tsl_distance_pct_at_open': 0.0, 'ts_is_active': False
                 }
                 params['posiciones'].append(new_pos)
-                return True # Hubo un cambio
+                return True
             
-            elif choice == 1: # Modificar todas las pendientes
+            elif choice == 1:
                 if not has_pending:
                     print("\nNo hay posiciones pendientes para modificar."); time.sleep(2)
                     continue
@@ -194,7 +196,7 @@ def _manage_position_list(params: Dict) -> bool:
                         pos['valor_nominal'] = nuevo_capital * params.get('apalancamiento', 10.0)
                 return True
 
-            elif choice == 2: # Eliminar última pendiente
+            elif choice == 2:
                 if not has_pending:
                     print("\nNo hay posiciones pendientes para eliminar."); time.sleep(2)
                     continue
@@ -204,16 +206,14 @@ def _manage_position_list(params: Dict) -> bool:
                         print("\nÚltima posición pendiente eliminada."); time.sleep(1.5)
                         return True
             
-            elif choice == 4 or choice is None: # Volver
-                return False # No hubo cambios en esta iteración
+            elif choice == 4 or choice is None:
+                return False
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
 
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
-    """Asistente unificado para crear o modificar una operación."""
-    # ... (la inicialización de `temp_params` no cambia significativamente)
     config_module = _deps.get("config_module")
     if not config_module:
         print("ERROR CRÍTICO: Módulo de configuración no encontrado.")
@@ -253,7 +253,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             'sl_posicion_individual_pct': defaults["RISK"]["INDIVIDUAL_SL_PCT"],
             'tsl_activacion_pct': defaults["RISK"]["TSL_ACTIVATION_PCT"],
             'tsl_distancia_pct': defaults["RISK"]["TSL_DISTANCE_PCT"],
-            # ... resto de los defaults no cambian ...
             'sl_roi_pct': defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["PERCENTAGE"] if defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["ENABLED"] else None,
             'tsl_roi_activacion_pct': defaults["OPERATION_LIMITS"]["ROI_TSL"].get("ACTIVATION_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None,
             'tsl_roi_distancia_pct': defaults["OPERATION_LIMITS"]["ROI_TSL"].get("DISTANCE_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None,
@@ -269,7 +268,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     params_changed = False
 
     while True:
-        # ... (el loop principal y el menú no cambian, solo la acción del `choice` 1)
         clear_screen()
         print_tui_header(f"Asistente de Operación {side.upper()}")
         
@@ -297,7 +295,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 if _manage_position_list(temp_params):
                     params_changed = True
             
-            elif choice == 1: # <<-- CAMBIO: Lógica simplificada para editar el apalancamiento.
+            elif choice == 1:
                 nuevo_apalancamiento = get_input("Nuevo Apalancamiento (se aplicará a todas las posiciones)", float, temp_params['apalancamiento'], min_val=1.0)
                 if nuevo_apalancamiento != temp_params['apalancamiento']:
                     temp_params['apalancamiento'] = nuevo_apalancamiento
@@ -305,8 +303,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                         pos['valor_nominal'] = pos['capital_asignado'] * nuevo_apalancamiento
                     params_changed = True
 
-            elif choice == 2: # Riesgo por Posición
-                # ... (esta lógica no cambia)
+            elif choice == 2:
                 print("\n--- Editando Riesgo por Posición ---")
                 temp_params['sl_posicion_individual_pct'] = get_input("Nuevo SL Individual (%)", float, temp_params.get('sl_posicion_individual_pct'), min_val=0.0, is_optional=True)
                 temp_params['tsl_activacion_pct'] = get_input("Nueva Activación TSL (%)", float, temp_params.get('tsl_activacion_pct'), min_val=0.0, is_optional=True)
@@ -316,15 +313,14 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     temp_params['tsl_distancia_pct'] = None
                 params_changed = True
 
-            # ... (el resto de las opciones del menú y la lógica de guardar/cancelar no cambian)
-            elif choice == 3: # Condición de Entrada
+            elif choice == 3:
                 entry_menu = TerminalMenu(["[1] Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a"], title="\nSelecciona la Condición de Entrada:").show()
                 if entry_menu == 0: temp_params.update({'tipo_cond_entrada': 'MARKET', 'valor_cond_entrada': 0.0})
                 elif entry_menu == 1: temp_params.update({'tipo_cond_entrada': 'PRICE_ABOVE', 'valor_cond_entrada': get_input("Activar si precio >", float)})
                 elif entry_menu == 2: temp_params.update({'tipo_cond_entrada': 'PRICE_BELOW', 'valor_cond_entrada': get_input("Activar si precio <", float)})
                 params_changed = True
 
-            elif choice == 4: # Condiciones y Límites de Salida
+            elif choice == 4:
                 print("\n--- Editando Condiciones y Límites de Salida ---")
                 exit_price_menu = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si precio SUPERIOR a", "[3] Salir si precio INFERIOR a"], title="Condición de Salida por Precio:").show()
                 if exit_price_menu == 0: temp_params.update({'tipo_cond_salida': None, 'valor_cond_salida': None})
@@ -351,7 +347,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 
                 params_changed = True
 
-            elif choice == 6: # Guardar
+            elif choice == 6:
                 if not params_changed and is_modification:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     break
@@ -367,7 +363,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     print(f"\n{msg}"); time.sleep(2.5)
                     break
             
-            elif choice == 7 or choice is None: # Cancelar
+            elif choice == 7 or choice is None:
                 if params_changed:
                     cancel_confirm = TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show()
                     if cancel_confirm == 0:

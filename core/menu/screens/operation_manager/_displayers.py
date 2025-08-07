@@ -15,18 +15,16 @@ import re
 import numpy as np
 
 try:
-    # <<-- CAMBIO: Se importa LogicalPosition para type hinting.
     from core.strategy.entities import Operacion, LogicalPosition
     from core import utils
 except ImportError:
     utils = None
-    # <<-- CAMBIO: Se actualiza el mock de Operacion con la nueva estructura de datos.
     class LogicalPosition:
         pass
     class Operacion:
         def __init__(self):
             self.estado, self.tendencia, self.accion_al_finalizar, self.tipo_cond_entrada = 'DESCONOCIDO', 'N/A', 'N/A', 'N/A'
-            self.apalancamiento, self.pnl_realizado_usdt, self.pnl_no_realizado_usdt_vivo = 0.0, 0.0, 0.0
+            self.apalancamiento, self.pnl_realizado_usdt, self.pnl_no_realizado_usdt_vivo = 10.0, 0.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
             self.total_reinvertido_usdt, self.valor_cond_entrada, self.valor_cond_salida = 0.0, 0.0, None
             self.tsl_roi_activacion_pct, self.tsl_roi_distancia_pct, self.sl_roi_pct = None, None, None
@@ -76,13 +74,24 @@ def _get_terminal_width():
 def _get_unified_box_width() -> int:
     """
     Calcula un ancho unificado para todas las cajas de esta pantalla,
-    basado en el contenido más ancho (la tabla de posiciones) y el tamaño del terminal.
+    basado en el contenido más ancho (las tablas de posiciones) y el tamaño del terminal.
     """
     terminal_width = _get_terminal_width()
-    # <<-- CAMBIO: Ancho ajustado para la nueva tabla de posiciones abiertas
-    content_width = 7 + 9 + 10 + 10 + 9 + 9 + 20 + (6 * 2) 
+    
+    # --- INICIO DE LA CORRECCIÓN: Cálculo de ancho robusto ---
+    # Ancho mínimo requerido para la tabla de posiciones abiertas
+    open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
+    
+    # Ancho mínimo requerido para la tabla de posiciones pendientes
+    pending_pos_content_width = 12 + 22 + 22
+
+    # El ancho de contenido es el máximo de los dos, más un poco de padding
+    content_width = max(open_pos_content_width, pending_pos_content_width) + 4
+    
+    # El ancho final de la caja es el menor entre el ancho del terminal, el contenido, y un máximo absoluto.
     box_width = min(terminal_width - 2, content_width, 120)
     return box_width
+    # --- FIN DE LA CORRECCIÓN ---
 
 def _clean_ansi_codes(text: str) -> str:
     """Función de ayuda para eliminar códigos de color ANSI de un string."""
@@ -124,7 +133,6 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
 # --- Funciones de Visualización ---
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
-    """Muestra la sección de parámetros de la operación para un lado específico."""
     box_width = _get_unified_box_width()
 
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -140,12 +148,8 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
     color, reset = color_map.get(tendencia, ""), "\033[0m"
     
-    # <<-- CAMBIO: La lógica de conteo de posiciones ahora usa las nuevas propiedades.
     pos_abiertas = operacion.posiciones_abiertas_count
     pos_total = len(operacion.posiciones)
-    # <<-- ANTERIOR:
-    # pos_abiertas = summary.get(f'open_{side}_positions_count', 0)
-    # pos_total = operacion.max_posiciones_logicas
 
     fecha_activacion_str = "N/A"
     tiempo_ejecucion_str = "N/A"
@@ -160,10 +164,8 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
     data = {
         "Tendencia": f"{color}{tendencia}{reset}",
-        # <<-- CAMBIO: Se elimina el tamaño base, se actualiza el conteo de posiciones.
-        # "Tamaño Base": f"${operacion.tamaño_posicion_base_usdt:.2f} USDT",
         "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
-        "Apalancamiento": f"{operacion.apalancamiento:.1f}x",
+        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
         "Fecha Activacion": fecha_activacion_str,
         "Tiempo Activa": tiempo_ejecucion_str
     }
@@ -176,7 +178,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
-    """Muestra la sección de estadísticas de capital, ahora basada en el nuevo modelo."""
     box_width = _get_unified_box_width()
 
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -188,16 +189,12 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
     
-    # <<-- CAMBIO: Toda esta sección ha sido reescrita para usar las nuevas propiedades de la entidad Operacion.
-    # <<-- La lógica de cálculo ahora está encapsulada en la entidad, haciendo esta vista mucho más limpia.
-
     def get_color(value): 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
     
-    # Obtener valores directamente de la operación
     pnl_realizado = operacion.pnl_realizado_usdt
-    pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo # Este valor se actualiza externamente
+    pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
     roi_twrr = operacion.twrr_roi
 
     data = {
@@ -208,7 +205,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Capital Disponible": f"${operacion.capital_disponible:.2f}",
         "--- RENDIMIENTO ---": "",
         "Equity Total (Histórico)": f"${operacion.equity_total_usdt:.2f}",
-        "Equity Actual (Vivo)": f"{get_color(operacion.equity_actual_vivo)}{operacion.equity_actual_vivo:+.2f}${reset}",
+        "Equity Actual (Vivo)": f"{get_color(operacion.equity_actual_vivo - operacion.capital_inicial_usdt)}{operacion.equity_actual_vivo:+.2f}${reset}",
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
         "ROI (TWRR)": f"{get_color(roi_twrr)}{roi_twrr:+.2f}%{reset}",
         "--- CONTADORES ---": "",
@@ -217,19 +214,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
 
-    # <<-- ANTERIOR: Lógica de cálculo que estaba en la vista
-    # pnl_realizado = operacion.pnl_realizado_usdt; pnl_no_realizado = 0.0
-    # for pos_data in summary.get(f'open_{side}_positions', []):
-    #     entry = pos_data.get('entry_price', 0.0); size = pos_data.get('size_contracts', 0.0)
-    #     pnl_no_realizado += (current_price - entry) * size if side == 'long' else (entry - current_price) * size
-    # pnl_total = pnl_realizado + pnl_no_realizado
-    # capital_inicial = operacion.capital_inicial_usdt
-    # equity_total_historico = operacion.equity_total_usdt
-    # equity_actual_vivo = operacion.balances.operational_margin + pnl_no_realizado
-    # safe_division = utils.safe_division if utils else lambda n, d: n / d if d != 0 else 0.0
-    # roi_total = safe_division(pnl_total, capital_inicial) * 100
-    # ... etc ...
-    
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():
         if "---" in key: 
@@ -239,7 +223,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
-    """Muestra la tabla de posiciones abiertas y PENDIENTES, y datos agregados."""
+    """Muestra la tabla de posiciones abiertas y PENDIENTES, con formato corregido."""
     box_width = _get_unified_box_width()
 
     # --- TABLA DE POSICIONES ABIERTAS ---
@@ -249,16 +233,14 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line(f"Posiciones Abiertas ({open_count}/{total_count})", box_width, 'center'))
+    print("├" + "─" * (box_width - 2) + "┤")
 
     if not open_positions:
-        print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("(No hay posiciones abiertas)", box_width, 'center'))
     else:
-        header = f"  {'ID':<7} {'Entrada':>9} {'Márgen':>10} {'PNL (U)':>10} {'SL':>9} {'TP Act.':>9} {'TS Status':<20}"
-        separator_width = min(len(_clean_ansi_codes(header)) -1, box_width - 2)
-        print("├" + "─" * separator_width + "┤")
-        print(_truncate_text(header, box_width - 2))
-        print("├" + "─" * separator_width + "┤")
+        header = f"  {'ID':<7} {'Entrada':>9} {'Márgen':>10} {'PNL (U)':>11} {'SL':>9} {'TP Act.':>9} {'TS Status':<20}"
+        print(_create_box_line(_truncate_text(header, box_width - 2), box_width))
+        print("├" + "─" * (box_width - 2) + "┤")
 
         for pos in open_positions:
             pnl = 0.0
@@ -285,26 +267,26 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             line = (
                 f"  {str(pos.id)[-6:]:<7} "
                 f"{entry_price:>9.4f} "
-                f"{pos.margin_usdt:>10.2f} " # <<-- CAMBIO: Se usa el margen real
-                f"{pnl_color}{pnl:>+10.4f}{reset} "
+                f"{pos.margin_usdt:>10.2f} "
+                f"{pnl_color}{pnl:>+11.4f}{reset} "
                 f"{sl_str:>9} "
                 f"{tp_act_str:>9} "
                 f"{ts_status_str:<20}"
             )
-            print(_truncate_text(line, box_width - 2))
+            print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
     print("└" + "─" * (box_width - 2) + "┘")
 
-    # --- NUEVA TABLA: POSICIONES PENDIENTES ---
+    # --- NUEVA TABLA: POSICIONES PENDIENTES (CON FORMATO CORREGIDO) ---
     pending_positions = operacion.posiciones_pendientes
     if pending_positions:
         print("┌" + "─" * (box_width - 2) + "┐")
         print(_create_box_line(f"Posiciones Pendientes ({len(pending_positions)})", box_width, 'center'))
+        print("├" + "─" * (box_width - 2) + "┤")
         
+        # --- INICIO DE LA CORRECCIÓN: Formato de tabla unificado ---
         header = f"  {'ID':<10} {'Capital Asignado':>20} {'Valor Nominal':>20}"
-        separator_width = min(len(_clean_ansi_codes(header)) -1, box_width - 2)
-        print("├" + "─" * separator_width + "┤")
-        print(_truncate_text(header, box_width - 2))
-        print("├" + "─" * separator_width + "┤")
+        print(_create_box_line(_truncate_text(header, box_width - 2), box_width))
+        print("├" + "─" * (box_width - 2) + "┤")
 
         for pos in pending_positions:
             line = (
@@ -312,12 +294,12 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
                 f"{pos.capital_asignado:>20.2f} USDT"
                 f"{pos.valor_nominal:>20.2f} USDT"
             )
-            print(_truncate_text(line, box_width-2))
+            print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
+        # --- FIN DE LA CORRECCIÓN ---
 
 
 def _display_operation_conditions(operacion: Operacion):
-    """Muestra la sección de condiciones de entrada y salida de la operación."""
     box_width = _get_unified_box_width()
 
     print("┌" + "─" * (box_width - 2) + "┐")
