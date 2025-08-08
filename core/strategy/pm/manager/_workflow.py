@@ -46,33 +46,47 @@ class _Workflow:
             if operacion.estado not in ['ACTIVA', 'PAUSADA']:
                 continue
 
-            open_positions = list(operacion.posiciones_abiertas)
+            # --- INICIO DE LA MODIFICACIÓN (Solución al bug del TSL individual) ---
+            # En lugar de iterar sobre una lista de objetos que puede quedar obsoleta,
+            # iteramos sobre una lista de índices. Esto nos permite obtener el estado
+            # más reciente de cada posición DENTRO del bucle.
             
-            if not open_positions:
+            # open_positions = list(operacion.posiciones_abiertas) # <-- LÍNEA ORIGINAL
+            all_positions = list(operacion.posiciones)
+            open_position_indices = [i for i, p in enumerate(all_positions) if p.estado == 'ABIERTA']
+            
+            # if not open_positions: # <-- LÍNEA ORIGINAL
+            if not open_position_indices:
                 continue
             
             positions_to_close: List[Dict[str, Any]] = []
-            
-            all_positions = list(operacion.posiciones)
 
-            for pos in open_positions:
-                try:
-                    original_index = next(i for i, p in enumerate(all_positions) if p.id == pos.id)
-                except StopIteration:
+            # for pos in open_positions: # <-- LÍNEA ORIGINAL CON BUG
+            for index in open_position_indices:
+                # Obtenemos la versión más reciente de la operación y la posición en cada iteración.
+                # Esto es redundante para la primera iteración, pero crucial para las siguientes
+                # para asegurar que vemos los cambios hechos por _update_trailing_stop.
+                current_operacion = self._om_api.get_operation_by_side(side)
+                if not current_operacion or index >= len(current_operacion.posiciones):
                     continue
                 
+                pos = current_operacion.posiciones[index]
+                
+                # La lógica de encontrar el índice original ya no es necesaria, ya que estamos iterando por índice.
+                # try: # <-- BLOQUE ORIGINAL
+                #     original_index = next(i for i, p in enumerate(all_positions) if p.id == pos.id)
+                # except StopIteration:
+                #     continue
+                original_index = index # El índice es nuestro punto de referencia.
+
                 sl_price = pos.stop_loss_price
                 if sl_price and ((side == 'long' and current_price <= sl_price) or (side == 'short' and current_price >= sl_price)):
                     positions_to_close.append({'index': original_index, 'reason': 'SL'})
                     continue 
                 
-                # --- INICIO DE LA MODIFICACIÓN (Solución al bug del TSL) ---
-                # 4. Se actualiza la llamada a _update_trailing_stop para no pasar el objeto 'pos',
-                #    que podría estar obsoleto. Solo pasamos el 'index'.
-                # self._update_trailing_stop(side, pos, original_index, current_price) # <-- LÍNEA ORIGINAL
                 self._update_trailing_stop(side, original_index, current_price)
-                # --- FIN DE LA MODIFICACIÓN ---
                 
+                # Obtenemos la operación actualizada DESPUÉS de la llamada al TSL
                 operacion_actualizada = self._om_api.get_operation_by_side(side)
                 if not operacion_actualizada: continue
                 
@@ -80,9 +94,12 @@ class _Workflow:
                     pos_actualizada = operacion_actualizada.posiciones[original_index]
                     ts_stop_price = pos_actualizada.ts_stop_price
                     if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or (side == 'short' and current_price >= ts_stop_price)):
+                        # Nos aseguramos de no añadir la misma posición dos veces a la lista de cierre
                         if not any(d['index'] == original_index for d in positions_to_close):
                             positions_to_close.append({'index': original_index, 'reason': 'TS'})
+            # --- FIN DE LA MODIFICACIÓN ---
 
+            # Es crucial ordenar por índice en reversa para no invalidar los índices de las posiciones restantes.
             for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
                 self._close_logical_position(
                     side, 
