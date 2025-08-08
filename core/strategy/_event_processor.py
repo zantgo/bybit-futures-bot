@@ -1,5 +1,3 @@
-# ./core/strategy/event_processor.py
-
 """
 Orquestador Principal del Procesamiento de Eventos.
 """
@@ -17,6 +15,7 @@ if TYPE_CHECKING:
     from core.strategy.pm import PositionManager
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
+    from core.strategy.entities import Operacion # Importación para type hint
 
 # --- Importaciones de Módulos del Proyecto ---
 try:
@@ -112,6 +111,18 @@ class EventProcessor:
             # 2. Procesar datos y generar señal de bajo nivel
             signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
             
+            # --- INICIO DE LA MODIFICACIÓN (Objetivo 2: Centralizar lógica) ---
+            # Se comenta la llamada a actualizar_pnl_vivo. Esta función será eliminada
+            # del OM API, ya que la caché de PNL no realizado en la entidad Operacion
+            # fue eliminada para evitar redundancia y posibles errores de sincronización.
+            # self._om_api.actualizar_pnl_vivo(
+            #     'long', summary.get('operation_long_pnl', 0.0) - long_op.pnl_realizado_usdt
+            # )
+            # self._om_api.actualizar_pnl_vivo(
+            #     'short', summary.get('operation_short_pnl', 0.0) - short_op.pnl_realizado_usdt
+            # )
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             # 3. Interacción con el Position Manager
             if self._pm_instance:
                 self._pm_instance.check_and_close_positions(current_price, current_timestamp)
@@ -135,12 +146,9 @@ class EventProcessor:
 
         try:
             for side in ['long', 'short']:
-                operacion = self._om_api.get_operation_by_side(side)
+                operacion: 'Operacion' = self._om_api.get_operation_by_side(side)
                 if not operacion:
                     continue
-
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # La lógica ahora se estructura por estado para mayor claridad.
 
                 # 1. Lógica de ENTRADA (solo aplica si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
@@ -158,51 +166,57 @@ class EventProcessor:
                 if operacion.estado in ['ACTIVA', 'PAUSADA', 'EN_ESPERA']:
                     exit_condition_met = False
                     reason = ""
-                    summary = self._pm_api.get_position_summary()
                     
-                    roi = 0.0
-                    if summary and 'error' not in summary:
-                        unrealized_pnl_side = 0.0
-                        for pos in summary.get(f'open_{side}_positions', []):
-                            entry = pos.get('entry_price', 0.0)
-                            size = pos.get('size_contracts', 0.0)
-                            if side == 'long': unrealized_pnl_side += (current_price - entry) * size
-                            else: unrealized_pnl_side += (entry - current_price) * size
-                        
-                        pnl_total_side = operacion.pnl_realizado_usdt + unrealized_pnl_side
-                        
-                        # capital_promedio = (operacion.capital_inicial_usdt + operacion.capital_actual_usdt) / 2
-                        # roi = self._utils.safe_division(pnl_total_side, capital_promedio) * 100
-                        
-                        # Corrección: El ROI siempre se calcula sobre el capital inicial para consistencia.
-                        # Esto elimina el "capital promedio" y el atributo 'capital_actual_usdt' que causaba el crash.
-                        roi = self._utils.safe_division(pnl_total_side, operacion.capital_inicial_usdt) * 100
+                    # --- INICIO DE LA MODIFICACIÓN (Objetivo 2: Centralizar lógica) ---
+                    # Se elimina el cálculo local y duplicado de ROI. En su lugar,
+                    # se llama al método centralizado get_live_performance() de la entidad Operacion,
+                    # que ya contiene la lógica TWRR correcta.
+                    
+                    # roi = 0.0 # <-- CÓDIGO ORIGINAL COMENTADO
+                    # summary = self._pm_api.get_position_summary() # <-- CÓDIGO ORIGINAL COMENTADO
+                    # if summary and 'error' not in summary: # <-- CÓDIGO ORIGINAL COMENTADO
+                    #     unrealized_pnl_side = 0.0 # <-- CÓDIGO ORIGINAL COMENTADO
+                    #     for pos in summary.get(f'open_{side}_positions', []): # <-- CÓDIGO ORIGINAL COMENTADO
+                    #         entry = pos.get('entry_price', 0.0) # <-- CÓDIGO ORIGINAL COMENTADO
+                    #         size = pos.get('size_contracts', 0.0) # <-- CÓDIGO ORIGINAL COMENTADO
+                    #         if side == 'long': unrealized_pnl_side += (current_price - entry) * size # <-- CÓDIGO ORIGINAL COMENTADO
+                    #         else: unrealized_pnl_side += (entry - current_price) * size # <-- CÓDIGO ORIGINAL COMENTADO
+                    #     
+                    #     pnl_total_side = operacion.pnl_realizado_usdt + unrealized_pnl_side # <-- CÓDIGO ORIGINAL COMENTADO
+                    #     
+                    #     roi = self._utils.safe_division(pnl_total_side, operacion.capital_inicial_usdt) * 100 # <-- CÓDIGO ORIGINAL COMENTADO
 
-                        tsl_act_pct = operacion.tsl_roi_activacion_pct
-                        tsl_dist_pct = operacion.tsl_roi_distancia_pct
+                    live_performance = operacion.get_live_performance(current_price, self._utils)
+                    roi = live_performance.get("roi_twrr_vivo", 0.0)
+                    
+                    # Todas las comprobaciones de TSL/SL por ROI ahora usan el valor TWRR correcto y consistente.
+                    tsl_act_pct = operacion.tsl_roi_activacion_pct
+                    tsl_dist_pct = operacion.tsl_roi_distancia_pct
+                    
+                    if tsl_act_pct is not None and tsl_dist_pct is not None:
+                        if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
+                            operacion.tsl_roi_activo = True
+                            operacion.tsl_roi_peak_pct = roi
+                            self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
+                            self._memory_logger.log(f"TSL-ROI para Operación {side.upper()} ACTIVADO. ROI: {roi:.2f}%, Pico: {operacion.tsl_roi_peak_pct:.2f}%", "INFO")
                         
-                        if tsl_act_pct is not None and tsl_dist_pct is not None:
-                            if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
-                                operacion.tsl_roi_activo = True
+                        if operacion.tsl_roi_activo:
+                            if roi > operacion.tsl_roi_peak_pct: 
                                 operacion.tsl_roi_peak_pct = roi
-                                self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
-                                self._memory_logger.log(f"TSL-ROI para Operación {side.upper()} ACTIVADO. ROI: {roi:.2f}%, Pico: {operacion.tsl_roi_peak_pct:.2f}%", "INFO")
+                                self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
                             
-                            if operacion.tsl_roi_activo:
-                                if roi > operacion.tsl_roi_peak_pct: 
-                                    operacion.tsl_roi_peak_pct = roi
-                                    self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
-                                
-                                umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
-                                if roi <= umbral_disparo: 
-                                    exit_condition_met, reason = True, f"TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
+                            umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
+                            if roi <= umbral_disparo: 
+                                exit_condition_met, reason = True, f"TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
 
-                        sl_roi_pct = operacion.sl_roi_pct
-                        if not exit_condition_met and sl_roi_pct is not None:
-                            if sl_roi_pct < 0 and roi <= sl_roi_pct:
-                                exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
-                            elif sl_roi_pct > 0 and roi >= sl_roi_pct:
-                                exit_condition_met, reason = True, f"TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
+                    sl_roi_pct = operacion.sl_roi_pct
+                    if not exit_condition_met and sl_roi_pct is not None:
+                        if sl_roi_pct < 0 and roi <= sl_roi_pct:
+                            exit_condition_met, reason = True, f"SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
+                        elif sl_roi_pct > 0 and roi >= sl_roi_pct:
+                            exit_condition_met, reason = True, f"TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
+
+                    # --- FIN DE LA MODIFICACIÓN ---
 
                     if not exit_condition_met and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_condition_met, reason = True, f"Límite de {operacion.max_comercios} trades"
@@ -224,7 +238,7 @@ class EventProcessor:
                         if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side)
                         elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
                         else: self._om_api.pausar_operacion(side)
-                # --- FIN DE LA MODIFICACIÓN ---
+        
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")

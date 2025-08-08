@@ -1,4 +1,4 @@
-# ./core/menu/screens/dashboard.py
+# ./core/menu/screens/_dashboard.py
 
 """
 Módulo para la Pantalla del Dashboard de Sesión.
@@ -275,17 +275,12 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             data[side]['Estado'] = 'NO_DISPONIBLE'
             continue
             
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # 1. Llamar al nuevo método para obtener todos los cálculos vivos
         live_performance = operacion.get_live_performance(current_price, utils)
         
-        # 2. Extraer los valores del diccionario resultante
         pnl_realizado = operacion.pnl_realizado_usdt
         pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
         equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
-        roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
-
-        # 3. Calcular ROI desglosado
+        
         roi_realizado = utils.safe_division(pnl_realizado, operacion.capital_inicial_usdt) * 100
         roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_inicial_usdt) * 100
         
@@ -293,7 +288,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             return "\033[92m" if value >= 0 else "\033[91m"
         reset = "\033[0m"
         
-        # 4. Actualizar el diccionario de datos para la TUI
         data[side] = {
             'Estado': operacion.estado.upper(),
             'Posiciones': f"{operacion.posiciones_abiertas_count}/{len(operacion.posiciones)}",
@@ -305,7 +299,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             'ROI Realizado': f"{get_color(roi_realizado)}{roi_realizado:+.2f}%{reset}",
             'ROI No Realizado': f"{get_color(roi_no_realizado)}{roi_no_realizado:+.2f}%{reset}",
         }
-        # --- FIN DE LA MODIFICACIÓN ---
 
     width_col = (box_width - 3) // 2
 
@@ -313,13 +306,11 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     print(f"│{'Operación LONG':^{width_col}}│{'Operación SHORT':^{width_col}}│")
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
 
-    # --- INICIO DE LA MODIFICACIÓN: Actualizar la lista de etiquetas ---
     labels = [
         'Estado', 'Posiciones', 'Equity Total (Hist.)', 'Equity Actual (Vivo)',
         'Transferido a PROFIT', 'PNL Realizado', 'PNL No Realizado',
         'ROI Realizado', 'ROI No Realizado'
     ]
-    # --- FIN DE LA MODIFICACIÓN ---
     
     max_label_len = min(max(len(k) for k in labels), width_col - 12) if labels else 0
 
@@ -366,7 +357,9 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
 
 
 def show_dashboard_screen(session_manager: Any):
-    # Se elimina la importación de _session_config_editor
+    # --- INICIO DE LA CORRECCIÓN: Re-importar el editor de sesión ---
+    from ._session_config_editor import show_session_config_editor_screen
+    
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module or not sm_api or not session_manager:
         print("ERROR CRÍTICO: Dependencias del Dashboard no disponibles.")
@@ -408,24 +401,28 @@ def show_dashboard_screen(session_manager: Any):
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
 
+        # --- INICIO DE LA CORRECCIÓN: Re-añadir la opción al menú ---
         menu_items = [
             "[1] Gestionar Operación LONG",
             "[2] Gestionar Operación SHORT",
             None,
-            "[3] Ver Logs en Tiempo Real",
+            "[3] Editar Configuración de Sesión",
+            "[4] Ver Logs en Tiempo Real",
             None,
             "[r] Refrescar",
             "[h] Ayuda",
             "[q] Finalizar Sesión y Volver al Menú Principal"
         ]
-
+        
+        # --- INICIO DE LA CORRECCIÓN: Ajustar el mapa de acciones para que coincida con los índices ---
         action_map = {
             0: 'manage_long',
             1: 'manage_short',
-            3: 'view_logs',
-            5: 'refresh',
-            6: 'help',
-            7: 'exit_session'
+            3: 'edit_config',
+            4: 'view_logs',
+            6: 'refresh',
+            7: 'help',
+            8: 'exit_session'
         }
 
         menu_options = helpers_module.MENU_STYLE.copy()
@@ -440,6 +437,11 @@ def show_dashboard_screen(session_manager: Any):
             operation_manager.show_operation_manager_screen(side_filter='long')
         elif action == 'manage_short':
             operation_manager.show_operation_manager_screen(side_filter='short')
+        # --- INICIO DE LA CORRECCIÓN: Re-añadir la lógica para la opción de menú ---
+        elif action == 'edit_config':
+            changes_made = show_session_config_editor_screen(config_module)
+            if changes_made:
+                sm_api.update_session_parameters(changes_made)
         elif action == 'view_logs':
             _log_viewer.show_log_viewer()
         elif action == 'refresh':

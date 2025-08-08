@@ -1,5 +1,3 @@
-# ./core/bot_controller/_manager.py
-
 """
 Módulo Gestor del Bot (BotController).
 
@@ -185,23 +183,17 @@ class BotController:
         except UserInputCancelled:
             return False, "Prueba cancelada por el usuario."
         
-        # --- INICIO DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
-        # 1. Definir los nombres de las cuentas al principio.
         long_account = self._config.BOT_CONFIG["ACCOUNTS"].get("LONGS")
         short_account = self._config.BOT_CONFIG["ACCOUNTS"].get("SHORTS")
 
         if not long_account or not short_account:
             return False, "Nombres de cuenta para LONGS o SHORTS no definidos en la configuración."
         
-        # 2. Banderas para saber si las posiciones se abrieron con éxito.
         long_position_opened = False
         short_position_opened = False
-        # --- FIN DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
-
+        
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
-        # --- INICIO DE LA INTEGRACIÓN: Se usa una única instancia del adaptador ---
         adapter = self._BybitAdapter(self._connection_manager)
-        # --- FIN DE LA INTEGRACIÓN ---
         
         if not adapter.initialize(symbol=ticker):
             print("FALLO.")
@@ -218,25 +210,13 @@ class BotController:
 
         try:
             print("\nEstableciendo apalancamiento...")
-            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para apalancamiento ---
-            # Se usa el adaptador para establecer el apalancamiento
             if not adapter.set_leverage(symbol=ticker, leverage=leverage, account_purpose='longs'):
                 return False, f"Fallo al establecer apalancamiento en '{long_account}'."
             if not adapter.set_leverage(symbol=ticker, leverage=leverage, account_purpose='shorts'):
                 return False, f"Fallo al establecer apalancamiento en '{short_account}'."
-            
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # # Se establece en ambas cuentas para asegurar consistencia
-            # if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=long_account):
-            #     return False, f"Fallo al establecer apalancamiento en '{long_account}'."
-            # if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=short_account):
-            #     return False, f"Fallo al establecer apalancamiento en '{short_account}'."
-            # --- FIN DE LA INTEGRACIÓN ---
             print(" -> Éxito.")
 
             print(f"Abriendo posición LONG en '{long_account}'...")
-            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para abrir posición LONG ---
-            # Se crea un objeto StandardOrder y se usa el adaptador
             long_order = StandardOrder(
                 symbol=ticker, side="buy", order_type="market", quantity_contracts=qty_to_trade
             )
@@ -244,25 +224,11 @@ class BotController:
             
             if not success_long:
                 return False, f"Fallo al abrir LONG: {msg_long}"
-
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
-            # if not long_res or long_res.get('retCode') != 0:
-            #     return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
-            # --- FIN DE LA INTEGRACIÓN ---
-            
-            # --- INICIO DE LA INTEGRACIÓN: Mensaje de éxito actualizado ---
             print(f" -> Éxito. OrderID: {msg_long}")
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
-            # --- FIN DE LA INTEGRACIÓN ---
-            
-            long_position_opened = True # Marcar como abierta
+            long_position_opened = True
             time.sleep(1)
 
             print(f"Abriendo posición SHORT en '{short_account}'...")
-            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para abrir posición SHORT ---
-            # Se crea un objeto StandardOrder y se usa el adaptador
             short_order = StandardOrder(
                 symbol=ticker, side="sell", order_type="market", quantity_contracts=qty_to_trade
             )
@@ -270,28 +236,12 @@ class BotController:
 
             if not success_short:
                 return False, f"Fallo al abrir SHORT: {msg_short}"
-            
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
-            # if not short_res or short_res.get('retCode') != 0:
-            #     return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
-            # --- FIN DE LA INTEGRACIÓN ---
-            
-            # --- INICIO DE LA INTEGRACIÓN: Mensaje de éxito actualizado ---
             print(f" -> Éxito. OrderID: {msg_short}")
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # print(f" -> Éxito. OrderID: {short_res.get('result', {}).get('orderId')}")
-            # --- FIN DE LA INTEGRACIÓN ---
-            
-            short_position_opened = True # Marcar como abierta
+            short_position_opened = True
             time.sleep(2)
 
         finally:
-            # --- INICIO DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
-            # 3. El bloque de limpieza ahora usa las banderas para actuar de forma segura.
             print("\n--- Fase de Limpieza ---")
-            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para cerrar posiciones ---
-            # Se usa el adaptador para cerrar las posiciones
             if long_position_opened:
                 print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
                 close_long_order = StandardOrder(
@@ -308,18 +258,7 @@ class BotController:
                 )
                 adapter.place_order(close_short_order, account_purpose='shorts')
 
-            # --- CÓDIGO ANTIGUO COMENTADO ---
-            # if long_position_opened:
-            #     print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
-            #     self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
-            # 
-            # if short_position_opened:
-            #     print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
-            #     self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
-            # --- FIN DE LA INTEGRACIÓN ---
-            
             self._memory_logger.log("BotController[Test]: Limpieza completada.", "INFO")
-            # --- FIN DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
 
         return True, f"Prueba de trading completada con éxito para {ticker}."
     
@@ -333,7 +272,13 @@ class BotController:
         try:
             exchange_adapter = self._BybitAdapter(self._connection_manager)
             
-            om_instance = self._OperationManager(config=self._config, memory_logger_instance=self._memory_logger)
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se añade la dependencia 'utils' al instanciar OperationManager.
+            # El BotController ya tiene acceso a self._utils desde su propio __init__.
+            # om_instance = self._OperationManager(config=self._config, memory_logger_instance=self._memory_logger) # <-- LÍNEA ORIGINAL
+            om_instance = self._OperationManager(config=self._config, utils=self._utils, memory_logger_instance=self._memory_logger)
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             self._om_api.init_om_api(om_instance)
             
             position_state = self._PositionState(config=self._config, utils=self._utils, exchange_adapter=exchange_adapter)
@@ -402,7 +347,7 @@ class BotController:
 
         for key, value in params.items():
             original_value = None
-            key_to_update = None
+            # key_to_update = None
             
             # Mapeamos las claves públicas a las rutas internas del diccionario de configuración.
             if key == 'Exchange' and 'EXCHANGE_NAME' in bot_config:
@@ -428,8 +373,10 @@ class BotController:
                 # Pero si se llama directamente, lo actualizamos.
                 original_value = bot_config['TICKER']['SYMBOL']
                 if original_value != value:
-                    self.validate_and_update_ticker_symbol(value) # Usamos el método con validación
-                    config_changed = True # Asumimos que cambió si se llamó a la función
+                    # self.validate_and_update_ticker_symbol(value) # Usamos el método con validación
+                    self.validate_and_update_ticker_symbol(value)
+                    # config_changed = True # Asumimos que cambió si se llamó a la función
+                    config_changed = True
             
             if config_changed and original_value is not None:
                  self._memory_logger.log(f"BotController: Config general actualizada -> {key}: '{original_value}' -> '{value}'", "WARN")

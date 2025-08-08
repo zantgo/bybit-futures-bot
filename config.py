@@ -129,12 +129,12 @@ OPERATION_DEFAULTS = {
         },
         "ROI_SL_PCT": {
             "ENABLED": True, 
-            "PERCENTAGE": 5.0, 
+            "PERCENTAGE": -50.0, 
         },
         "ROI_TSL": {
             "ENABLED": True,
-            "ACTIVATION_PCT": 10.0,
-            "DISTANCE_PCT": 1.0,
+            "ACTIVATION_PCT": 25.0,
+            "DISTANCE_PCT": 5.0,
         },
     }
 }

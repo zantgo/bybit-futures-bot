@@ -1,3 +1,5 @@
+# ./core/strategy/pm/manager/_api_actions.py
+
 """
 Módulo del Position Manager: API de Acciones.
 
@@ -14,6 +16,8 @@ try:
     from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
 except ImportError:
     class Operacion: pass
+    class LogicalPosition: pass
+    class LogicalBalances: pass
 
 class _ApiActions:
     """Clase base que contiene las acciones públicas de la API del PositionManager."""
@@ -22,10 +26,6 @@ class _ApiActions:
         """Delega la llamada para forzar una actualización de la caché de balances reales."""
         if self._initialized and self._balance_manager:
             self._balance_manager.force_update_real_balances_cache()
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se eliminan los métodos set_global_stop_loss_pct y set_global_take_profit_pct.
-    # --- FIN DE LA MODIFICACIÓN ---
 
     # --- Métodos de Gestión de Posiciones ---
 
@@ -56,8 +56,17 @@ class _ApiActions:
             self._memory_logger.log(msg, level="ERROR")
             return False, msg
         
-        positions_to_close = list(operacion.posiciones_activas.get(side, []))
-        count = len(positions_to_close)
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se obtiene el índice original de todas las posiciones abiertas para pasarlo a `_close_logical_position`.
+        # Esto soluciona el AttributeError al no usar 'posiciones_activas'.
+        all_positions = operacion.posiciones
+        positions_to_close_with_indices = [
+            {'pos': p, 'original_index': i} 
+            for i, p in enumerate(all_positions) 
+            if p.estado == 'ABIERTA'
+        ]
+        count = len(positions_to_close_with_indices)
+        # --- FIN DE LA CORRECCIÓN ---
         
         if count == 0:
             return True, f"No hay posiciones {side.upper()} para cerrar."
@@ -65,9 +74,10 @@ class _ApiActions:
         self._memory_logger.log(f"Iniciando cierre de {count} posiciones del lado {side.upper()}...", "INFO")
         
         success_count = 0
-        # Iterar en orden inverso para evitar problemas de índice al eliminar elementos.
-        for i in range(count - 1, -1, -1):
-            result = self._close_logical_position(side, i, price, datetime.datetime.now(timezone.utc), reason)
+        # Iterar en orden inverso de los índices originales para evitar problemas al modificar la lista de posiciones.
+        for pos_info in sorted(positions_to_close_with_indices, key=lambda x: x['original_index'], reverse=True):
+            index_to_close = pos_info['original_index']
+            result = self._close_logical_position(side, index_to_close, price, datetime.datetime.now(timezone.utc), reason)
             if result and result.get('success', False):
                 success_count += 1
         

@@ -1,5 +1,3 @@
-# ./core/menu/screens/operation_manager/_displayers.py
-
 """
 Módulo de Visualizadores del Panel de Control de Operación.
 
@@ -24,7 +22,7 @@ except ImportError:
     class Operacion:
         def __init__(self):
             self.estado, self.tendencia, self.accion_al_finalizar, self.tipo_cond_entrada = 'DESCONOCIDO', 'N/A', 'N/A', 'N/A'
-            self.apalancamiento, self.pnl_realizado_usdt, self.pnl_no_realizado_usdt_vivo = 10.0, 0.0, 0.0
+            self.apalancamiento, self.pnl_realizado_usdt = 10.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
             self.total_reinvertido_usdt, self.valor_cond_entrada, self.valor_cond_salida = 0.0, 0.0, None
             self.tsl_roi_activacion_pct, self.tsl_roi_distancia_pct, self.sl_roi_pct = None, None, None
@@ -163,19 +161,23 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
     
-    # --- INICIO DE LA MODIFICACIÓN ---
     utils_module = _deps.get("utils_module")
     if not utils_module:
         print(_create_box_line("Error: Módulo utils no disponible", box_width, 'center'))
         print("└" + "─" * (box_width - 2) + "┘")
         return
 
+    # --- INICIO DE LA MODIFICACIÓN (Verificación final) ---
+    # Se confirma que todos los datos de rendimiento se obtienen de la llamada
+    # a get_live_performance(), que es la única fuente de verdad corregida.
+    # No hay cambios funcionales aquí, solo se confirma que el código ya es correcto.
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
     pnl_realizado = operacion.pnl_realizado_usdt
     pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
     equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
     roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     capital_inicial = operacion.capital_inicial_usdt
     equity_total_historico = operacion.equity_total_usdt
@@ -203,11 +205,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
 
-    # --- ANTERIOR (Código obsoleto) ---
-    # pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
-    # roi_twrr = operacion.twrr_roi
-    # ... etc ...
-    
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():
         if "---" in key: 
@@ -215,7 +212,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         else: 
             print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
     print("└" + "─" * (box_width - 2) + "┘")
-    # --- FIN DE LA MODIFICACIÓN ---
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     box_width = _get_unified_box_width()

@@ -23,7 +23,8 @@ except ImportError as e:
     print(f"ERROR [Position Calculations Import]: No se pudo importar core.config o core.utils: {e}")
     # Definir stubs/dummies si las importaciones fallan, para que las funciones no fallen catastróficamente
     config_attrs = {
-        'OPERATION_DEFAULTS': {'PROFIT': {'COMMISSION_RATE': 0.0, 'REINVEST_PROFIT_PCT': 0.0}}
+        'OPERATION_DEFAULTS': {'PROFIT': {'COMMISSION_RATE': 0.0, 'REINVEST_PROFIT_PCT': 0.0}},
+        'SESSION_CONFIG': {'PROFIT': {'COMMISSION_RATE': 0.0, 'REINVEST_PROFIT_PCT': 0.0}}
     }
     config = type('obj', (object,), config_attrs)()
     _utils = type('obj', (object,), {
@@ -63,15 +64,16 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     Calcula el precio de Stop Loss para una posición individual.
     Recibe el porcentaje de SL como argumento para permitir el ajuste dinámico.
     """
-    # --- INICIO DE LA CORRECCIÓN CRÍTICA ---
-    # Comprobamos PRIMERO si sl_pct es un número válido.
-    # Si es None o no es un número, no podemos hacer la comparación <=.
+    # --- INICIO DE LA MODIFICACIÓN (Objetivo 4: Corregir Bug Crítico en SL) ---
+    # Se añade una validación explícita para sl_pct ANTES de cualquier comparación.
+    # Si sl_pct es None (porque el usuario lo desactivó) o no es un número finito,
+    # la función devuelve None inmediatamente, evitando un TypeError.
     if not isinstance(sl_pct, (int, float)) or not np.isfinite(sl_pct):
         return None # No hay Stop Loss si el valor no es un número válido.
 
     if sl_pct <= 0:
         return None # No hay Stop Loss si el porcentaje es cero o negativo.
-    # --- FIN DE LA CORRECCIÓN CRÍTICA ---
+    # --- FIN DE LA MODIFICACIÓN ---
 
     if not isinstance(entry_price, (int, float)) or not np.isfinite(entry_price) or entry_price <= 0:
         return None
@@ -89,6 +91,7 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     except Exception as e:
         memory_logger.log(f"ERROR [Calc SL]: Excepción calculando SL: {e}", level="ERROR")
         return None
+
 def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: float) -> Optional[float]:
     """
     Estima el precio de liquidación (aproximación simple margen aislado).
@@ -146,11 +149,12 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
             entry_nominal_value = entry_price * size_contracts
             exit_nominal_value = exit_price * size_contracts
             
-            # --- INICIO DE LA MODIFICACIÓN: Aplicar comisión a entrada y salida ---
-            # La fórmula anterior podía estar calculando la comisión incorrectamente.
-            # Se corrige para que la comisión se aplique al valor nominal de la entrada MÁS el de la salida.
+            # --- INICIO DE LA MODIFICACIÓN (Objetivo 5: Precisión de Comisiones) ---
+            # La fórmula original podía subestimar la comisión. La fórmula correcta
+            # debe sumar el valor nominal de la entrada y la salida, ya que la
+            # comisión se paga en ambas transacciones.
             if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
-                # commission_usdt = (abs(exit_nominal_value)) * commission_rate # (Línea antigua comentada conceptualmente)
+                # commission_usdt = (abs(exit_nominal_value)) * commission_rate # <-- LÍNEA ORIGINAL INEXACTA
                 commission_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * commission_rate
             # --- FIN DE LA MODIFICACIÓN ---
 

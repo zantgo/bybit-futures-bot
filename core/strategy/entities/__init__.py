@@ -1,5 +1,3 @@
-# ./core/strategy/entities/__init__.py
-
 """
 Paquete Central de Entidades de Dominio.
 
@@ -90,8 +88,13 @@ class Operacion:
         
         self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
-        # Este PNL no realizado es una "caché" que el EventProcessor actualiza.
-        self.pnl_no_realizado_usdt_vivo: float = 0.0
+        
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+        # Se comenta este atributo. Es redundante ya que get_live_performance calcula
+        # el PNL no realizado en tiempo real, lo cual es más robusto y evita
+        # problemas de sincronización. El EventProcessor ya no necesitará actualizarlo.
+        # self.pnl_no_realizado_usdt_vivo: float = 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
         
         self.total_reinvertido_usdt: float = 0.0
         self.comercios_cerrados_contador: int = 0
@@ -109,19 +112,23 @@ class Operacion:
 
     @property
     def capital_operativo_logico_actual(self) -> float:
+        """Suma el capital de todas las posiciones lógicas (abiertas o no). Es la base de capital actual de la operación."""
         return sum(p.capital_asignado for p in self.posiciones)
 
     @property
     def capital_en_uso(self) -> float:
+        """Suma el capital de las posiciones que están actualmente abiertas en el mercado."""
         return sum(p.capital_asignado for p in self.posiciones if p.estado == 'ABIERTA')
 
     @property
     def capital_disponible(self) -> float:
+        """Calcula el capital que aún no ha sido asignado a posiciones abiertas."""
         return self.capital_operativo_logico_actual - self.capital_en_uso
 
     @property
     def valor_nominal_total(self) -> float:
-        return sum(p.valor_nominal for p in self.posiciones)
+        """Suma el valor nominal (tamaño * precio) de todas las posiciones abiertas."""
+        return sum(p.valor_nominal for p in self.posiciones_abiertas)
 
     @property
     def posiciones_abiertas(self) -> List['LogicalPosition']:
@@ -144,38 +151,47 @@ class Operacion:
         """Calcula el Equity Histórico (contable) de la operación."""
         return self.capital_inicial_usdt + self.pnl_realizado_usdt
 
-    @property
-    def equity_actual_vivo(self) -> float:
-        """
-        Calcula el Equity "vivo" (valor de mercado).
-        Usa la caché `pnl_no_realizado_usdt_vivo` que es actualizada externamente.
-        """
-        return self.equity_total_usdt + self.pnl_no_realizado_usdt_vivo
+    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+    # Se comenta esta propiedad. Su cálculo era incorrecto para TWRR y dependía
+    # del atributo pnl_no_realizado_usdt_vivo que fue eliminado. El cálculo
+    # correcto ahora reside únicamente dentro de get_live_performance.
+    # @property
+    # def equity_actual_vivo(self) -> float:
+    #     """
+    #     Calcula el Equity "vivo" (valor de mercado).
+    #     Usa la caché `pnl_no_realizado_usdt_vivo` que es actualizada externamente.
+    #     """
+    #     return self.capital_operativo_logico_actual + self.pnl_no_realizado_usdt_vivo
+    # --- FIN DE LA MODIFICACIÓN ---
     
-    @property
-    def twrr_roi(self) -> float:
-        """
-        Calcula el TWRR usando la caché de PNL no realizado.
-        """
-        equity_inicial_periodo_actual = self.capital_inicial_usdt
-        if self.capital_flows:
-            last_flow = self.capital_flows[-1]
-            equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
+    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+    # Se comenta esta propiedad. El ROI "estático" o en reposo es propenso a errores
+    # y es redundante. El único ROI fiable es el que se calcula en tiempo real
+    # con el precio de mercado actual, lo cual ya hace get_live_performance.
+    # @property
+    # def twrr_roi(self) -> float:
+    #     """
+    #     Calcula el TWRR usando la caché de PNL no realizado.
+    #     """
+    #     equity_inicial_periodo_actual = self.capital_inicial_usdt
+    #     if self.capital_flows:
+    #         last_flow = self.capital_flows[-1]
+    #         equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
+    #
+    #     pnl_periodo_actual = self.equity_actual_vivo - equity_inicial_periodo_actual
+    #     retorno_periodo_actual = safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
+    #
+    #     if not self.sub_period_returns:
+    #         return retorno_periodo_actual * 100
+    #
+    #     total_return_factor = 1.0
+    #     for r in self.sub_period_returns:
+    #         total_return_factor *= r
+    #
+    #     total_return_factor *= (1 + retorno_periodo_actual)
+    #     return (total_return_factor - 1) * 100
+    # --- FIN DE LA MODIFICACIÓN ---
 
-        pnl_periodo_actual = self.equity_actual_vivo - equity_inicial_periodo_actual
-        retorno_periodo_actual = safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
-
-        if not self.sub_period_returns:
-            return retorno_periodo_actual * 100
-
-        total_return_factor = 1.0
-        for r in self.sub_period_returns:
-            total_return_factor *= r
-
-        total_return_factor *= (1 + retorno_periodo_actual)
-        return (total_return_factor - 1) * 100
-
-    # --- INICIO DE LA NUEVA IMPLEMENTACIÓN ---
     def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
         """
         Calcula y devuelve las métricas de rendimiento "en vivo" que dependen
@@ -201,7 +217,7 @@ class Operacion:
         pnl_total = self.pnl_realizado_usdt + pnl_no_realizado
 
         # 3. Calcular Equity Actual "Vivo"
-        equity_actual_vivo = self.equity_total_usdt + pnl_no_realizado
+        equity_actual_vivo = self.capital_operativo_logico_actual + pnl_no_realizado
         
         # 4. Calcular ROI (TWRR) "Vivo"
         equity_inicial_periodo_actual = self.capital_inicial_usdt
@@ -209,7 +225,14 @@ class Operacion:
             last_flow = self.capital_flows[-1]
             equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
 
-        pnl_periodo_actual = equity_actual_vivo - equity_inicial_periodo_actual
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 1: Corregir Cálculo TWRR) ---
+        # La línea original mezclaba flujos de capital con PNL. La nueva fórmula aísla
+        # el PNL total del trading y lo compara contra la base de capital del período actual,
+        # lo que anula el efecto de los depósitos/retiros en el cálculo del retorno.
+        # pnl_periodo_actual = equity_actual_vivo - equity_inicial_periodo_actual # <-- LÍNEA ORIGINAL ERRÓNEA
+        pnl_periodo_actual = (self.equity_total_usdt + pnl_no_realizado) - equity_inicial_periodo_actual
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         retorno_periodo_actual = utils_module.safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
         
         total_return_factor = 1.0
@@ -225,7 +248,6 @@ class Operacion:
             "equity_actual_vivo": equity_actual_vivo,
             "roi_twrr_vivo": roi_twrr_vivo
         }
-    # --- FIN DE LA NUEVA IMPLEMENTACIÓN ---
 
     def reset(self):
         self.estado = 'DETENIDA'
@@ -238,7 +260,12 @@ class Operacion:
         self.tsl_roi_peak_pct = 0.0
         self.comisiones_totales_usdt = 0.0
         self.profit_balance_acumulado = 0.0
-        self.pnl_no_realizado_usdt_vivo = 0.0
+        
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+        # Se comenta la línea que resetea el atributo pnl_no_realizado_usdt_vivo, ya que fue eliminado.
+        # self.pnl_no_realizado_usdt_vivo = 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []
