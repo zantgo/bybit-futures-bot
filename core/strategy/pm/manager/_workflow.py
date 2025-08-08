@@ -1,3 +1,4 @@
+# Contenido completo para: core/strategy/pm/manager/_workflow.py
 import datetime
 from typing import Any, List, Dict
 
@@ -26,6 +27,9 @@ class _Workflow:
         """
         if not self._initialized or not self._executor:
             return
+            
+        # --- AÑADIDO: Log de depuración ---
+        self._memory_logger.log(f"[DEBUG] check_and_close_positions llamado. price={current_price} ts={timestamp}", "DEBUG")
 
         for side in ['long', 'short']:
             operacion = self._om_api.get_operation_by_side(side)
@@ -80,6 +84,8 @@ class _Workflow:
             # --- FASE 3: EJECUTAR CIERRES ---
             if positions_to_close:
                 for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
+                    # --- AÑADIDO: Log de depuración ---
+                    self._memory_logger.log(f"[DEBUG] Planificando cierre side={side} index={close_info['index']} reason={close_info.get('reason')}", "DEBUG")
                     self._close_logical_position(
                         side, 
                         close_info['index'], 

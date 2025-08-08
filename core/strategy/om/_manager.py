@@ -1,6 +1,9 @@
+# Contenido completo y corregido para: core/strategy/om/_manager.py
+
 import datetime
 import uuid
 import threading
+import copy
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import asdict
 
@@ -71,13 +74,15 @@ class OperationManager:
         with self._lock:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
-            import copy
+            
             copied_op = Operacion(id=original_op.id)
             for attr, value in original_op.__dict__.items():
                 if attr not in ['posiciones', 'capital_flows', 'sub_period_returns']:
                     setattr(copied_op, attr, value)
-            copied_op.posiciones = [copy.copy(p) for p in original_op.posiciones]
-            copied_op.capital_flows = [copy.copy(cf) for cf in original_op.capital_flows]
+            
+            # Realizamos una copia profunda de las posiciones para evitar mutaciones accidentales
+            copied_op.posiciones = copy.deepcopy(original_op.posiciones)
+            copied_op.capital_flows = copy.deepcopy(original_op.capital_flows)
             copied_op.sub_period_returns = original_op.sub_period_returns[:] 
             return copied_op
 
@@ -89,13 +94,15 @@ class OperationManager:
             estado_original = target_op.estado
             changes_log = []
             
-            nuevas_posiciones_config = params.get('posiciones')
-            if nuevas_posiciones_config and isinstance(nuevas_posiciones_config[0], LogicalPosition):
-                nuevas_posiciones_config = [asdict(p) for p in nuevas_posiciones_config]
+            # --- INICIO DE LA CORRECCIÓN CLAVE ---
+            # El PM nos enviará una lista de objetos `LogicalPosition`.
+            nuevas_posiciones = params.get('posiciones')
 
             nuevo_capital_operativo = 0.0
-            if nuevas_posiciones_config is not None:
-                nuevo_capital_operativo = sum(p.get('capital_asignado', 0.0) for p in nuevas_posiciones_config)
+            if nuevas_posiciones is not None:
+                # Calculamos el capital directamente desde los objetos
+                nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
+            # --- FIN DE LA CORRECCIÓN CLAVE ---
             
             capital_operativo_anterior = target_op.capital_operativo_logico_actual
             diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
@@ -122,16 +129,12 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
-            if nuevas_posiciones_config is not None:
-                current_positions_as_dicts = [asdict(p) for p in target_op.posiciones]
-                if current_positions_as_dicts != nuevas_posiciones_config:
-                    reconstructed_positions = []
-                    for pos_dict in nuevas_posiciones_config:
-                        dict_para_objeto = pos_dict.copy()
-                        dict_para_objeto.pop('leverage', None); dict_para_objeto.pop('apalancamiento', None)
-                        reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
-                    target_op.posiciones = reconstructed_positions
-                    changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
+            # --- INICIO DE LA CORRECCIÓN CLAVE ---
+            if nuevas_posiciones is not None:
+                # Asignamos directamente la lista de objetos, usando deepcopy para seguridad.
+                target_op.posiciones = copy.deepcopy(nuevas_posiciones)
+                changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
+            # --- FIN DE LA CORRECCIÓN CLAVE ---
 
             if estado_original == 'DETENIDA' and params:
                 target_op.capital_inicial_usdt = nuevo_capital_operativo
@@ -156,13 +159,10 @@ class OperationManager:
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
 
         if changes_log:
-            # --- INICIO DE LA MODIFICACIÓN (Ajuste Final de Apalancamiento) ---
-            # Se añade la lógica para determinar la cuenta específica y pasarla a la API.
             symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
             new_leverage = target_op.apalancamiento
             
             if self._trading_api and symbol and new_leverage:
-                # 1. Determinamos el nombre de la cuenta objetivo basándonos en el 'side'.
                 target_account_name = None
                 if side == 'long':
                     target_account_name = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
@@ -171,16 +171,14 @@ class OperationManager:
 
                 if target_account_name:
                     self._memory_logger.log(f"OM: Actualizando apalancamiento a {new_leverage}x para '{symbol}' en la cuenta '{target_account_name}'...", "INFO")
-                    # 2. Pasamos el nombre de la cuenta a la función set_leverage.
                     self._trading_api.set_leverage(
                         symbol=symbol, 
                         buy_leverage=str(new_leverage), 
                         sell_leverage=str(new_leverage),
-                        account_name=target_account_name  # <-- Parámetro clave añadido
+                        account_name=target_account_name
                     )
                 else:
                     self._memory_logger.log(f"OM WARN: No se encontró una cuenta para el lado '{side}' para establecer el apalancamiento.", "WARN")
-            # --- FIN DE LA MODIFICACIÓN ---
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -189,7 +187,6 @@ class OperationManager:
         self._memory_logger.log(log_message, "WARN")
         return True, f"Operación {side.upper()} actualizada con éxito."
 
-    # ... (resto de los métodos de la clase sin cambios) ...
     def pausar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)

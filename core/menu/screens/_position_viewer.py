@@ -1,10 +1,5 @@
-"""
-Módulo para la Pantalla de Visualización y Gestión de Posiciones.
+# Contenido completo y corregido para: core/menu/screens/_position_viewer.py
 
-Permite al usuario ver una lista detallada de todas las posiciones lógicas
-abiertas, incluyendo PNL no realizado, y ofrece la opción de cerrarlas
-manual y forzosamente.
-"""
 import time
 from typing import Any
 
@@ -13,7 +8,6 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# --- Dependencias del Menú ---
 from .._helpers import (
     clear_screen, 
     print_tui_header, 
@@ -23,12 +17,6 @@ from .._helpers import (
 )
 
 def show_position_viewer_screen(pm_api: Any):
-    """
-    Muestra el menú principal para elegir qué lado de las posiciones gestionar.
-
-    Args:
-        pm_api: El objeto API del Position Manager para interactuar con él.
-    """
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado.")
         time.sleep(2)
@@ -70,9 +58,6 @@ def show_position_viewer_screen(pm_api: Any):
 
 
 def _manage_side_positions(side: str, pm_api: Any):
-    """
-    Función interna que muestra y gestiona las posiciones para un lado específico.
-    """
     while True:
         clear_screen()
         print_tui_header(f"Gestionando Posiciones {side.upper()}")
@@ -98,19 +83,15 @@ def _manage_side_positions(side: str, pm_api: Any):
             print(f"Precio de Mercado Actual: {current_price:.4f} USDT\n")
             for i, pos in enumerate(open_positions):
                 pnl = 0.0
-                entry_price = pos.get('entry_price', 0.0)
-                size_contracts = pos.get('size_contracts', 0.0)
-                sl_price = pos.get('stop_loss_price')
-                
-                # Búsqueda del estado del TSL desde la estructura de datos 'pos'
+                # --- INICIO DE LA CORRECCIÓN ---
+                entry_price = pos.entry_price or 0.0
+                size_contracts = pos.size_contracts or 0.0
+                sl_price = pos.stop_loss_price
                 ts_info = "TS Inactivo"
-                # Esta lógica se mantiene por si se añade 'ts_is_active' al resumen en el futuro.
-                if pos.get('ts_is_active'):
-                    ts_stop = pos.get('ts_stop_price')
-                    if ts_stop is not None:
-                        ts_info = f"TS Activo @ {ts_stop:.4f}"
-                    else:
-                        ts_info = "TS Activo (Calculando...)"
+                if pos.ts_is_active:
+                    ts_stop = pos.ts_stop_price
+                    ts_info = f"TS Activo @ {ts_stop:.4f}" if ts_stop else "TS Activo (Calculando...)"
+                # --- FIN DE LA CORRECCIÓN ---
 
                 if current_price > 0 and entry_price > 0 and size_contracts > 0:
                     pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
@@ -138,7 +119,6 @@ def _manage_side_positions(side: str, pm_api: Any):
         if choice_index is None:
             break
 
-        # Asegurarse de que el índice elegido es válido para la lista de items del menú
         if not (0 <= choice_index < len(menu_items)):
             continue
 
@@ -146,24 +126,16 @@ def _manage_side_positions(side: str, pm_api: Any):
 
         if action_text is None or "Volver" in action_text:
             break
-
         if "[r] Refrescar" in action_text:
             continue
-        
         if "[h] Ayuda" in action_text:
             show_help_popup("position_viewer")
             continue
         
-        # --- INICIO DE LA MODIFICACIÓN (Implementar Cierre Manual) ---
-        # Se actualiza esta sección para usar la nueva función de la API.
         if "[Cerrar] Idx" in action_text:
             try:
-                # El índice de la posición en la lista de 'open_positions' es el mismo
-                # que el índice de la opción en el menú.
                 pos_index_to_close = choice_index
-                
                 print(f"\nEnviando orden de cierre para la posición con índice {pos_index_to_close}...")
-                # Llamamos a la nueva función de la API centralizada.
                 success, msg = pm_api.manual_close_logical_position_by_index(side, pos_index_to_close)
 
                 if success:
@@ -175,7 +147,6 @@ def _manage_side_positions(side: str, pm_api: Any):
             except (ValueError, IndexError):
                 print("\nError al procesar la selección. Inténtalo de nuevo.")
                 time.sleep(1.5)
-        # --- FIN DE LA MODIFICACIÓN ---
 
         elif "[Cerrar TODAS]" in action_text and open_positions:
             confirm_title = f"¿Confirmas cerrar TODAS las {len(open_positions)} posiciones {side.upper()}?"
@@ -188,4 +159,3 @@ def _manage_side_positions(side: str, pm_api: Any):
                 else:
                     print(f"\n\033[91mFALLO:\033[0m {message}")
                 time.sleep(3)
-                # No necesitamos 'break' aquí, el bucle se refrescará y mostrará la lista vacía.

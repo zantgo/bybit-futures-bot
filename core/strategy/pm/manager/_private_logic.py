@@ -1,5 +1,7 @@
+# Contenido completo para: core/strategy/pm/manager/_private_logic.py
 import datetime
 import uuid
+import traceback  # <-- AÑADIDO
 from typing import Any
 from dataclasses import asdict
 
@@ -85,7 +87,6 @@ class _PrivateLogic:
         if result and result.get('success'):
             new_pos_data = result.get('logical_position_object')
             if new_pos_data:
-                # --- INICIO DE LA CORRECCIÓN (Solución a Corrupción de Estado) ---
                 op_to_update = self._om_api.get_operation_by_side(side)
                 
                 pos_to_update_in_list = next((p for p in op_to_update.posiciones if p.id == pending_position.id), None)
@@ -102,83 +103,79 @@ class _PrivateLogic:
                     pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
                     pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
                 
-                    # Se envía la lista de posiciones convertida a una lista de diccionarios,
-                    # que es el formato que espera el OperationManager.
-                    # self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones}) # <-- LÍNEA ORIGINAL COMENTADA
-                    self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in op_to_update.posiciones]})
+                    # --- INICIO DE LA CORRECCIÓN CLAVE ---
+                    # Pasamos la lista de OBJETOS directamente, sin convertir a dicts.
+                    self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones})
+                    # --- FIN DE LA CORRECCIÓN CLAVE ---
 
                     if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                         self._position_state.sync_positions_from_operation(op_to_update)
-                # --- FIN DE LA CORRECCIÓN ---
-
-# Reemplaza la función completa en /core/strategy/pm/manager/_private_logic.py
 
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
-        operacion = self._om_api.get_operation_by_side(side)
-        if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
-            return
-        
-        if index >= len(operacion.posiciones):
-            return
-        
-        position_to_update = operacion.posiciones[index]
-        pos_id_short = str(position_to_update.id)[-6:]
-
-        activation_pct = position_to_update.tsl_activation_pct_at_open
-        distance_pct = position_to_update.tsl_distance_pct_at_open
-        is_ts_active = position_to_update.ts_is_active
-        entry_price = position_to_update.entry_price
-
-        # Si no hay TSL configurado para esta posición, no hacemos nada.
-        if not (activation_pct > 0 and distance_pct > 0 and entry_price is not None):
-            return
-
-        # --- FASE 1: LÓGICA DE ACTIVACIÓN DEL TSL ---
-        if not is_ts_active:
-            activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
+        try:
+            operacion = self._om_api.get_operation_by_side(side)
+            if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
+                return
             
-            # Logging para depuración
-            self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", level="DEBUG")
+            if index >= len(operacion.posiciones):
+                return
+            
+            position_to_update = operacion.posiciones[index]
+            pos_id_short = str(position_to_update.id)[-6:]
 
-            if (side == 'long' and current_price >= activation_price) or \
-               (side == 'short' and current_price <= activation_price):
+            activation_pct = position_to_update.tsl_activation_pct_at_open
+            distance_pct = position_to_update.tsl_distance_pct_at_open
+            is_ts_active = position_to_update.ts_is_active
+            entry_price = position_to_update.entry_price
+
+            if not (activation_pct > 0 and distance_pct > 0 and entry_price is not None):
+                return
+
+            if not is_ts_active:
+                activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
                 
-                self._memory_logger.log(f"¡TSL ACTIVADO! [ID:{pos_id_short}] Precio cruzó umbral. Pico inicial fijado en {current_price:.4f}", level="INFO")
-                position_to_update.ts_is_active = True
-                position_to_update.ts_peak_price = current_price
-        
-        # --- FASE 2: LÓGICA DE TRAILING (SI YA ESTÁ ACTIVO) ---
-        if position_to_update.ts_is_active:
-            
-            # --- INICIO DE LA CORRECCIÓN LÓGICA ---
-            # El pico actual debe ser el guardado, no el precio actual. Si no hay, se usa el de entrada.
-            current_peak = position_to_update.ts_peak_price if position_to_update.ts_peak_price is not None else entry_price
-            
-            # Actualizamos el pico si el precio actual es más favorable
-            if (side == 'long' and current_price > current_peak) or \
-               (side == 'short' and current_price < current_peak):
-                
-                self._memory_logger.log(f"TSL Peak Update [ID:{pos_id_short}]: Nuevo pico {current_price:.4f} (anterior: {current_peak:.4f})", level="DEBUG")
-                position_to_update.ts_peak_price = current_price
-            
-            # Recalculamos el precio de stop basándonos en el pico más reciente
-            new_peak_price = position_to_update.ts_peak_price
-            if new_peak_price:
-                new_stop_price = new_peak_price * (1 - distance_pct / 100) if side == 'long' else new_peak_price * (1 + distance_pct / 100)
-                
-                # Solo actualizamos si el nuevo precio de stop es diferente, para no saturar logs.
-                if new_stop_price != position_to_update.ts_stop_price:
-                    self._memory_logger.log(f"TSL Stop Price Update [ID:{pos_id_short}]: Nuevo Stop en {new_stop_price:.4f}", level="DEBUG")
-                    position_to_update.ts_stop_price = new_stop_price
-            # --- FIN DE LA CORRECCIÓN LÓGICA ---
+                self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", level="DEBUG")
 
-        # Guardamos el estado actualizado (ya sea que haya cambiado o no)
-        self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in operacion.posiciones]})
+                if (side == 'long' and current_price >= activation_price) or \
+                   (side == 'short' and current_price <= activation_price):
+                    
+                    self._memory_logger.log(f"¡TSL ACTIVADO! [ID:{pos_id_short}] Precio cruzó umbral. Pico inicial fijado en {current_price:.4f}", level="INFO")
+                    position_to_update.ts_is_active = True
+                    position_to_update.ts_peak_price = current_price
+            
+            if position_to_update.ts_is_active:
+                current_peak = position_to_update.ts_peak_price if position_to_update.ts_peak_price is not None else entry_price
+                
+                if (side == 'long' and current_price > current_peak) or \
+                   (side == 'short' and current_price < current_peak):
+                    
+                    self._memory_logger.log(f"TSL Peak Update [ID:{pos_id_short}]: Nuevo pico {current_price:.4f} (anterior: {current_peak:.4f})", level="DEBUG")
+                    position_to_update.ts_peak_price = current_price
+                
+                new_peak_price = position_to_update.ts_peak_price
+                if new_peak_price:
+                    new_stop_price = new_peak_price * (1 - distance_pct / 100) if side == 'long' else new_peak_price * (1 + distance_pct / 100)
+                    
+                    if new_stop_price != position_to_update.ts_stop_price:
+                        self._memory_logger.log(f"TSL Stop Price Update [ID:{pos_id_short}]: Nuevo Stop en {new_stop_price:.4f}", level="DEBUG")
+                        position_to_update.ts_stop_price = new_stop_price
+
+            # --- INICIO DE LA CORRECCIÓN CLAVE ---
+            self._om_api.create_or_update_operation(side, {'posiciones': operacion.posiciones})
+            # --- FIN DE LA CORRECCIÓN CLAVE ---
+            
+        except AttributeError as ae:
+            self._memory_logger.log(f"ERROR [TSL AttrErr] side={side} index={index} current_price={current_price}: {ae}", level="ERROR")
+            self._memory_logger.log(traceback.format_exc(), level="ERROR")
+        except Exception as e:
+            self._memory_logger.log(f"ERROR [TSL] side={side} index={index} current_price={current_price}: {e}", level="ERROR")
+            self._memory_logger.log(traceback.format_exc(), level="ERROR")
         
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         op_before = self._om_api.get_operation_by_side(side)
         
         if not self._executor or not op_before or index >= len(op_before.posiciones):
+            self._memory_logger.log(f"ERROR [Close Attempt] side={side} index={index} executor={self._executor is not None} op_before_exists={op_before is not None}", level="ERROR")
             return {'success': False, 'message': 'Índice o executor no válido'}
 
         pos_to_close = op_before.posiciones[index]
@@ -211,7 +208,9 @@ class _PrivateLogic:
                 pos_to_reset.api_filled_qty = None
 
             params = {
-                'posiciones': [asdict(p) for p in op_after.posiciones],
+                # --- INICIO DE LA CORRECCIÓN CLAVE ---
+                'posiciones': op_after.posiciones,
+                # --- FIN DE LA CORRECCIÓN CLAVE ---
                 'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
             }
             if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:

@@ -1,8 +1,5 @@
-# ./core/menu/screens/_dashboard.py
+# Contenido completo y corregido para: core/menu/screens/_dashboard.py
 
-"""
-Módulo para la Pantalla del Dashboard de Sesión.
-"""
 import time
 import datetime
 from datetime import timezone
@@ -28,64 +25,31 @@ try:
     from core.strategy.sm import api as sm_api
     from core.strategy.pm import api as pm_api
     from core.strategy.om import api as om_api
-    from core.strategy.entities import Operacion
+    from core.strategy.entities import Operacion, LogicalPosition
     from core import utils
 except ImportError:
     sm_api = pm_api = om_api = utils = None
-    # Fallback actualizado para incluir el nuevo método
     class Operacion:
-        def __init__(self):
-            self.pnl_realizado_usdt = 0.0
-            self.comisiones_totales_usdt = 0.0
-            self.capital_inicial_usdt = 0.0
-            self.equity_total_usdt = 0.0
-            self.profit_balance_acumulado = 0.0
-            self.estado = 'N/A'
-            self.comercios_cerrados_contador = 0
-            self.posiciones = []
-            self.apalancamiento = 10.0
-            self.tendencia = 'N/A'
         def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
             return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
-        @property
-        def posiciones_abiertas_count(self): return 0
-        @property
-        def capital_operativo_logico_actual(self): return 0.0
-        @property
-        def capital_en_uso(self): return 0.0
-    # Fallback para LogicalPosition que es lo que el SessionManager ahora espera
-    class LogicalPosition:
-        def __init__(self, id='N/A', entry_price=0.0, size_contracts=0.0):
-            self.id = id
-            self.entry_price = entry_price
-            self.size_contracts = size_contracts
+    class LogicalPosition: pass
 
 
-# --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
-    """Recibe las dependencias inyectadas desde el controlador principal."""
     global _deps
     _deps = dependencies
 
-
 def _get_terminal_width():
-    """Obtiene el ancho actual del terminal."""
-    try:
-        return shutil.get_terminal_size().columns
-    except:
-        return 90
-
+    try: return shutil.get_terminal_size().columns
+    except: return 90
 
 def _clean_ansi_codes(text: str) -> str:
-    """Función de ayuda para eliminar códigos de color ANSI de un string."""
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', str(text))
 
-
 def _truncate_text(text: str, max_length: int) -> str:
-    """Trunca el texto si es muy largo, añadiendo '...' al final."""
     clean_text = _clean_ansi_codes(text)
     if len(clean_text) <= max_length:
         return text
@@ -95,9 +59,7 @@ def _truncate_text(text: str, max_length: int) -> str:
         return color_codes[0] + truncated_clean + "\033[0m"
     return truncated_clean
 
-
 def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
-    """Crea una línea de caja con el contenido alineado correctamente."""
     clean_content = _clean_ansi_codes(content)
     padding_needed = width - 2 - len(clean_content)
     if padding_needed < 0:
@@ -113,9 +75,7 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
-
 def _display_final_summary(summary: Dict[str, Any], config_module: Any):
-    """Muestra una pantalla de resumen clara al finalizar la sesión."""
     clear_screen()
     print_tui_header("Resumen Final de la Sesión")
 
@@ -154,7 +114,9 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
 
         pnl_realizado = op_obj.pnl_realizado_usdt
         ganancias_netas = pnl_realizado - op_obj.comisiones_totales_usdt
-        roi = op_obj.twrr_roi if hasattr(op_obj, 'twrr_roi') else utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100 if utils else 0.0
+        roi = 0.0
+        if utils and op_obj.capital_inicial_usdt > 0:
+            roi = utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100
 
         print(f"\n  Operación {side.upper()}:")
         print(f"    - Estado Final          : {op_obj.estado.upper()}")
@@ -163,7 +125,7 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         print(f"    - Equity Total (Final)  : ${op_obj.equity_total_usdt:.2f}")
         print(f"    - Ganancias Netas       : ${ganancias_netas:+.4f}")
         print(f"    - PNL (Realizado)       : {pnl_realizado:+.4f} USDT")
-        print(f"    - ROI (TWRR)            : {roi:+.2f}%")
+        print(f"    - ROI                   : {roi:+.2f}%")
 
     open_longs = summary.get('open_long_positions', [])
     open_shorts = summary.get('open_short_positions', [])
@@ -173,25 +135,15 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         if open_longs:
             print(f"  LONGs ({len(open_longs)}):")
             for pos in open_longs:
-                # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-                # Se accede a los atributos directamente de los objetos LogicalPosition.
-                # print(f"    - ID: {str(pos.get('id', 'N/A'))[-6:]}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}") # <-- LÍNEA ORIGINAL COMENTADA
-                pos_id = getattr(pos, 'id', 'N/A')
-                entry_price = getattr(pos, 'entry_price', 0.0)
-                size_contracts = getattr(pos, 'size_contracts', 0.0)
-                print(f"    - ID: {str(pos_id)[-6:]}, Entrada: {entry_price:.4f}, Tamaño: {size_contracts:.4f}")
-                # --- FIN DE LA MODIFICACIÓN ---
+                # --- INICIO DE LA CORRECCIÓN ---
+                print(f"    - ID: {str(pos.id)[-6:]}, Entrada: {pos.entry_price or 0.0:.4f}, Tamaño: {pos.size_contracts or 0.0:.4f}")
+                # --- FIN DE LA CORRECCIÓN ---
         if open_shorts:
             print(f"  SHORTs ({len(open_shorts)}):")
             for pos in open_shorts:
-                # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-                # Se accede a los atributos directamente de los objetos LogicalPosition.
-                # print(f"    - ID: {str(pos.get('id', 'N/A'))[-6:]}, Entrada: {pos.get('entry_price', 0.0):.4f}, Tamaño: {pos.get('size_contracts', 0.0):.4f}") # <-- LÍNEA ORIGINAL COMENTADA
-                pos_id = getattr(pos, 'id', 'N/A')
-                entry_price = getattr(pos, 'entry_price', 0.0)
-                size_contracts = getattr(pos, 'size_contracts', 0.0)
-                print(f"    - ID: {str(pos_id)[-6:]}, Entrada: {entry_price:.4f}, Tamaño: {size_contracts:.4f}")
-                # --- FIN DE LA MODIFICACIÓN ---
+                # --- INICIO DE LA CORRECCIÓN ---
+                print(f"    - ID: {str(pos.id)[-6:]}, Entrada: {pos.entry_price or 0.0:.4f}, Tamaño: {pos.size_contracts or 0.0:.4f}")
+                # --- FIN DE LA CORRECCIÓN ---
     else:
         print("\n--- No quedaron posiciones abiertas ---")
 
@@ -295,8 +247,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
             data[side]['Estado'] = 'NO_DISPONIBLE'
             continue
             
-        # Esta función ya usa la notación de punto o .get() correctamente
-        # porque 'live_performance' es un diccionario.
         live_performance = operacion.get_live_performance(current_price, utils)
         
         pnl_realizado = operacion.pnl_realizado_usdt
@@ -304,7 +254,7 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
         
         roi_realizado = utils.safe_division(pnl_realizado, operacion.capital_inicial_usdt) * 100
-        roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_inicial_usdt) * 100
+        roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_operativo_logico_actual) * 100
         
         def get_color(value):
             return "\033[92m" if value >= 0 else "\033[91m"
@@ -379,7 +329,6 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
 
 
 def show_dashboard_screen(session_manager: Any):
-    # --- INICIO DE LA CORRECCIÓN: Re-importar el editor de sesión ---
     from ._session_config_editor import show_session_config_editor_screen
     
     config_module = _deps.get("config_module")
@@ -423,7 +372,6 @@ def show_dashboard_screen(session_manager: Any):
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
 
-        # --- INICIO DE LA CORRECCIÓN: Re-añadir la opción al menú ---
         menu_items = [
             "[1] Gestionar Operación LONG",
             "[2] Gestionar Operación SHORT",
@@ -436,15 +384,9 @@ def show_dashboard_screen(session_manager: Any):
             "[q] Finalizar Sesión y Volver al Menú Principal"
         ]
         
-        # --- INICIO DE LA CORRECCIÓN: Ajustar el mapa de acciones para que coincida con los índices ---
         action_map = {
-            0: 'manage_long',
-            1: 'manage_short',
-            3: 'edit_config',
-            4: 'view_logs',
-            6: 'refresh',
-            7: 'help',
-            8: 'exit_session'
+            0: 'manage_long', 1: 'manage_short', 3: 'edit_config',
+            4: 'view_logs', 6: 'refresh', 7: 'help', 8: 'exit_session'
         }
 
         menu_options = helpers_module.MENU_STYLE.copy()
@@ -459,7 +401,6 @@ def show_dashboard_screen(session_manager: Any):
             operation_manager.show_operation_manager_screen(side_filter='long')
         elif action == 'manage_short':
             operation_manager.show_operation_manager_screen(side_filter='short')
-        # --- INICIO DE LA CORRECCIÓN: Re-añadir la lógica para la opción de menú ---
         elif action == 'edit_config':
             changes_made = show_session_config_editor_screen(config_module)
             if changes_made:

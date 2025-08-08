@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from core import utils as ut_mod
 
 class LogicalPositionTable:
-    # --- ESTA ES LA PARTE CRÍTICA QUE DEBE ESTAR PRESENTE ---
     def __init__(self,
                  side: str,
                  is_live_mode: bool,
