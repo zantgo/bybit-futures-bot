@@ -37,7 +37,7 @@ import numpy as np # Importado para cálculos de promedio
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
     from core.logging import memory_logger
-    from core.strategy.ep.event_processor import EventProcessor # Se quita GlobalStopLossException
+    from core.strategy.ep.event_processor import EventProcessor
     from connection import Ticker
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
@@ -106,11 +106,7 @@ class SessionManager:
         self._session_start_time: Optional[datetime.datetime] = None
         self._last_known_valid_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina el evento de stop loss global.
-        # self._global_stop_loss_event = None
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        # El evento de stop loss global ha sido eliminado.
 
     def initialize(self):
         """
@@ -142,10 +138,7 @@ class SessionManager:
         self._event_processor.initialize(
             operation_mode=operation_mode,
             pm_instance=self._pm
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se elimina el paso del evento de stop loss.
-            # global_stop_loss_event=self._global_stop_loss_event
-            # --- FIN DE LA MODIFICACIÓN ---
+            # El paso del evento de stop loss global ha sido eliminado.
         )
         
         if self._ta_manager:
@@ -207,28 +200,33 @@ class SessionManager:
             long_op = self._om_api.get_operation_by_side('long')
             short_op = self._om_api.get_operation_by_side('short')
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se elimina el cálculo de PNL y ROI a nivel de sesión.
-            # La lógica para `total_initial_capital` y `total_session_pnl` se elimina.
-            # --- FIN DE LA MODIFICACIÓN ---
+            # La lógica de PNL y ROI a nivel de sesión ha sido eliminada.
             
             if long_op:
                 summary['comisiones_totales_usdt_long'] = long_op.comisiones_totales_usdt
+                # --- INICIO DE LA MODIFICACIÓN (Solución al bug AttributeError) ---
+                # Ahora `summary['open_long_positions']` contiene una lista de OBJETOS LogicalPosition, no de diccionarios.
+                # Se accede a los atributos con notación de punto (p.entry_price) en lugar de p.get().
                 long_positions = summary.get('open_long_positions', [])
                 if long_positions:
-                    entry_prices = [p.get('entry_price', 0) for p in long_positions]
+                    # entry_prices = [p.get('entry_price', 0) for p in long_positions] # <-- LÍNEA ORIGINAL CON BUG COMENTADA
+                    entry_prices = [p.entry_price for p in long_positions if p.entry_price is not None]
                     summary['avg_entry_price_long'] = np.mean(entry_prices) if entry_prices else 'N/A'
                 else:
                     summary['avg_entry_price_long'] = 'N/A'
+                # --- FIN DE LA MODIFICACIÓN ---
 
             if short_op:
                 summary['comisiones_totales_usdt_short'] = short_op.comisiones_totales_usdt
+                # --- INICIO DE LA MODIFICACIÓN (Solución al bug AttributeError) ---
                 short_positions = summary.get('open_short_positions', [])
                 if short_positions:
-                    entry_prices = [p.get('entry_price', 0) for p in short_positions]
+                    # entry_prices = [p.get('entry_price', 0) for p in short_positions] # <-- LÍNEA ORIGINAL CON BUG COMENTADA
+                    entry_prices = [p.entry_price for p in short_positions if p.entry_price is not None]
                     summary['avg_entry_price_short'] = np.mean(entry_prices) if entry_prices else 'N/A'
                 else:
                     summary['avg_entry_price_short'] = 'N/A'
+                # --- FIN DE LA MODIFICACIÓN ---
                             
             return summary
         except Exception as e:
@@ -277,10 +275,7 @@ class SessionManager:
             self.stop()
             self.start()
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se elimina el bloque que actualizaba los límites globales a través de pm_api.
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        # El bloque para actualizar los límites globales de la sesión ha sido eliminado.
 
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""

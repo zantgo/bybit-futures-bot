@@ -35,32 +35,15 @@ class _ApiGetters:
         open_longs = long_op.posiciones_abiertas
         open_shorts = short_op.posiciones_abiertas
         
-        # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-        # El atributo 'pnl_no_realizado_usdt_vivo' y 'twrr_roi' fueron eliminados de la clase Operacion.
-        # En su lugar, obtenemos todas las métricas de rendimiento en vivo a través de una única
-        # llamada al método 'get_live_performance()', que contiene la lógica TWRR corregida.
-        
-        # unrealized_pnl_long = long_op.pnl_no_realizado_usdt_vivo # <-- LÍNEA ORIGINAL CON ERROR
-        # unrealized_pnl_short = short_op.pnl_no_realizado_usdt_vivo # <-- LÍNEA ORIGINAL CON ERROR
-        
         long_live_perf = long_op.get_live_performance(current_market_price, self._utils)
         short_live_perf = short_op.get_live_performance(current_market_price, self._utils)
         
-        unrealized_pnl_long = long_live_perf.get("pnl_no_realizado", 0.0)
-        unrealized_pnl_short = short_live_perf.get("pnl_no_realizado", 0.0)
-
-        initial_capital_ops = long_op.capital_inicial_usdt + short_op.capital_inicial_usdt
-
         operation_long_pnl = long_live_perf.get("pnl_total", 0.0)
         operation_short_pnl = short_live_perf.get("pnl_total", 0.0)
         operation_long_roi = long_live_perf.get("roi_twrr_vivo", 0.0)
         operation_short_roi = short_live_perf.get("roi_twrr_vivo", 0.0)
         
-        # operation_long_pnl = long_op.pnl_realizado_usdt + unrealized_pnl_long # <-- LÍNEA ORIGINAL
-        # operation_short_pnl = short_op.pnl_realizado_usdt + unrealized_pnl_short # <-- LÍNEA ORIGINAL
-        # operation_long_roi = long_op.twrr_roi # <-- LÍNEA ORIGINAL CON ERROR
-        # operation_short_roi = short_op.twrr_roi # <-- LÍNEA ORIGINAL CON ERROR
-        # --- FIN DE LA MODIFICACIÓN ---
+        initial_capital_ops = long_op.capital_inicial_usdt + short_op.capital_inicial_usdt
 
         active_tendencies = []
         if long_op.estado == 'ACTIVA': active_tendencies.append(long_op.tendencia)
@@ -90,21 +73,26 @@ class _ApiGetters:
             'capital_logico_total': f"L:${long_op.capital_operativo_logico_actual:.2f} / S:${short_op.capital_operativo_logico_actual:.2f}"
         }
 
+        # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
+        # Se elimina la conversión y el formateo. Ahora devolvemos la lista de OBJETOS directamente.
+        # Quien consuma esta API (la TUI, el SessionManager) será responsable de formatear o leer los datos.
         return {
             "initialized": True, "operation_mode": display_tendencia,
             "operation_status": op_status_summary, "operations_info": operations_info,
             "operation_long_pnl": operation_long_pnl, "operation_short_pnl": operation_short_pnl,
             "operation_long_roi": operation_long_roi, "operation_short_roi": operation_short_roi,
             "open_long_positions_count": len(open_longs), "open_short_positions_count": len(open_shorts),
-            "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs],
-            "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts],
+            # "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs], # <-- LÍNEA ORIGINAL
+            # "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts], # <-- LÍNEA ORIGINAL
+            "open_long_positions": open_longs,
+            "open_short_positions": open_shorts,
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": initial_capital_ops,
             "current_market_price": current_market_price,
         }
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def get_unrealized_pnl(self, current_price: float) -> float:
-        """Calcula el PNL no realizado total para ambas operaciones."""
         total_pnl = 0.0
         long_op = self._om_api.get_operation_by_side('long')
         short_op = self._om_api.get_operation_by_side('short')
