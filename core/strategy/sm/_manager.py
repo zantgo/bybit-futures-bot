@@ -275,8 +275,6 @@ class SessionManager:
             self.stop()
             self.start()
         
-        # El bloque para actualizar los límites globales de la sesión ha sido eliminado.
-
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""
         return self._is_running

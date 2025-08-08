@@ -82,8 +82,8 @@ class _ApiGetters:
             "operation_long_pnl": operation_long_pnl, "operation_short_pnl": operation_short_pnl,
             "operation_long_roi": operation_long_roi, "operation_short_roi": operation_short_roi,
             "open_long_positions_count": len(open_longs), "open_short_positions_count": len(open_shorts),
-            # "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs], # <-- LÍNEA ORIGINAL
-            # "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts], # <-- LÍNEA ORIGINAL
+            # "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs], # <-- LÍNEA ORIGINAL COMENTADA
+            # "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts], # <-- LÍNEA ORIGINAL COMENTADA
             "open_long_positions": open_longs,
             "open_short_positions": open_shorts,
             "total_realized_pnl_session": self.get_total_pnl_realized(),
