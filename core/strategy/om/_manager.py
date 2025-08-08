@@ -2,16 +2,13 @@ import datetime
 import uuid
 import threading
 from typing import Optional, Dict, Any, Tuple
+from dataclasses import asdict # Se importa asdict para la comparación de contenido
 
 try:
     from core.strategy.entities import Operacion, LogicalPosition, CapitalFlow
     from core.logging import memory_logger
     from core.strategy.sm import api as sm_api
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se importa el módulo 'utils' completo en lugar de solo la función 'safe_division'.
-    # from core._utils import safe_division # <-- LÍNEA ORIGINAL
     from core import utils
-    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError:
     # Fallback for isolated testing or type checking
     class Operacion:
@@ -43,11 +40,7 @@ except ImportError:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
     sm_api = None
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Fallback para 'utils' consistente con la nueva importación
-    # def safe_division(numerator, denominator): return 0 if denominator == 0 else numerator / denominator # <-- LÍNEA ORIGINAL
     utils = type('obj', (object,), {'safe_division': lambda n, d: 0 if d == 0 else n / d})()
-    # --- FIN DE LA MODIFICACIÓN ---
 
 
 class OperationManager:
@@ -55,15 +48,11 @@ class OperationManager:
     Gestiona el ciclo de vida y la configuración de las operaciones estratégicas
     (LONG y SHORT). Actualizado para manejar capital por posición y TWRR.
     """
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se añade 'utils: Any' a la firma del constructor para recibir el módulo.
-    # def __init__(self, config: Any, memory_logger_instance: Any): # <-- LÍNEA ORIGINAL
     def __init__(self, config: Any, utils: Any, memory_logger_instance: Any):
         self._config = config
-        self._utils = utils  # <-- Se almacena el módulo 'utils' en la instancia.
+        self._utils = utils
         self._memory_logger = memory_logger_instance
         self._initialized: bool = False
-    # --- FIN DE LA MODIFICACIÓN ---
         
         self.long_operation: Optional[Operacion] = None
         self.short_operation: Optional[Operacion] = None
@@ -132,12 +121,7 @@ class OperationManager:
                     summary = sm_api.get_session_summary()
                     current_price = summary.get('current_market_price', 0.0)
                 
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Se corrige la llamada para pasar 'self._utils' (el módulo completo)
-                # en lugar de una función aislada.
-                # live_performance = target_op.get_live_performance(current_price, safe_division) # <-- LÍNEA ORIGINAL CON ERROR
                 live_performance = target_op.get_live_performance(current_price, self._utils)
-                # --- FIN DE LA MODIFICACIÓN ---
 
                 equity_before_flow = live_performance.get("equity_actual_vivo", target_op.equity_total_usdt)
 
@@ -148,11 +132,7 @@ class OperationManager:
                 
                 pnl_periodo = (target_op.equity_total_usdt + live_performance.get("pnl_no_realizado", 0.0)) - equity_inicial_periodo
 
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Se utiliza el módulo utils inyectado
-                # retorno_periodo = safe_division(pnl_periodo, equity_inicial_periodo) # <-- LÍNEA ORIGINAL
                 retorno_periodo = self._utils.safe_division(pnl_periodo, equity_inicial_periodo)
-                # --- FIN DE LA MODIFICACIÓN ---
                 target_op.sub_period_returns.append(1 + retorno_periodo)
                 flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
                 target_op.capital_flows.append(flow_event)
@@ -165,16 +145,39 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
+            # --- INICIO DE LA MODIFICACIÓN (Solución al bug de logs repetitivos) ---
             if nuevas_posiciones_config is not None:
-                reconstructed_positions = []
-                for pos_dict in nuevas_posiciones_config:
-                    dict_para_objeto = pos_dict.copy()
-                    dict_para_objeto.pop('leverage', None)
-                    dict_para_objeto.pop('apalancamiento', None)
-                    reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
+                # 1. Convertimos la lista de objetos 'LogicalPosition' existente a una lista de diccionarios.
+                #    Esto nos permite comparar el *contenido* en lugar de las referencias de los objetos.
+                current_positions_as_dicts = [asdict(p) for p in target_op.posiciones]
+
+                # 2. Comparamos la lista de diccionarios actual con la nueva que hemos recibido.
+                #    Si son diferentes, significa que hubo un cambio real y debemos actualizar.
+                if current_positions_as_dicts != nuevas_posiciones_config:
+                    # La lógica original de reconstrucción ahora solo se ejecuta si hay un cambio.
+                    reconstructed_positions = []
+                    for pos_dict in nuevas_posiciones_config:
+                        dict_para_objeto = pos_dict.copy()
+                        # Eliminamos claves que no pertenecen al constructor de LogicalPosition
+                        dict_para_objeto.pop('leverage', None)
+                        dict_para_objeto.pop('apalancamiento', None)
+                        reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
                     
-                target_op.posiciones = reconstructed_positions
-                changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
+                    target_op.posiciones = reconstructed_positions
+                    changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
+            
+            # --- LÍNEAS ORIGINALES COMENTADAS ---
+            # if nuevas_posiciones_config is not None:
+            #     reconstructed_positions = []
+            #     for pos_dict in nuevas_posiciones_config:
+            #         dict_para_objeto = pos_dict.copy()
+            #         dict_para_objeto.pop('leverage', None)
+            #         dict_para_objeto.pop('apalancamiento', None)
+            #         reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
+            #         
+            #     target_op.posiciones = reconstructed_positions
+            #     changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
+            # --- FIN DE LA MODIFICACIÓN ---
 
             if estado_original == 'DETENIDA' and params:
                 target_op.capital_inicial_usdt = nuevo_capital_operativo
@@ -264,15 +267,11 @@ class OperationManager:
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
         return True, f"Proceso de detención para {side.upper()} iniciado."
     
-    # --- INICIO DE LA MODIFICACIÓN (Objetivo 6: Limpieza de Código) ---
-    # Este método queda obsoleto porque el atributo que actualizaba fue eliminado
-    # de la clase Operacion para evitar redundancia. Lo comentamos por completo.
     # def actualizar_pnl_vivo(self, side: str, pnl_no_realizado: float):
     #     with self._lock:
     #         op = self._get_operation_by_side_internal(side)
     #         if op:
     #             op.pnl_no_realizado_usdt_vivo = pnl_no_realizado
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:

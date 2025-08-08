@@ -1,4 +1,3 @@
-# ./core/strategy/pm/manager/_private_logic.py
 import datetime
 import uuid
 from typing import Any
@@ -73,17 +72,12 @@ class _PrivateLogic:
             self._memory_logger.log(f"Apertura fallida ({side.upper()}): No se encontró ninguna posición pendiente en el momento de la ejecución.", level="WARN")
             return
 
-        # --- INICIO DE LA CORRECCIÓN ---
-        # 1. Definir 'margin_to_use' ANTES de usarlo.
         margin_to_use = pending_position.capital_asignado
         
-        # 2. Ahora sí, realizar la comprobación.
         if margin_to_use < 1.0:
             self._memory_logger.log(f"Apertura omitida ({side.upper()}): Capital asignado ({margin_to_use:.4f} USDT) es menor al umbral mínimo.", level="WARN")
             return
-        # --- FIN DE LA CORRECCIÓN ---
 
-        # El resto de la función continúa igual
         result = self._executor.execute_open(
             side=side, entry_price=entry_price, timestamp=timestamp, 
             margin_to_use=margin_to_use, 
@@ -113,8 +107,12 @@ class _PrivateLogic:
                 self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in current_op.posiciones]})
                 if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                     self._position_state.sync_positions_from_operation(current_op)
-                
-    def _update_trailing_stop(self, side, position_obj: LogicalPosition, index: int, current_price: float):
+    
+    # --- INICIO DE LA MODIFICACIÓN (Solución al bug del TSL) ---
+    # 1. Se elimina el parámetro 'position_obj'. La función ahora solo necesita saber el 'index'
+    #    de la posición a actualizar y obtendrá la versión más reciente por sí misma.
+    # def _update_trailing_stop(self, side, position_obj: LogicalPosition, index: int, current_price: float): # <-- LÍNEA ORIGINAL COMENTADA
+    def _update_trailing_stop(self, side: str, index: int, current_price: float):
         operacion = self._om_api.get_operation_by_side(side)
         if not operacion or operacion.estado != 'ACTIVA':
             return
@@ -122,28 +120,44 @@ class _PrivateLogic:
         if index >= len(operacion.posiciones):
             return
         
-        pos_mutated_obj = operacion.posiciones[index]
-        activation_pct = position_obj.tsl_activation_pct_at_open
-        distance_pct = position_obj.tsl_distance_pct_at_open
-        is_ts_active = position_obj.ts_is_active
-        entry_price = position_obj.entry_price
+        # 2. Obtenemos el objeto de la posición directamente de la copia fresca de 'operacion'.
+        #    Este objeto será tanto la fuente de verdad para leer como el destino para escribir.
+        position_to_update = operacion.posiciones[index]
+        # pos_mutated_obj = operacion.posiciones[index] # <-- LÍNEA ORIGINAL (Referencia eliminada)
+        
+        # 3. Se reemplazan todas las lecturas de 'position_obj' para que usen 'position_to_update'.
+        #    Esto asegura que siempre trabajemos con el estado más reciente.
+        activation_pct = position_to_update.tsl_activation_pct_at_open
+        distance_pct = position_to_update.tsl_distance_pct_at_open
+        is_ts_active = position_to_update.ts_is_active
+        entry_price = position_to_update.entry_price
+        
+        # activation_pct = position_obj.tsl_activation_pct_at_open # <-- LÍNEA ORIGINAL COMENTADA
+        # distance_pct = position_obj.tsl_distance_pct_at_open # <-- LÍNEA ORIGINAL COMENTADA
+        # is_ts_active = position_obj.ts_is_active # <-- LÍNEA ORIGINAL COMENTADA
+        # entry_price = position_obj.entry_price # <-- LÍNEA ORIGINAL COMENTADA
 
         if not is_ts_active and activation_pct > 0 and entry_price:
             activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
             if (side == 'long' and current_price >= activation_price) or (side == 'short' and current_price <= activation_price):
-                pos_mutated_obj.ts_is_active = True
-                pos_mutated_obj.ts_peak_price = current_price
+                position_to_update.ts_is_active = True
+                position_to_update.ts_peak_price = current_price
         
-        if pos_mutated_obj.ts_is_active:
-            peak_price = pos_mutated_obj.ts_peak_price or current_price
+        if position_to_update.ts_is_active:
+            peak_price = position_to_update.ts_peak_price or current_price
             if (side == 'long' and current_price > peak_price) or (side == 'short' and current_price < peak_price):
-                pos_mutated_obj.ts_peak_price = current_price
+                position_to_update.ts_peak_price = current_price
             
-            new_peak_price = pos_mutated_obj.ts_peak_price
+            new_peak_price = position_to_update.ts_peak_price
             if new_peak_price:
                 new_stop_price = new_peak_price * (1 - distance_pct / 100) if side == 'long' else new_peak_price * (1 + distance_pct / 100)
-                pos_mutated_obj.ts_stop_price = new_stop_price
+                position_to_update.ts_stop_price = new_stop_price
+        # --- FIN DE LA MODIFICACIÓN ---
         
+        # Esta línea es correcta y se mantiene, ya que guarda los cambios realizados en 'position_to_update'
+        # (que es un objeto dentro de 'operacion.posiciones') de vuelta al gestor de operaciones.
+        # El siguiente paso será hacer que 'create_or_update_operation' sea más inteligente para no
+        # registrar un cambio si los datos son idénticos.
         self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in operacion.posiciones]})
 
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
