@@ -26,6 +26,9 @@ try:
     from core.strategy.pm._position_state import PositionState
     from core.strategy.pm._executor import PositionExecutor
     from core.exchange._bybit_adapter import BybitAdapter
+    # --- INICIO DE LA INTEGRACIÓN: Importar el modelo StandardOrder ---
+    from core.exchange._models import StandardOrder
+    # --- FIN DE LA INTEGRACIÓN ---
     
     # Módulos y APIs de soporte
     from core.logging import memory_logger as memory_logger_module
@@ -38,6 +41,9 @@ except ImportError:
     # Fallbacks para análisis estático y resiliencia
     SessionManager = OperationManager = PositionManager = None
     PositionState = PositionExecutor = BybitAdapter = ConnectionManager = None
+    # --- INICIO DE LA INTEGRACIÓN: Fallback para StandardOrder ---
+    StandardOrder = None
+    # --- FIN DE LA INTEGRACIÓN ---
     memory_logger_module = type('obj', (object,), {'log': print})()
     trading_api = None
     UserInputCancelled = Exception
@@ -179,7 +185,7 @@ class BotController:
         except UserInputCancelled:
             return False, "Prueba cancelada por el usuario."
         
-        # --- INICIO DE LA MODIFICACIÓN ---
+        # --- INICIO DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
         # 1. Definir los nombres de las cuentas al principio.
         long_account = self._config.BOT_CONFIG["ACCOUNTS"].get("LONGS")
         short_account = self._config.BOT_CONFIG["ACCOUNTS"].get("SHORTS")
@@ -190,10 +196,12 @@ class BotController:
         # 2. Banderas para saber si las posiciones se abrieron con éxito.
         long_position_opened = False
         short_position_opened = False
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
 
         print(f"\nObteniendo precio de mercado para {ticker}... ", end="", flush=True)
+        # --- INICIO DE LA INTEGRACIÓN: Se usa una única instancia del adaptador ---
         adapter = self._BybitAdapter(self._connection_manager)
+        # --- FIN DE LA INTEGRACIÓN ---
         
         if not adapter.initialize(symbol=ticker):
             print("FALLO.")
@@ -210,47 +218,108 @@ class BotController:
 
         try:
             print("\nEstableciendo apalancamiento...")
-            # Se establece en ambas cuentas para asegurar consistencia
-            if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=long_account):
+            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para apalancamiento ---
+            # Se usa el adaptador para establecer el apalancamiento
+            if not adapter.set_leverage(symbol=ticker, leverage=leverage, account_purpose='longs'):
                 return False, f"Fallo al establecer apalancamiento en '{long_account}'."
-            if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=short_account):
+            if not adapter.set_leverage(symbol=ticker, leverage=leverage, account_purpose='shorts'):
                 return False, f"Fallo al establecer apalancamiento en '{short_account}'."
+            
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # # Se establece en ambas cuentas para asegurar consistencia
+            # if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=long_account):
+            #     return False, f"Fallo al establecer apalancamiento en '{long_account}'."
+            # if not self._trading_api.set_leverage(symbol=ticker, buy_leverage=str(leverage), sell_leverage=str(leverage), account_name=short_account):
+            #     return False, f"Fallo al establecer apalancamiento en '{short_account}'."
+            # --- FIN DE LA INTEGRACIÓN ---
             print(" -> Éxito.")
 
             print(f"Abriendo posición LONG en '{long_account}'...")
-            long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
+            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para abrir posición LONG ---
+            # Se crea un objeto StandardOrder y se usa el adaptador
+            long_order = StandardOrder(
+                symbol=ticker, side="buy", order_type="market", quantity_contracts=qty_to_trade
+            )
+            success_long, msg_long = adapter.place_order(long_order, account_purpose='longs')
             
-            if not long_res or long_res.get('retCode') != 0:
-                return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
+            if not success_long:
+                return False, f"Fallo al abrir LONG: {msg_long}"
+
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # long_res = self._trading_api.place_market_order(symbol=ticker, side="Buy", quantity=qty_to_trade, account_name=long_account)
+            # if not long_res or long_res.get('retCode') != 0:
+            #     return False, f"Fallo al abrir LONG: {long_res.get('retMsg', 'Error') if long_res else 'N/A'}"
+            # --- FIN DE LA INTEGRACIÓN ---
             
-            print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
+            # --- INICIO DE LA INTEGRACIÓN: Mensaje de éxito actualizado ---
+            print(f" -> Éxito. OrderID: {msg_long}")
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # print(f" -> Éxito. OrderID: {long_res.get('result', {}).get('orderId')}")
+            # --- FIN DE LA INTEGRACIÓN ---
+            
             long_position_opened = True # Marcar como abierta
             time.sleep(1)
 
             print(f"Abriendo posición SHORT en '{short_account}'...")
-            short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
+            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para abrir posición SHORT ---
+            # Se crea un objeto StandardOrder y se usa el adaptador
+            short_order = StandardOrder(
+                symbol=ticker, side="sell", order_type="market", quantity_contracts=qty_to_trade
+            )
+            success_short, msg_short = adapter.place_order(short_order, account_purpose='shorts')
 
-            if not short_res or short_res.get('retCode') != 0:
-                return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
+            if not success_short:
+                return False, f"Fallo al abrir SHORT: {msg_short}"
             
-            print(f" -> Éxito. OrderID: {short_res.get('result', {}).get('orderId')}")
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # short_res = self._trading_api.place_market_order(symbol=ticker, side="Sell", quantity=qty_to_trade, account_name=short_account)
+            # if not short_res or short_res.get('retCode') != 0:
+            #     return False, f"Fallo al abrir SHORT: {short_res.get('retMsg', 'Error') if short_res else 'N/A'}"
+            # --- FIN DE LA INTEGRACIÓN ---
+            
+            # --- INICIO DE LA INTEGRACIÓN: Mensaje de éxito actualizado ---
+            print(f" -> Éxito. OrderID: {msg_short}")
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # print(f" -> Éxito. OrderID: {short_res.get('result', {}).get('orderId')}")
+            # --- FIN DE LA INTEGRACIÓN ---
+            
             short_position_opened = True # Marcar como abierta
             time.sleep(2)
 
         finally:
-            # --- INICIO DE LA MODIFICACIÓN ---
+            # --- INICIO DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
             # 3. El bloque de limpieza ahora usa las banderas para actuar de forma segura.
             print("\n--- Fase de Limpieza ---")
+            # --- INICIO DE LA INTEGRACIÓN: Uso del adaptador para cerrar posiciones ---
+            # Se usa el adaptador para cerrar las posiciones
             if long_position_opened:
                 print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
-                self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
+                close_long_order = StandardOrder(
+                    symbol=ticker, side="sell", order_type="market",
+                    quantity_contracts=qty_to_trade, reduce_only=True
+                )
+                adapter.place_order(close_long_order, account_purpose='longs')
             
             if short_position_opened:
                 print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
-                self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
+                close_short_order = StandardOrder(
+                    symbol=ticker, side="buy", order_type="market",
+                    quantity_contracts=qty_to_trade, reduce_only=True
+                )
+                adapter.place_order(close_short_order, account_purpose='shorts')
+
+            # --- CÓDIGO ANTIGUO COMENTADO ---
+            # if long_position_opened:
+            #     print(f"Cerrando posiciones de {ticker} en '{long_account}'...")
+            #     self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=long_account)
+            # 
+            # if short_position_opened:
+            #     print(f"Cerrando posiciones de {ticker} en '{short_account}'...")
+            #     self._trading_api.close_all_symbol_positions(symbol=ticker, account_name=short_account)
+            # --- FIN DE LA INTEGRACIÓN ---
             
             self._memory_logger.log("BotController[Test]: Limpieza completada.", "INFO")
-            # --- FIN DE LA MODIFICACIÓN ---
+            # --- FIN DE LA MODIFICACIÓN (Mantenido del código antiguo) ---
 
         return True, f"Prueba de trading completada con éxito para {ticker}."
     
@@ -319,7 +388,6 @@ class BotController:
             'Ticker Symbol': self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         }
 
-    # --- INICIO DE LA FUNCIÓN CORREGIDA ---
     def update_general_config(self, params: Dict[str, Any]) -> bool:
         """
         Actualiza la configuración a nivel de aplicación (BOT_CONFIG).
@@ -368,7 +436,6 @@ class BotController:
                  config_changed = False # Reseteamos para el siguiente item del bucle
 
         return True
-    # --- FIN DE LA FUNCIÓN CORREGIDA ---
 
     def shutdown_bot(self):
         """Orquesta el apagado de los servicios de bajo nivel."""
