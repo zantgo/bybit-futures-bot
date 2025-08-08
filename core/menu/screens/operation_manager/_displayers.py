@@ -104,8 +104,6 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
-# --- Funciones de Visualización ---
-
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -228,9 +226,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
         for pos in open_positions:
             pnl = 0.0
-            # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-            # Se reemplazan las llamadas .get('key') por la notación de objeto .key
-            # ya que 'pos' es un objeto LogicalPosition, no un diccionario.
             entry_price = pos.entry_price or 0.0
             size = pos.size_contracts or 0.0
             if current_price > 0 and entry_price > 0:
@@ -247,9 +242,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
 
             ts_status_str = "Inactivo"
-            # if pos.get('ts_is_active'): # <-- LÍNEA ORIGINAL CON BUG
             if pos.ts_is_active:
-                # ts_stop = pos.get('ts_stop_price') # <-- LÍNEA ORIGINAL CON BUG
                 ts_stop = pos.ts_stop_price
                 ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
 
@@ -263,7 +256,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
                 f"{ts_status_str:<20}"
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
-            # --- FIN DE LA MODIFICACIÓN ---
     print("└" + "─" * (box_width - 2) + "┘")
 
     pending_positions = operacion.posiciones_pendientes
