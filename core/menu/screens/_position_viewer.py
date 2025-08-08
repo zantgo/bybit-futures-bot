@@ -19,7 +19,7 @@ from .._helpers import (
     print_tui_header, 
     press_enter_to_continue, 
     MENU_STYLE,
-    show_help_popup # <-- NUEVA IMPORTACIÓN
+    show_help_popup
 )
 
 def show_position_viewer_screen(pm_api: Any):
@@ -44,12 +44,11 @@ def show_position_viewer_screen(pm_api: Any):
             time.sleep(2)
             return
 
-        # <<< INICIO MODIFICACIÓN: Añadir opción de ayuda al menú principal >>>
         menu_items = [
             f"[1] Gestionar Posiciones LONG ({longs_count} abiertas)",
             f"[2] Gestionar Posiciones SHORT ({shorts_count} abiertas)",
             None,
-            "[h] Ayuda sobre esta pantalla", # <-- NUEVA OPCIÓN
+            "[h] Ayuda sobre esta pantalla",
             None,
             "[b] Volver al Dashboard Principal"
         ]
@@ -64,9 +63,9 @@ def show_position_viewer_screen(pm_api: Any):
             _manage_side_positions('long', pm_api)
         elif choice == 1:
             _manage_side_positions('short', pm_api)
-        elif choice == 3: # Índice de la opción de Ayuda
+        elif choice == 3:
             show_help_popup("position_viewer")
-        else: # Volver o ESC
+        else:
             break
 
 
@@ -92,7 +91,6 @@ def _manage_side_positions(side: str, pm_api: Any):
             time.sleep(2)
             return
             
-        # --- Construcción del menú con detalles (Lógica existente, sin cambios) ---
         menu_items = []
         if not open_positions:
             menu_items.append("(No hay posiciones lógicas abiertas en este lado)")
@@ -103,7 +101,10 @@ def _manage_side_positions(side: str, pm_api: Any):
                 entry_price = pos.get('entry_price', 0.0)
                 size_contracts = pos.get('size_contracts', 0.0)
                 sl_price = pos.get('stop_loss_price')
+                
+                # Búsqueda del estado del TSL desde la estructura de datos 'pos'
                 ts_info = "TS Inactivo"
+                # Esta lógica se mantiene por si se añade 'ts_is_active' al resumen en el futuro.
                 if pos.get('ts_is_active'):
                     ts_stop = pos.get('ts_stop_price')
                     if ts_stop is not None:
@@ -114,7 +115,6 @@ def _manage_side_positions(side: str, pm_api: Any):
                 if current_price > 0 and entry_price > 0 and size_contracts > 0:
                     pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
                 
-                # Formato de la entrada del menú
                 sl_str = f"{sl_price:.4f}" if sl_price is not None else 'N/A'
                 entry_str = f"Idx {i:<2} | PNL: {pnl:>+8.2f} USDT | Entrada: {entry_price:>9.4f} | Tamaño: {size_contracts:>8.4f} | SL: {sl_str:<9} | {ts_info}"
                 menu_items.append(f"[Cerrar] {entry_str}")
@@ -123,7 +123,7 @@ def _manage_side_positions(side: str, pm_api: Any):
             None,
             f"[Cerrar TODAS] las {len(open_positions)} posiciones {side.upper()}" if open_positions else "(No hay posiciones para cerrar)",
             "[r] Refrescar",
-            "[h] Ayuda", # <-- NUEVA OPCIÓN
+            "[h] Ayuda",
             None,
             "[b] Volver"
         ])
@@ -138,10 +138,11 @@ def _manage_side_positions(side: str, pm_api: Any):
         if choice_index is None:
             break
 
-        try:
-            action_text = menu_items[choice_index]
-        except IndexError:
-            break
+        # Asegurarse de que el índice elegido es válido para la lista de items del menú
+        if not (0 <= choice_index < len(menu_items)):
+            continue
+
+        action_text = menu_items[choice_index]
 
         if action_text is None or "Volver" in action_text:
             break
@@ -153,27 +154,38 @@ def _manage_side_positions(side: str, pm_api: Any):
             show_help_popup("position_viewer")
             continue
         
+        # --- INICIO DE LA MODIFICACIÓN (Implementar Cierre Manual) ---
+        # Se actualiza esta sección para usar la nueva función de la API.
         if "[Cerrar] Idx" in action_text:
             try:
-                # Lógica de cierre individual (sin cambios)
-                pos_index_to_close = int(action_text.split('|')[0].split(' ')[2])
+                # El índice de la posición en la lista de 'open_positions' es el mismo
+                # que el índice de la opción en el menú.
+                pos_index_to_close = choice_index
+                
+                print(f"\nEnviando orden de cierre para la posición con índice {pos_index_to_close}...")
+                # Llamamos a la nueva función de la API centralizada.
                 success, msg = pm_api.manual_close_logical_position_by_index(side, pos_index_to_close)
-                print(f"\n{msg}")
-                time.sleep(2.0)
+
+                if success:
+                    print(f"\033[92mÉXITO:\033[0m {msg}")
+                else:
+                    print(f"\033[91mFALLO:\033[0m {msg}")
+                
+                time.sleep(2.5)
             except (ValueError, IndexError):
-                print("\nError al procesar la selección.")
+                print("\nError al procesar la selección. Inténtalo de nuevo.")
                 time.sleep(1.5)
+        # --- FIN DE LA MODIFICACIÓN ---
 
         elif "[Cerrar TODAS]" in action_text and open_positions:
-            # Lógica de cierre total (sin cambios)
             confirm_title = f"¿Confirmas cerrar TODAS las {len(open_positions)} posiciones {side.upper()}?"
             confirm_menu = TerminalMenu(["[s] Sí, cerrar todas", "[n] No, cancelar"], title=confirm_title, **MENU_STYLE)
             if confirm_menu.show() == 0:
                 print("\nEnviando órdenes de cierre total, por favor espera...")
-                closed_successfully = pm_api.close_all_logical_positions(side, reason="MANUAL_CLOSE_ALL")
-                if closed_successfully:
-                    print(f"\nÉXITO: Todas las posiciones {side.upper()} han sido cerradas.")
+                success, message = pm_api.close_all_logical_positions(side, reason="MANUAL_CLOSE_ALL")
+                if success:
+                    print(f"\n\033[92mÉXITO:\033[0m {message}")
                 else:
-                    print(f"\nFALLO: No se pudieron cerrar todas las posiciones. Revisa los logs.")
+                    print(f"\n\033[91mFALLO:\033[0m {message}")
                 time.sleep(3)
-                break # Rompe el bucle interno para volver al menú principal de posiciones
+                # No necesitamos 'break' aquí, el bucle se refrescará y mostrará la lista vacía.

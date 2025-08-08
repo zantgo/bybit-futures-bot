@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, Tuple, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .manager import PositionManager
-    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
+    from core.strategy.entities import Operacion, LogicalPosition
 
 # --- Módulos API de Dependencia ---
 # El PM API ahora necesita conocer al SM API para obtener el precio
@@ -43,19 +43,36 @@ def get_session_start_time() -> Optional[datetime.datetime]:
     return _pm_instance.get_session_start_time() if _pm_instance else None
 
 # --- Funciones de Control de Posiciones ---
-def manual_close_logical_position_by_index(side: str, index: int) -> Tuple[bool, str]:
-    if not _pm_instance: return False, "PM no instanciado"
-    return _pm_instance.manual_close_logical_position_by_index(side, index)
 
-def close_all_logical_positions(side: str, reason: str = "MANUAL_ALL") -> bool:
-    if not _pm_instance: return False
+# --- INICIO DE LA MODIFICACIÓN (Implementar Cierre Manual) ---
+# Se añade la nueva función proxy que delega la llamada de cierre manual
+# al método correspondiente en la instancia del PositionManager.
+def manual_close_logical_position_by_index(side: str, index: int) -> Tuple[bool, str]:
+    """
+    Delega la llamada para cerrar manualmente una posición lógica específica por su
+    índice en la lista de posiciones abiertas.
+    """
+    if not _pm_instance:
+        return False, "PM no instanciado"
+    return _pm_instance.manual_close_logical_position_by_index(side, index)
+# --- FIN DE LA MODIFICACIÓN ---
+
+def close_all_logical_positions(side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
+    """
+    Delega la llamada para cerrar todas las posiciones lógicas de un lado.
+    Se corrige el tipo de retorno para que coincida con la implementación.
+    """
+    if not _pm_instance:
+        return False, "PM no instanciado"
     return _pm_instance.close_all_logical_positions(side, reason)
 
 # --- Funciones de Ayuda y Sistema ---
 def force_balance_update():
     """Delega la llamada para forzar una actualización de la caché de balances reales."""
-    if _pm_instance:
-        _pm_instance.force_balance_update()
+    # La funcionalidad subyacente está obsoleta, pero se mantiene la llamada por si se reutiliza.
+    # if _pm_instance:
+    #     _pm_instance.force_balance_update()
+    pass
 
 def get_current_market_price() -> Optional[float]:
     """

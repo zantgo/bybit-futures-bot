@@ -21,7 +21,7 @@ from ..._helpers import (
     MENU_STYLE,
     UserInputCancelled,
     _get_terminal_width,
-    _create_config_box_line, # La función importada
+    _create_config_box_line,
     _truncate_text,
     _clean_ansi_codes,
 )
@@ -29,8 +29,13 @@ from ..._helpers import (
 try:
     from core.strategy.entities import Operacion, LogicalPosition
     from dataclasses import asdict
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Importamos la API del PM para poder llamar a la función de cierre.
+    from core.strategy.pm import api as pm_api
+    # --- FIN DE LA MODIFICACIÓN ---
 except ImportError:
     asdict = lambda x: x
+    pm_api = None
     class Operacion: pass
     class LogicalPosition: pass
 
@@ -54,12 +59,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
         content = f"  {label:<{key_len}} : {value}"
         print(_create_config_box_line(content, box_width))
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # La función _create_config_box_line ya no acepta 'alignment'.
-    # Para centrar el texto, lo hacemos manualmente antes de pasar el contenido.
     title_capital = "Configuración de Capital y Posiciones"
     print(_create_config_box_line(title_capital.center(box_width - 4), box_width))
-    # --- FIN DE LA CORRECCIÓN ---
     
     posiciones = params.get('posiciones', [])
     capital_operativo_total = sum(p.get('capital_asignado', 0.0) for p in posiciones)
@@ -71,7 +72,8 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
     
     for pos in posiciones:
         estado_val = pos.get('estado', 'N/A')
-        color = "\033[92m" if estado_val == 'ABIERTA' else "\033[96m"
+        # Corrección de color para que ambos estados tengan su propio color y se resetee
+        color = "\033[92m" if estado_val == 'ABIERTA' else "\033[96m" if estado_val == 'PENDIENTE' else ""
         reset = "\033[0m"
         line = (
             f"  {str(pos.get('id', ''))[-6:]:<10} "
@@ -145,7 +147,7 @@ def _display_setup_box(params: Dict, box_width: int, is_modification: bool):
 
     print("└" + "─" * (box_width - 2) + "┘")
 
-def _manage_position_list(params: Dict) -> bool:
+def _manage_position_list(params: Dict, side: str) -> bool:
     while True:
         clear_screen()
         print_tui_header("Gestor de Lista de Posiciones")
@@ -153,18 +155,27 @@ def _manage_position_list(params: Dict) -> bool:
 
         posiciones = params.get('posiciones', [])
         has_pending = any(p.get('estado') == 'PENDIENTE' for p in posiciones)
+        has_open = any(p.get('estado') == 'ABIERTA' for p in posiciones)
 
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
+            # Opciones para PENDIENTES
             "[1] Añadir nueva posición PENDIENTE",
-            "[2] Modificar capital de TODAS las posiciones PENDIENTES",
-            "[3] Eliminar la última posición PENDIENTE",
+            "[2] Modificar capital de TODAS las PENDIENTES",
+            "[3] Eliminar la última PENDIENTE",
+            None,
+            # Nueva opción para ABIERTAS
+            "[4] Cerrar posición ABIERTA específica",
             None,
             "[b] Volver al menú anterior"
         ]
 
+        # Deshabilitar opciones si no aplican
         if not has_pending:
-            menu_items[1] = "[2] Modificar capital... (No hay posiciones pendientes)"
-            menu_items[2] = "[3] Eliminar última... (No hay posiciones pendientes)"
+            menu_items[1] = "[2] Modificar capital... (No hay posiciones PENDIENTES)"
+            menu_items[2] = "[3] Eliminar última... (No hay posiciones PENDIENTES)"
+        if not has_open:
+            menu_items[4] = "[4] Cerrar posición... (No hay posiciones ABIERTAS)"
         
         menu = TerminalMenu(menu_items, title="\nAcciones:", **MENU_STYLE)
         choice = menu.show()
@@ -174,10 +185,8 @@ def _manage_position_list(params: Dict) -> bool:
                 capital = get_input("Capital a asignar para la nueva posición (USDT)", float, 1.0, min_val=0.1)
                 apalancamiento = params.get('apalancamiento', 10.0)
                 new_pos = {
-                    'id': f"pos_{uuid.uuid4().hex[:8]}",
-                    'estado': 'PENDIENTE',
-                    'capital_asignado': capital,
-                    'valor_nominal': capital * apalancamiento,
+                    'id': f"pos_{uuid.uuid4().hex[:8]}", 'estado': 'PENDIENTE',
+                    'capital_asignado': capital, 'valor_nominal': capital * apalancamiento,
                     'entry_timestamp': None, 'entry_price': None, 'margin_usdt': 0.0,
                     'size_contracts': 0.0, 'tsl_activation_pct_at_open': 0.0,
                     'tsl_distance_pct_at_open': 0.0, 'ts_is_active': False
@@ -187,9 +196,9 @@ def _manage_position_list(params: Dict) -> bool:
             
             elif choice == 1:
                 if not has_pending:
-                    print("\nNo hay posiciones pendientes para modificar."); time.sleep(2)
+                    print("\nNo hay posiciones PENDIENTES para modificar."); time.sleep(2)
                     continue
-                nuevo_capital = get_input("Nuevo capital para TODAS las posiciones pendientes (USDT)", float, 1.0, min_val=0.1)
+                nuevo_capital = get_input("Nuevo capital para TODAS las PENDIENTES (USDT)", float, 1.0, min_val=0.1)
                 for pos in params['posiciones']:
                     if pos.get('estado') == 'PENDIENTE':
                         pos['capital_asignado'] = nuevo_capital
@@ -198,20 +207,75 @@ def _manage_position_list(params: Dict) -> bool:
 
             elif choice == 2:
                 if not has_pending:
-                    print("\nNo hay posiciones pendientes para eliminar."); time.sleep(2)
+                    print("\nNo hay posiciones PENDIENTES para eliminar."); time.sleep(2)
                     continue
                 for i in range(len(params['posiciones']) - 1, -1, -1):
                     if params['posiciones'][i].get('estado') == 'PENDIENTE':
                         params['posiciones'].pop(i)
-                        print("\nÚltima posición pendiente eliminada."); time.sleep(1.5)
+                        print("\nÚltima posición PENDIENTE eliminada."); time.sleep(1.5)
                         return True
             
-            elif choice == 4 or choice is None:
+            elif choice == 4:
+                if not has_open:
+                    print("\nNo hay posiciones ABIERTAS para cerrar."); time.sleep(2)
+                    continue
+                
+                # Creamos un submenú para seleccionar qué posición abierta cerrar
+                open_positions_with_indices = [
+                    (i, p) for i, p in enumerate(posiciones) if p.get('estado') == 'ABIERTA'
+                ]
+                
+                # Obtenemos el índice relativo de las posiciones abiertas para la API
+                open_positions_relative_indices = {
+                    original_idx: relative_idx for relative_idx, (original_idx, _) in enumerate(open_positions_with_indices)
+                }
+
+                submenu_items = [
+                    f"Cerrar Posición ID: ...{p['id'][-6:]} (Capital: ${p['capital_asignado']:.2f})" 
+                    for _, p in open_positions_with_indices
+                ]
+                submenu_items.append("[c] Cancelar")
+                
+                close_menu = TerminalMenu(submenu_items, title="Selecciona la posición ABIERTA a cerrar:", **MENU_STYLE)
+                selected_index_in_submenu = close_menu.show()
+                
+                if selected_index_in_submenu is not None and selected_index_in_submenu < len(open_positions_with_indices):
+                    # El índice seleccionado en el submenú corresponde al índice en `open_positions_with_indices`
+                    original_list_index, pos_to_close = open_positions_with_indices[selected_index_in_submenu]
+                    
+                    print(f"\nEnviando orden de cierre para la posición ...{pos_to_close['id'][-6:]}...")
+                    
+                    # Buscamos el índice relativo que la API espera (índice dentro de la lista de posiciones abiertas)
+                    api_index_to_close = open_positions_relative_indices.get(original_list_index)
+
+                    if api_index_to_close is None:
+                        print(f"\033[91mFALLO:\033[0m No se pudo determinar el índice relativo para la API."); time.sleep(2.5)
+                        continue
+
+                    success, msg = pm_api.manual_close_logical_position_by_index(side, api_index_to_close)
+                    
+                    if success:
+                        print(f"\033[92mÉXITO:\033[0m {msg}")
+                        # Actualizamos el estado en nuestra copia local para que la UI se refresque correctamente
+                        params['posiciones'][original_list_index]['estado'] = 'PENDIENTE'
+                        # Reseteamos valores de la posición cerrada
+                        params['posiciones'][original_list_index].update({
+                            'entry_timestamp': None, 'entry_price': None, 'margin_usdt': 0.0,
+                            'size_contracts': 0.0, 'ts_is_active': False, 'stop_loss_price': None,
+                            'est_liq_price': None, 'api_order_id': None
+                        })
+                        time.sleep(2.5)
+                        return True # Indicamos que hubo un cambio
+                    else:
+                        print(f"\033[91mFALLO:\033[0m {msg}")
+                        time.sleep(2.5)
+
+            elif choice == 6 or choice is None:
                 return False
+        # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
-
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     config_module = _deps.get("config_module")
@@ -237,32 +301,23 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         default_positions = []
         for _ in range(max_pos):
             new_pos = {
-                'id': f"pos_{uuid.uuid4().hex[:8]}",
-                'estado': 'PENDIENTE', 'capital_asignado': base_size,
-                'valor_nominal': base_size * apalancamiento,
-                'entry_timestamp': None, 'entry_price': None, 'margin_usdt': 0.0,
-                'size_contracts': 0.0, 'tsl_activation_pct_at_open': 0.0,
-                'tsl_distance_pct_at_open': 0.0, 'ts_is_active': False
+                'id': f"pos_{uuid.uuid4().hex[:8]}", 'estado': 'PENDIENTE', 'capital_asignado': base_size,
+                'valor_nominal': base_size * apalancamiento, 'entry_timestamp': None, 'entry_price': None, 'margin_usdt': 0.0,
+                'size_contracts': 0.0, 'tsl_activation_pct_at_open': 0.0, 'tsl_distance_pct_at_open': 0.0, 'ts_is_active': False
             }
             default_positions.append(new_pos)
 
         temp_params = {
-            'tendencia': "LONG_ONLY" if side == 'long' else "SHORT_ONLY",
-            'posiciones': default_positions,
-            'apalancamiento': apalancamiento,
-            'sl_posicion_individual_pct': defaults["RISK"]["INDIVIDUAL_SL_PCT"],
-            'tsl_activacion_pct': defaults["RISK"]["TSL_ACTIVATION_PCT"],
-            'tsl_distancia_pct': defaults["RISK"]["TSL_DISTANCE_PCT"],
+            'tendencia': "LONG_ONLY" if side == 'long' else "SHORT_ONLY", 'posiciones': default_positions,
+            'apalancamiento': apalancamiento, 'sl_posicion_individual_pct': defaults["RISK"]["INDIVIDUAL_SL_PCT"],
+            'tsl_activacion_pct': defaults["RISK"]["TSL_ACTIVATION_PCT"], 'tsl_distancia_pct': defaults["RISK"]["TSL_DISTANCE_PCT"],
             'sl_roi_pct': defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["PERCENTAGE"] if defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["ENABLED"] else None,
             'tsl_roi_activacion_pct': defaults["OPERATION_LIMITS"]["ROI_TSL"].get("ACTIVATION_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None,
             'tsl_roi_distancia_pct': defaults["OPERATION_LIMITS"]["ROI_TSL"].get("DISTANCE_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None,
             'max_comercios': defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None,
             'tiempo_maximo_min': defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None,
-            'accion_al_finalizar': defaults["OPERATION_LIMITS"]["AFTER_STATE"],
-            'tipo_cond_entrada': 'MARKET',
-            'valor_cond_entrada': 0.0,
-            'tipo_cond_salida': None,
-            'valor_cond_salida': None
+            'accion_al_finalizar': defaults["OPERATION_LIMITS"]["AFTER_STATE"], 'tipo_cond_entrada': 'MARKET',
+            'valor_cond_entrada': 0.0, 'tipo_cond_salida': None, 'valor_cond_salida': None
         }
 
     params_changed = False
@@ -292,7 +347,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
 
         try:
             if choice == 0:
-                if _manage_position_list(temp_params):
+                if _manage_position_list(temp_params, side):
                     params_changed = True
             
             elif choice == 1:

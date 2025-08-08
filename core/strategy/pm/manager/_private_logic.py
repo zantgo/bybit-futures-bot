@@ -104,38 +104,31 @@ class _PrivateLogic:
                     pos_to_update.api_avg_fill_price = new_pos_data.api_avg_fill_price
                     pos_to_update.api_filled_qty = new_pos_data.api_filled_qty
                 
-                self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in current_op.posiciones]})
+                self._om_api.create_or_update_operation(side, {'posiciones': current_op.posiciones})
                 if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                     self._position_state.sync_positions_from_operation(current_op)
     
-    # --- INICIO DE LA MODIFICACIÓN (Solución al bug del TSL) ---
-    # 1. Se elimina el parámetro 'position_obj'. La función ahora solo necesita saber el 'index'
-    #    de la posición a actualizar y obtendrá la versión más reciente por sí misma.
-    # def _update_trailing_stop(self, side, position_obj: LogicalPosition, index: int, current_price: float): # <-- LÍNEA ORIGINAL COMENTADA
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         operacion = self._om_api.get_operation_by_side(side)
-        if not operacion or operacion.estado != 'ACTIVA':
+        
+        # --- INICIO DE LA MODIFICACIÓN (Solución al Bug del TSL) ---
+        # La condición original (operacion.estado != 'ACTIVA') impedía que el TSL funcionara
+        # en estado 'PAUSADA'. La nueva condición permite la gestión de posiciones existentes
+        # mientras la operación esté activa o pausada, pero no si está detenida o esperando.
+        # if not operacion or operacion.estado != 'ACTIVA': # <-- LÍNEA ORIGINAL CON BUG
+        if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
             return
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if index >= len(operacion.posiciones):
             return
         
-        # 2. Obtenemos el objeto de la posición directamente de la copia fresca de 'operacion'.
-        #    Este objeto será tanto la fuente de verdad para leer como el destino para escribir.
         position_to_update = operacion.posiciones[index]
-        # pos_mutated_obj = operacion.posiciones[index] # <-- LÍNEA ORIGINAL (Referencia eliminada)
         
-        # 3. Se reemplazan todas las lecturas de 'position_obj' para que usen 'position_to_update'.
-        #    Esto asegura que siempre trabajemos con el estado más reciente.
         activation_pct = position_to_update.tsl_activation_pct_at_open
         distance_pct = position_to_update.tsl_distance_pct_at_open
         is_ts_active = position_to_update.ts_is_active
         entry_price = position_to_update.entry_price
-        
-        # activation_pct = position_obj.tsl_activation_pct_at_open # <-- LÍNEA ORIGINAL COMENTADA
-        # distance_pct = position_obj.tsl_distance_pct_at_open # <-- LÍNEA ORIGINAL COMENTADA
-        # is_ts_active = position_obj.ts_is_active # <-- LÍNEA ORIGINAL COMENTADA
-        # entry_price = position_obj.entry_price # <-- LÍNEA ORIGINAL COMENTADA
 
         if not is_ts_active and activation_pct > 0 and entry_price:
             activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
@@ -152,13 +145,8 @@ class _PrivateLogic:
             if new_peak_price:
                 new_stop_price = new_peak_price * (1 - distance_pct / 100) if side == 'long' else new_peak_price * (1 + distance_pct / 100)
                 position_to_update.ts_stop_price = new_stop_price
-        # --- FIN DE LA MODIFICACIÓN ---
         
-        # Esta línea es correcta y se mantiene, ya que guarda los cambios realizados en 'position_to_update'
-        # (que es un objeto dentro de 'operacion.posiciones') de vuelta al gestor de operaciones.
-        # El siguiente paso será hacer que 'create_or_update_operation' sea más inteligente para no
-        # registrar un cambio si los datos son idénticos.
-        self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in operacion.posiciones]})
+        self._om_api.create_or_update_operation(side, {'posiciones': operacion.posiciones})
 
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         op_before = self._om_api.get_operation_by_side(side)
@@ -196,7 +184,7 @@ class _PrivateLogic:
                 pos_to_reset.api_filled_qty = None
 
             params = {
-                'posiciones': [asdict(p) for p in op_after.posiciones],
+                'posiciones': op_after.posiciones,
                 'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
             }
             if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:
