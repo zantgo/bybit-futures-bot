@@ -2,7 +2,7 @@ import datetime
 import uuid
 import threading
 from typing import Optional, Dict, Any, Tuple
-from dataclasses import asdict # Se importa asdict para la comparación de contenido
+from dataclasses import asdict
 
 try:
     from core.strategy.entities import Operacion, LogicalPosition, CapitalFlow
@@ -42,15 +42,15 @@ except ImportError:
     sm_api = None
     utils = type('obj', (object,), {'safe_division': lambda n, d: 0 if d == 0 else n / d})()
 
-
 class OperationManager:
     """
     Gestiona el ciclo de vida y la configuración de las operaciones estratégicas
     (LONG y SHORT). Actualizado para manejar capital por posición y TWRR.
     """
-    def __init__(self, config: Any, utils: Any, memory_logger_instance: Any):
+    def __init__(self, config: Any, utils: Any, trading_api: Any, memory_logger_instance: Any):
         self._config = config
         self._utils = utils
+        self._trading_api = trading_api
         self._memory_logger = memory_logger_instance
         self._initialized: bool = False
         
@@ -108,6 +108,10 @@ class OperationManager:
             changes_log = []
             
             nuevas_posiciones_config = params.get('posiciones')
+            
+            if nuevas_posiciones_config and isinstance(nuevas_posiciones_config[0], LogicalPosition):
+                nuevas_posiciones_config = [asdict(p) for p in nuevas_posiciones_config]
+
             nuevo_capital_operativo = 0.0
             if nuevas_posiciones_config is not None:
                 nuevo_capital_operativo = sum(p.get('capital_asignado', 0) for p in nuevas_posiciones_config)
@@ -116,22 +120,14 @@ class OperationManager:
             diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
 
             if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and abs(diferencia_capital) > 1e-9:
-                current_price = 0.0
-                if sm_api:
-                    summary = sm_api.get_session_summary()
-                    current_price = summary.get('current_market_price', 0.0)
-                
+                current_price = sm_api.get_session_summary().get('current_market_price', 0.0) if sm_api else 0.0
                 live_performance = target_op.get_live_performance(current_price, self._utils)
-
                 equity_before_flow = live_performance.get("equity_actual_vivo", target_op.equity_total_usdt)
-
                 equity_inicial_periodo = target_op.capital_inicial_usdt
                 if target_op.capital_flows:
                     last_flow = target_op.capital_flows[-1]
                     equity_inicial_periodo = last_flow.equity_before_flow + last_flow.flow_amount
-                
                 pnl_periodo = (target_op.equity_total_usdt + live_performance.get("pnl_no_realizado", 0.0)) - equity_inicial_periodo
-
                 retorno_periodo = self._utils.safe_division(pnl_periodo, equity_inicial_periodo)
                 target_op.sub_period_returns.append(1 + retorno_periodo)
                 flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
@@ -145,39 +141,16 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
-            # --- INICIO DE LA MODIFICACIÓN (Solución al bug de logs repetitivos) ---
             if nuevas_posiciones_config is not None:
-                # 1. Convertimos la lista de objetos 'LogicalPosition' existente a una lista de diccionarios.
-                #    Esto nos permite comparar el *contenido* en lugar de las referencias de los objetos.
                 current_positions_as_dicts = [asdict(p) for p in target_op.posiciones]
-
-                # 2. Comparamos la lista de diccionarios actual con la nueva que hemos recibido.
-                #    Si son diferentes, significa que hubo un cambio real y debemos actualizar.
                 if current_positions_as_dicts != nuevas_posiciones_config:
-                    # La lógica original de reconstrucción ahora solo se ejecuta si hay un cambio.
                     reconstructed_positions = []
                     for pos_dict in nuevas_posiciones_config:
                         dict_para_objeto = pos_dict.copy()
-                        # Eliminamos claves que no pertenecen al constructor de LogicalPosition
-                        dict_para_objeto.pop('leverage', None)
-                        dict_para_objeto.pop('apalancamiento', None)
+                        dict_para_objeto.pop('leverage', None); dict_para_objeto.pop('apalancamiento', None)
                         reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
-                    
                     target_op.posiciones = reconstructed_positions
                     changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
-            
-            # --- LÍNEAS ORIGINALES COMENTADAS ---
-            # if nuevas_posiciones_config is not None:
-            #     reconstructed_positions = []
-            #     for pos_dict in nuevas_posiciones_config:
-            #         dict_para_objeto = pos_dict.copy()
-            #         dict_para_objeto.pop('leverage', None)
-            #         dict_para_objeto.pop('apalancamiento', None)
-            #         reconstructed_positions.append(LogicalPosition(**dict_para_objeto))
-            #         
-            #     target_op.posiciones = reconstructed_positions
-            #     changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
-            # --- FIN DE LA MODIFICACIÓN ---
 
             if estado_original == 'DETENIDA' and params:
                 target_op.capital_inicial_usdt = nuevo_capital_operativo
@@ -200,6 +173,13 @@ class OperationManager:
                 if not met:
                     target_op.estado = 'EN_ESPERA'
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
+
+        if changes_log:
+            symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            new_leverage = target_op.apalancamiento
+            if self._trading_api and symbol and new_leverage:
+                self._memory_logger.log(f"OM: Actualizando apalancamiento a {new_leverage}x para '{symbol}'...", "INFO")
+                self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(new_leverage), sell_leverage=str(new_leverage))
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -267,12 +247,6 @@ class OperationManager:
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
         return True, f"Proceso de detención para {side.upper()} iniciado."
     
-    # def actualizar_pnl_vivo(self, side: str, pnl_no_realizado: float):
-    #     with self._lock:
-    #         op = self._get_operation_by_side_internal(side)
-    #         if op:
-    #             op.pnl_no_realizado_usdt_vivo = pnl_no_realizado
-
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)

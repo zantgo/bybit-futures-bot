@@ -271,14 +271,8 @@ class BotController:
         self._memory_logger.log("BotController: Creando nueva sesión de trading...", "INFO")
         try:
             exchange_adapter = self._BybitAdapter(self._connection_manager)
-            
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se añade la dependencia 'utils' al instanciar OperationManager.
-            # El BotController ya tiene acceso a self._utils desde su propio __init__.
-            # om_instance = self._OperationManager(config=self._config, memory_logger_instance=self._memory_logger) # <-- LÍNEA ORIGINAL
-            om_instance = self._OperationManager(config=self._config, utils=self._utils, memory_logger_instance=self._memory_logger)
-            # --- FIN DE LA MODIFICACIÓN ---
-            
+            om_instance = self._OperationManager(config=self._config, utils=self._utils, trading_api=self._trading_api, memory_logger_instance=self._memory_logger)
+
             self._om_api.init_om_api(om_instance)
             
             position_state = self._PositionState(config=self._config, utils=self._utils, exchange_adapter=exchange_adapter)

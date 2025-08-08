@@ -82,19 +82,14 @@ class _PrivateLogic:
             tsl_distance_pct=operacion.tsl_distancia_pct
         )
 
-        # --- INICIO DE LA MODIFICACIÓN (Solución al bucle de apertura) ---
-        # El flujo original tenía un problema de sincronización de estado. Este nuevo flujo
-        # es más explícito y garantiza que el estado central se actualice correctamente.
         if result and result.get('success'):
             new_pos_data = result.get('logical_position_object')
             if new_pos_data:
-                # 1. Obtenemos una copia fresca de la operación del estado central.
+                # --- INICIO DE LA CORRECCIÓN (Solución a Corrupción de Estado) ---
                 op_to_update = self._om_api.get_operation_by_side(side)
                 
-                # 2. Encontramos la posición que debemos actualizar en esta copia.
                 pos_to_update_in_list = next((p for p in op_to_update.posiciones if p.id == pending_position.id), None)
                 
-                # 3. Modificamos el estado de la posición DENTRO de la lista de la copia.
                 if pos_to_update_in_list:
                     pos_to_update_in_list.estado = 'ABIERTA'
                     pos_to_update_in_list.entry_timestamp = new_pos_data.entry_timestamp
@@ -107,14 +102,14 @@ class _PrivateLogic:
                     pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
                     pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
                 
-                    # 4. Enviamos TODA la lista de posiciones actualizada (convertida a dicts)
-                    #    de vuelta al OperationManager para que la guarde como el nuevo estado.
+                    # Se envía la lista de posiciones convertida a una lista de diccionarios,
+                    # que es el formato que espera el OperationManager.
+                    # self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones}) # <-- LÍNEA ORIGINAL COMENTADA
                     self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in op_to_update.posiciones]})
 
-                    # 5. Sincronizamos el PositionState interno con la operación ya actualizada.
                     if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                         self._position_state.sync_positions_from_operation(op_to_update)
-        # --- FIN DE LA MODIFICACIÓN ---
+                # --- FIN DE LA CORRECCIÓN ---
 
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         operacion = self._om_api.get_operation_by_side(side)
@@ -147,7 +142,11 @@ class _PrivateLogic:
                 new_stop_price = new_peak_price * (1 - distance_pct / 100) if side == 'long' else new_peak_price * (1 + distance_pct / 100)
                 position_to_update.ts_stop_price = new_stop_price
         
-        self._om_api.create_or_update_operation(side, {'posiciones': operacion.posiciones})
+        # --- INICIO DE LA CORRECCIÓN (Solución a Corrupción de Estado) ---
+        # Se envía la lista de posiciones convertida a diccionarios para mantener la integridad del estado.
+        # self._om_api.create_or_update_operation(side, {'posiciones': operacion.posiciones}) # <-- LÍNEA ORIGINAL COMENTADA
+        self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in operacion.posiciones]})
+        # --- FIN DE LA CORRECCIÓN ---
 
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         op_before = self._om_api.get_operation_by_side(side)
@@ -185,7 +184,7 @@ class _PrivateLogic:
                 pos_to_reset.api_filled_qty = None
 
             params = {
-                'posiciones': [asdict(p) for p in op_after.posiciones], # <-- Convertimos a dict aquí para guardar.
+                'posiciones': [asdict(p) for p in op_after.posiciones],
                 'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
             }
             if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:
