@@ -177,7 +177,15 @@ def _manage_position_list(params: Dict, side: str) -> bool:
         if not has_open:
             menu_items[4] = "[4] Cerrar posición... (No hay posiciones ABIERTAS)"
         
-        menu = TerminalMenu(menu_items, title="\nAcciones:", **MENU_STYLE)
+        # --- INICIO DE LA CORRECCIÓN ---
+        # 1. Copiamos el estilo global para no modificarlo.
+        menu_options = MENU_STYLE.copy()
+        # 2. Desactivamos la limpieza de pantalla para ESTE menú específico.
+        menu_options['clear_screen'] = False
+        # 3. Usamos las nuevas opciones al crear el menú.
+        menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
+        # --- FIN DE LA CORRECCIÓN ---
+
         choice = menu.show()
 
         try:
