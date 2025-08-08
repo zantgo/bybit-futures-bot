@@ -29,7 +29,7 @@ class _Workflow:
             return
             
         # --- AÑADIDO: Log de depuración ---
-        self._memory_logger.log(f"[DEBUG] check_and_close_positions llamado. price={current_price} ts={timestamp}", "DEBUG")
+        #self._memory_logger.log(f"[DEBUG] check_and_close_positions llamado. price={current_price} ts={timestamp}", "DEBUG")
 
         for side in ['long', 'short']:
             operacion = self._om_api.get_operation_by_side(side)
