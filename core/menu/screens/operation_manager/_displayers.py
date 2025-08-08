@@ -34,12 +34,10 @@ except ImportError:
             self.tsl_roi_activo = False
             self.posiciones: List[LogicalPosition] = []
         
+        def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
+            return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
         @property
         def equity_total_usdt(self): return self.capital_inicial_usdt + self.pnl_realizado_usdt
-        @property
-        def equity_actual_vivo(self): return self.equity_total_usdt + self.pnl_no_realizado_usdt_vivo
-        @property
-        def twrr_roi(self) -> float: return 0.0
         @property
         def capital_operativo_logico_actual(self) -> float: return 0.0
         @property
@@ -65,62 +63,40 @@ def init(dependencies: Dict[str, Any]):
 # --- Funciones de Ayuda para UI Dinámica ---
 
 def _get_terminal_width():
-    """Obtiene el ancho actual del terminal."""
     try:
         return shutil.get_terminal_size().columns
     except:
         return 90
 
 def _get_unified_box_width() -> int:
-    """
-    Calcula un ancho unificado para todas las cajas de esta pantalla,
-    basado en el contenido más ancho (las tablas de posiciones) y el tamaño del terminal.
-    """
     terminal_width = _get_terminal_width()
-    
-    # --- INICIO DE LA CORRECCIÓN: Cálculo de ancho robusto ---
-    # Ancho mínimo requerido para la tabla de posiciones abiertas
     open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
-    
-    # Ancho mínimo requerido para la tabla de posiciones pendientes
     pending_pos_content_width = 12 + 22 + 22
-
-    # El ancho de contenido es el máximo de los dos, más un poco de padding
     content_width = max(open_pos_content_width, pending_pos_content_width) + 4
-    
-    # El ancho final de la caja es el menor entre el ancho del terminal, el contenido, y un máximo absoluto.
     box_width = min(terminal_width - 2, content_width, 120)
     return box_width
-    # --- FIN DE LA CORRECCIÓN ---
 
 def _clean_ansi_codes(text: str) -> str:
-    """Función de ayuda para eliminar códigos de color ANSI de un string."""
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', str(text))
 
 def _truncate_text(text: str, max_length: int) -> str:
-    """Trunca el texto si es muy largo, añadiendo '...' al final."""
     clean_text = _clean_ansi_codes(text)
     if len(clean_text) <= max_length:
         return text
-
     truncated_clean = clean_text[:max_length-3] + "..."
-
     color_codes = re.findall(r'(\x1B\[[0-?]*[ -/]*[@-~])', text)
     if color_codes:
         return color_codes[0] + truncated_clean + "\033[0m"
     return truncated_clean
 
 def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
-    """Crea una línea de caja con el contenido alineado correctamente."""
     clean_content = _clean_ansi_codes(content)
     padding_needed = width - 2 - len(clean_content)
-
     if padding_needed < 0:
         content = _truncate_text(content, width - 2)
         clean_content = _clean_ansi_codes(content)
         padding_needed = width - 2 - len(clean_content)
-
     if alignment == 'center':
         left_pad = padding_needed // 2
         right_pad = padding_needed - left_pad
@@ -134,7 +110,6 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
 
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
-
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
@@ -179,7 +154,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     box_width = _get_unified_box_width()
-
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
@@ -189,31 +163,51 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    utils_module = _deps.get("utils_module")
+    if not utils_module:
+        print(_create_box_line("Error: Módulo utils no disponible", box_width, 'center'))
+        print("└" + "─" * (box_width - 2) + "┘")
+        return
+
+    live_performance = operacion.get_live_performance(current_price, utils_module)
+    
+    pnl_realizado = operacion.pnl_realizado_usdt
+    pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
+    equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
+    roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
+
+    capital_inicial = operacion.capital_inicial_usdt
+    equity_total_historico = operacion.equity_total_usdt
+    comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
+    total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
+
     def get_color(value): 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
     
-    pnl_realizado = operacion.pnl_realizado_usdt
-    pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
-    roi_twrr = operacion.twrr_roi
-
     data = {
         "--- CAPITAL ---": "",
-        "Capital Inicial (Base ROI)": f"${operacion.capital_inicial_usdt:.2f}",
+        "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
         "Capital Operativo (Lógico)": f"${operacion.capital_operativo_logico_actual:.2f}",
         "Capital en Uso": f"${operacion.capital_en_uso:.2f}",
         "Capital Disponible": f"${operacion.capital_disponible:.2f}",
         "--- RENDIMIENTO ---": "",
-        "Equity Total (Histórico)": f"${operacion.equity_total_usdt:.2f}",
-        "Equity Actual (Vivo)": f"{get_color(operacion.equity_actual_vivo - operacion.capital_inicial_usdt)}{operacion.equity_actual_vivo:+.2f}${reset}",
+        "Equity Total (Histórico)": f"${equity_total_historico:.2f}",
+        "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
-        "ROI (TWRR)": f"{get_color(roi_twrr)}{roi_twrr:+.2f}%{reset}",
+        "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
         "--- CONTADORES ---": "",
-        "Total Reinvertido": f"${operacion.total_reinvertido_usdt:.4f}",
-        "Comisiones Totales": f"${operacion.comisiones_totales_usdt:.4f}",
+        "Total Reinvertido": f"${total_reinvertido:.4f}",
+        "Comisiones Totales": f"${comisiones_totales:.4f}",
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
 
+    # --- ANTERIOR (Código obsoleto) ---
+    # pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
+    # roi_twrr = operacion.twrr_roi
+    # ... etc ...
+    
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():
         if "---" in key: 
@@ -221,12 +215,11 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         else: 
             print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
     print("└" + "─" * (box_width - 2) + "┘")
+    # --- FIN DE LA MODIFICACIÓN ---
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
-    """Muestra la tabla de posiciones abiertas y PENDIENTES, con formato corregido."""
     box_width = _get_unified_box_width()
 
-    # --- TABLA DE POSICIONES ABIERTAS ---
     open_positions = operacion.posiciones_abiertas
     open_count = len(open_positions)
     total_count = len(operacion.posiciones)
@@ -276,14 +269,12 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
     print("└" + "─" * (box_width - 2) + "┘")
 
-    # --- NUEVA TABLA: POSICIONES PENDIENTES (CON FORMATO CORREGIDO) ---
     pending_positions = operacion.posiciones_pendientes
     if pending_positions:
         print("┌" + "─" * (box_width - 2) + "┐")
         print(_create_box_line(f"Posiciones Pendientes ({len(pending_positions)})", box_width, 'center'))
         print("├" + "─" * (box_width - 2) + "┤")
         
-        # --- INICIO DE LA CORRECCIÓN: Formato de tabla unificado ---
         header = f"  {'ID':<10} {'Capital Asignado':>20} {'Valor Nominal':>20}"
         print(_create_box_line(_truncate_text(header, box_width - 2), box_width))
         print("├" + "─" * (box_width - 2) + "┤")
@@ -296,7 +287,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
-        # --- FIN DE LA CORRECCIÓN ---
 
 
 def _display_operation_conditions(operacion: Operacion):

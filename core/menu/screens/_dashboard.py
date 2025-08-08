@@ -32,6 +32,28 @@ try:
     from core import utils
 except ImportError:
     sm_api = pm_api = om_api = utils = None
+    # Fallback actualizado para incluir el nuevo método
+    class Operacion:
+        def __init__(self):
+            self.pnl_realizado_usdt = 0.0
+            self.comisiones_totales_usdt = 0.0
+            self.capital_inicial_usdt = 0.0
+            self.equity_total_usdt = 0.0
+            self.profit_balance_acumulado = 0.0
+            self.estado = 'N/A'
+            self.comercios_cerrados_contador = 0
+            self.posiciones = []
+            self.apalancamiento = 10.0
+            self.tendencia = 'N/A'
+        def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
+            return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
+        @property
+        def posiciones_abiertas_count(self): return 0
+        @property
+        def capital_operativo_logico_actual(self): return 0.0
+        @property
+        def capital_en_uso(self): return 0.0
+
 
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
@@ -47,7 +69,7 @@ def _get_terminal_width():
     try:
         return shutil.get_terminal_size().columns
     except:
-        return 90  # Ancho por defecto
+        return 90
 
 
 def _clean_ansi_codes(text: str) -> str:
@@ -61,9 +83,7 @@ def _truncate_text(text: str, max_length: int) -> str:
     clean_text = _clean_ansi_codes(text)
     if len(clean_text) <= max_length:
         return text
-
     truncated_clean = clean_text[:max_length-3] + "..."
-
     color_codes = re.findall(r'(\x1B\[[0-?]*[ -/]*[@-~])', text)
     if color_codes:
         return color_codes[0] + truncated_clean + "\033[0m"
@@ -74,19 +94,17 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     """Crea una línea de caja con el contenido alineado correctamente."""
     clean_content = _clean_ansi_codes(content)
     padding_needed = width - 2 - len(clean_content)
-
     if padding_needed < 0:
         content = _truncate_text(content, width - 2)
         clean_content = _clean_ansi_codes(content)
         padding_needed = width - 2 - len(clean_content)
-
     if alignment == 'center':
         left_pad = padding_needed // 2
         right_pad = padding_needed - left_pad
         return f"│{' ' * left_pad}{content}{' ' * right_pad}│"
     elif alignment == 'right':
         return f"│{' ' * padding_needed}{content} │"
-    else: # left
+    else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
 
@@ -104,7 +122,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
         print("\n--- Configuración del Bot ---")
         bot_cfg = config_module.BOT_CONFIG
         modo_trading_str = "Paper Trading" if bot_cfg.get("PAPER_TRADING_MODE", False) else "Live Trading"
-
         bot_params_to_show = {
             "Exchange": bot_cfg.get("EXCHANGE_NAME", "N/A").upper(),
             "Símbolo Ticker": bot_cfg.get("TICKER", {}).get("SYMBOL", "N/A"),
@@ -131,7 +148,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
 
         pnl_realizado = op_obj.pnl_realizado_usdt
         ganancias_netas = pnl_realizado - op_obj.comisiones_totales_usdt
-        # <<-- CAMBIO: El ROI ahora se lee de la propiedad TWRR
         roi = op_obj.twrr_roi if hasattr(op_obj, 'twrr_roi') else utils.safe_division(pnl_realizado, op_obj.capital_inicial_usdt) * 100 if utils else 0.0
 
         print(f"\n  Operación {side.upper()}:")
@@ -163,7 +179,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
 
 
 def _render_session_status_block(summary: Dict[str, Any], box_width: int):
-    """Imprime el bloque de Estado de Sesión con el estilo y formato correctos."""
     session_start_time = pm_api.get_session_start_time()
     start_time_str = "N/A"
     duration_str = "0:00:00"
@@ -175,32 +190,16 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         duration_str = str(datetime.timedelta(seconds=int(duration_seconds)))
 
     total_equity = 0.0
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Se reemplaza el acceso al obsoleto 'balances' por el nuevo atributo.
     transferido_val = 0.0
     if om_api:
         long_op = om_api.get_operation_by_side('long')
         short_op = om_api.get_operation_by_side('short')
         if long_op:
             total_equity += long_op.equity_total_usdt
-            # Accedemos al nuevo campo directo de la operación
             transferido_val += getattr(long_op, 'profit_balance_acumulado', 0.0)
         if short_op:
             total_equity += short_op.equity_total_usdt
-            # Usamos getattr por seguridad, devolviendo 0.0 si el atributo no existiera
             transferido_val += getattr(short_op, 'profit_balance_acumulado', 0.0)
-    # --- FIN DE LA CORRECCIÓN ---
-    # --- ANTERIOR (Código con el error) ---
-    # transferido_val = 0.0
-    # if om_api:
-    #     long_op = om_api.get_operation_by_side('long')
-    #     short_op = om_api.get_operation_by_side('short')
-    #     if long_op:
-    #         total_equity += long_op.equity_total_usdt
-    #         transferido_val += long_op.balances.profit_balance
-    #     if short_op:
-    #         total_equity += short_op.equity_total_usdt
-    #         transferido_val += short_op.balances.profit_balance
     
     data = {
         "Inicio Sesión": start_time_str,
@@ -223,7 +222,6 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
 
 
 def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box_width: int):
-    """Imprime el bloque de Estado de Señal con el nuevo formato."""
     ticker_symbol = config_module.BOT_CONFIG["TICKER"]["SYMBOL"]
     latest_signal_info = summary.get('latest_signal', {})
 
@@ -247,10 +245,10 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
         print(_create_box_line(content, box_width))
 
     print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_box_line("Indicadores TA", box_width))
+    print(_create_box_line("Indicadores TA", box_width, 'center'))
     print(_create_box_line(f"  EMA: {_truncate_text(str(ema_str), box_width-10)}", box_width))
     print(_create_box_line(f"  W.Inc / W.Dec: {_truncate_text(f'{w_inc_str} / {w_dec_str}', box_width-20)}", box_width))
-    print(_create_box_line(f"  Price Inc.(%)/ Price Dec.(%): {_truncate_text(f'{inc_pct_str} / {dec_pct_str}', box_width-35)}", box_width))
+    print(_create_box_line(f"  Price Inc.(%)/ Dec.(%): {_truncate_text(f'{inc_pct_str} / {dec_pct_str}', box_width-35)}", box_width))
 
     print("├" + "─" * (box_width - 2) + "┤")
 
@@ -263,7 +261,6 @@ def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
-    """Imprime el bloque de Estado de Operaciones con el desglose de PNL y ROI."""
     if not all([om_api, utils]):
         print("Error: Dependencias om_api o utils no disponibles.")
         return
@@ -277,44 +274,38 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         if not operacion:
             data[side]['Estado'] = 'NO_DISPONIBLE'
             continue
+            
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 1. Llamar al nuevo método para obtener todos los cálculos vivos
+        live_performance = operacion.get_live_performance(current_price, utils)
+        
+        # 2. Extraer los valores del diccionario resultante
+        pnl_realizado = operacion.pnl_realizado_usdt
+        pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
+        equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
+        roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
 
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de capital actualizada para usar las nuevas propiedades. ---
-        pnl_no_realizado = 0.0
-        # El PNL no realizado se calcula ahora externamente y se almacena en la operación.
-        if hasattr(operacion, 'pnl_no_realizado_usdt_vivo'):
-            pnl_no_realizado = operacion.pnl_no_realizado_usdt_vivo
-        else: # Fallback por si el atributo no está
-            for pos_data in summary.get(f'open_{side}_positions', []):
-                entry = pos_data.get('entry_price', 0.0)
-                size = pos_data.get('size_contracts', 0.0)
-                if side == 'long': pnl_no_realizado += (current_price - entry) * size
-                else: pnl_no_realizado += (entry - current_price) * size
-
-        capital_inicial = operacion.capital_inicial_usdt
-        equity_total_hist = operacion.equity_total_usdt
-        equity_actual_vivo = equity_total_hist + pnl_no_realizado
-
+        # 3. Calcular ROI desglosado
+        roi_realizado = utils.safe_division(pnl_realizado, operacion.capital_inicial_usdt) * 100
+        roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_inicial_usdt) * 100
+        
         def get_color(value):
             return "\033[92m" if value >= 0 else "\033[91m"
         reset = "\033[0m"
-
+        
+        # 4. Actualizar el diccionario de datos para la TUI
         data[side] = {
             'Estado': operacion.estado.upper(),
             'Posiciones': f"{operacion.posiciones_abiertas_count}/{len(operacion.posiciones)}",
-            'Capital Inicial': f"${capital_inicial:.2f}",
-            'Capital Operativo': f"${operacion.capital_operativo_logico_actual:.2f}",
-            'Capital en Uso': f"${operacion.capital_en_uso:.2f}",
-            'Equity Total (Hist.)': f"${equity_total_hist:.2f}",
-            'Equity Actual (Vivo)': f"{get_color(equity_actual_vivo - capital_inicial)}${equity_actual_vivo:.2f}{reset}",
-            'PNL Realizado': f"{get_color(operacion.pnl_realizado_usdt)}{operacion.pnl_realizado_usdt:+.4f}${reset}",
+            'Equity Total (Hist.)': f"${operacion.equity_total_usdt:.2f}",
+            'Equity Actual (Vivo)': f"{get_color(pnl_no_realizado)}${equity_actual_vivo:.2f}{reset}",
             'Transferido a PROFIT': f"{get_color(getattr(operacion, 'profit_balance_acumulado', 0.0))}{getattr(operacion, 'profit_balance_acumulado', 0.0):+.4f}{reset}",
+            'PNL Realizado': f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset}",
+            'PNL No Realizado': f"{get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
+            'ROI Realizado': f"{get_color(roi_realizado)}{roi_realizado:+.2f}%{reset}",
+            'ROI No Realizado': f"{get_color(roi_no_realizado)}{roi_no_realizado:+.2f}%{reset}",
         }
         # --- FIN DE LA MODIFICACIÓN ---
-        # --- ANTERIOR (Código con errores) ---
-        # 'Posiciones': f"{summary.get(f'open_{side}_positions_count', 0)}/{operacion.max_posiciones_logicas}",
-        # 'Capital Operativo': f"${operacion.balances.operational_margin:.2f}",
-        # 'Capital en Uso': f"${operacion.balances.used_margin:.2f}",
-        # 'Transferido a PROFIT': f"{get_color(operacion.balances.profit_balance)}{operacion.balances.profit_balance:+.4f}{reset}",
 
     width_col = (box_width - 3) // 2
 
@@ -322,12 +313,15 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
     print(f"│{'Operación LONG':^{width_col}}│{'Operación SHORT':^{width_col}}│")
     print("├" + "─" * width_col + "┼" + "─" * width_col + "┤")
 
+    # --- INICIO DE LA MODIFICACIÓN: Actualizar la lista de etiquetas ---
     labels = [
-        'Estado', 'Posiciones', 'Capital Inicial', 'Capital Operativo',
-        'Capital en Uso', 'Equity Total (Hist.)', 'Equity Actual (Vivo)',
-        'PNL Realizado', 'Transferido a PROFIT'
+        'Estado', 'Posiciones', 'Equity Total (Hist.)', 'Equity Actual (Vivo)',
+        'Transferido a PROFIT', 'PNL Realizado', 'PNL No Realizado',
+        'ROI Realizado', 'ROI No Realizado'
     ]
-    max_label_len = min(max(len(k) for k in labels), width_col - 12)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
+    max_label_len = min(max(len(k) for k in labels), width_col - 12) if labels else 0
 
     for label in labels:
         long_val = data['long'].get(label, 'N/A')
@@ -350,7 +344,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
 
 
 def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
-    """Función dedicada a imprimir el layout completo del dashboard con el nuevo orden."""
     terminal_width = _get_terminal_width()
     box_width = min(terminal_width - 2, 90)
 
@@ -373,8 +366,7 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
 
 
 def show_dashboard_screen(session_manager: Any):
-    from ._session_config_editor import show_session_config_editor_screen
-
+    # Se elimina la importación de _session_config_editor
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module or not sm_api or not session_manager:
         print("ERROR CRÍTICO: Dependencias del Dashboard no disponibles.")
@@ -420,8 +412,7 @@ def show_dashboard_screen(session_manager: Any):
             "[1] Gestionar Operación LONG",
             "[2] Gestionar Operación SHORT",
             None,
-            "[3] Editar Configuración de Sesión",
-            "[4] Ver Logs en Tiempo Real",
+            "[3] Ver Logs en Tiempo Real",
             None,
             "[r] Refrescar",
             "[h] Ayuda",
@@ -431,11 +422,10 @@ def show_dashboard_screen(session_manager: Any):
         action_map = {
             0: 'manage_long',
             1: 'manage_short',
-            3: 'edit_config',
-            4: 'view_logs',
-            6: 'refresh',
-            7: 'help',
-            8: 'exit_session'
+            3: 'view_logs',
+            5: 'refresh',
+            6: 'help',
+            7: 'exit_session'
         }
 
         menu_options = helpers_module.MENU_STYLE.copy()
@@ -450,10 +440,6 @@ def show_dashboard_screen(session_manager: Any):
             operation_manager.show_operation_manager_screen(side_filter='long')
         elif action == 'manage_short':
             operation_manager.show_operation_manager_screen(side_filter='short')
-        elif action == 'edit_config':
-            changes_made = show_session_config_editor_screen(config_module)
-            if changes_made:
-                sm_api.update_session_parameters(changes_made)
         elif action == 'view_logs':
             _log_viewer.show_log_viewer()
         elif action == 'refresh':
@@ -467,7 +453,6 @@ def show_dashboard_screen(session_manager: Any):
                 break
 
     final_summary_data = sm_api.get_session_summary()
-
     _display_final_summary(final_summary_data, config_module)
 
     if session_manager.is_running():
