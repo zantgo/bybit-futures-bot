@@ -166,8 +166,7 @@ def _run_position_test(bot_controller: Any):
 
 def show_welcome_screen(bot_controller: Any):
     from ._general_config_editor import show_general_config_editor_screen
-    from ._session_config_editor import show_session_config_editor_screen
-
+    
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module:
         print("ERROR CRÍTICO: Dependencias no disponibles."); time.sleep(1); return
@@ -197,15 +196,14 @@ def show_welcome_screen(bot_controller: Any):
             "[3] Probar Apertura/Cierre de Posiciones",
             None,
             "[4] Configuración General",
-            "[5] Configuración de la Sesión",
-            "[6] Ver Logs de la Aplicación",
+            "[5] Ver Logs de la Aplicación",
             None,
-            "[7] Salir del Bot"
+            "[6] Salir del Bot"
         ]
         
         action_map = {
             0: 'start_session', 2: 'test_transfers', 3: 'test_positions',
-            5: 'edit_general_config', 6: 'edit_session_config', 7: 'view_logs', 9: 'exit'
+            5: 'edit_general_config', 6: 'view_logs', 8: 'exit'
         }
         
         welcome_menu_options = MENU_STYLE.copy()
@@ -221,7 +219,6 @@ def show_welcome_screen(bot_controller: Any):
                 print("Sesión creada con éxito. Lanzando dashboard...")
                 time.sleep(2)
                 _dashboard.show_dashboard_screen(session_manager)
-                # session_manager.stop() # Comentado, el dashboard ya gestiona la parada
             else:
                 print("\nERROR: No se pudo crear la sesión. Revisa los logs.")
                 press_enter_to_continue()
@@ -229,7 +226,6 @@ def show_welcome_screen(bot_controller: Any):
         elif choice == 'test_transfers': _run_transfer_test(bot_controller)
         elif choice == 'test_positions': _run_position_test(bot_controller)
         elif choice == 'edit_general_config': show_general_config_editor_screen(config_module)
-        elif choice == 'edit_session_config': show_session_config_editor_screen(config_module)
         elif choice == 'view_logs': _log_viewer.show_log_viewer()
         elif choice == 'exit' or choice is None:
             confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="\n¿Confirmas apagar el bot?", **MENU_STYLE)
