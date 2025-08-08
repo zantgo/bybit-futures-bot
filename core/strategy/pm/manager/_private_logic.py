@@ -18,10 +18,6 @@ class _PrivateLogic:
     """
 
     def _can_open_new_position(self, side: str) -> bool:
-        """
-        Verifica si se puede abrir una nueva posición. La condición principal ahora es
-        la existencia de una posición en estado 'PENDIENTE'.
-        """
         operacion = self._om_api.get_operation_by_side(side)
         if not operacion or operacion.estado != 'ACTIVA':
             return False
@@ -86,39 +82,44 @@ class _PrivateLogic:
             tsl_distance_pct=operacion.tsl_distancia_pct
         )
 
+        # --- INICIO DE LA MODIFICACIÓN (Solución al bucle de apertura) ---
+        # El flujo original tenía un problema de sincronización de estado. Este nuevo flujo
+        # es más explícito y garantiza que el estado central se actualice correctamente.
         if result and result.get('success'):
             new_pos_data = result.get('logical_position_object')
             if new_pos_data:
-                current_op = self._om_api.get_operation_by_side(side)
+                # 1. Obtenemos una copia fresca de la operación del estado central.
+                op_to_update = self._om_api.get_operation_by_side(side)
                 
-                pos_to_update = next((p for p in current_op.posiciones if p.id == pending_position.id), None)
-                if pos_to_update:
-                    pos_to_update.estado = 'ABIERTA'
-                    pos_to_update.entry_timestamp = new_pos_data.entry_timestamp
-                    pos_to_update.entry_price = new_pos_data.entry_price
-                    pos_to_update.margin_usdt = new_pos_data.margin_usdt
-                    pos_to_update.size_contracts = new_pos_data.size_contracts
-                    pos_to_update.stop_loss_price = new_pos_data.stop_loss_price
-                    pos_to_update.est_liq_price = new_pos_data.est_liq_price
-                    pos_to_update.api_order_id = new_pos_data.api_order_id
-                    pos_to_update.api_avg_fill_price = new_pos_data.api_avg_fill_price
-                    pos_to_update.api_filled_qty = new_pos_data.api_filled_qty
+                # 2. Encontramos la posición que debemos actualizar en esta copia.
+                pos_to_update_in_list = next((p for p in op_to_update.posiciones if p.id == pending_position.id), None)
                 
-                self._om_api.create_or_update_operation(side, {'posiciones': current_op.posiciones})
-                if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
-                    self._position_state.sync_positions_from_operation(current_op)
-    
+                # 3. Modificamos el estado de la posición DENTRO de la lista de la copia.
+                if pos_to_update_in_list:
+                    pos_to_update_in_list.estado = 'ABIERTA'
+                    pos_to_update_in_list.entry_timestamp = new_pos_data.entry_timestamp
+                    pos_to_update_in_list.entry_price = new_pos_data.entry_price
+                    pos_to_update_in_list.margin_usdt = new_pos_data.margin_usdt
+                    pos_to_update_in_list.size_contracts = new_pos_data.size_contracts
+                    pos_to_update_in_list.stop_loss_price = new_pos_data.stop_loss_price
+                    pos_to_update_in_list.est_liq_price = new_pos_data.est_liq_price
+                    pos_to_update_in_list.api_order_id = new_pos_data.api_order_id
+                    pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
+                    pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
+                
+                    # 4. Enviamos TODA la lista de posiciones actualizada (convertida a dicts)
+                    #    de vuelta al OperationManager para que la guarde como el nuevo estado.
+                    self._om_api.create_or_update_operation(side, {'posiciones': [asdict(p) for p in op_to_update.posiciones]})
+
+                    # 5. Sincronizamos el PositionState interno con la operación ya actualizada.
+                    if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
+                        self._position_state.sync_positions_from_operation(op_to_update)
+        # --- FIN DE LA MODIFICACIÓN ---
+
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         operacion = self._om_api.get_operation_by_side(side)
-        
-        # --- INICIO DE LA MODIFICACIÓN (Solución al Bug del TSL) ---
-        # La condición original (operacion.estado != 'ACTIVA') impedía que el TSL funcionara
-        # en estado 'PAUSADA'. La nueva condición permite la gestión de posiciones existentes
-        # mientras la operación esté activa o pausada, pero no si está detenida o esperando.
-        # if not operacion or operacion.estado != 'ACTIVA': # <-- LÍNEA ORIGINAL CON BUG
         if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
             return
-        # --- FIN DE LA MODIFICACIÓN ---
         
         if index >= len(operacion.posiciones):
             return
@@ -184,7 +185,7 @@ class _PrivateLogic:
                 pos_to_reset.api_filled_qty = None
 
             params = {
-                'posiciones': op_after.posiciones,
+                'posiciones': [asdict(p) for p in op_after.posiciones], # <-- Convertimos a dict aquí para guardar.
                 'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
             }
             if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:
