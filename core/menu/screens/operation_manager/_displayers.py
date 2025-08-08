@@ -167,17 +167,12 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
 
-    # --- INICIO DE LA MODIFICACIÓN (Verificación final) ---
-    # Se confirma que todos los datos de rendimiento se obtienen de la llamada
-    # a get_live_performance(), que es la única fuente de verdad corregida.
-    # No hay cambios funcionales aquí, solo se confirma que el código ya es correcto.
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
     pnl_realizado = operacion.pnl_realizado_usdt
     pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
     equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
     roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
-    # --- FIN DE LA MODIFICACIÓN ---
 
     capital_inicial = operacion.capital_inicial_usdt
     equity_total_historico = operacion.equity_total_usdt
@@ -233,6 +228,9 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
         for pos in open_positions:
             pnl = 0.0
+            # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
+            # Se reemplazan las llamadas .get('key') por la notación de objeto .key
+            # ya que 'pos' es un objeto LogicalPosition, no un diccionario.
             entry_price = pos.entry_price or 0.0
             size = pos.size_contracts or 0.0
             if current_price > 0 and entry_price > 0:
@@ -249,7 +247,9 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
 
             ts_status_str = "Inactivo"
+            # if pos.get('ts_is_active'): # <-- LÍNEA ORIGINAL CON BUG
             if pos.ts_is_active:
+                # ts_stop = pos.get('ts_stop_price') # <-- LÍNEA ORIGINAL CON BUG
                 ts_stop = pos.ts_stop_price
                 ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
 
@@ -263,6 +263,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
                 f"{ts_status_str:<20}"
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
+            # --- FIN DE LA MODIFICACIÓN ---
     print("└" + "─" * (box_width - 2) + "┘")
 
     pending_positions = operacion.posiciones_pendientes
