@@ -197,7 +197,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             "[2] Editar Estrategia Global (Apalancamiento y Promediación)",
             "[3] Editar Riesgo por Posición Individual (SL/TSL)",
             "[4] Editar Gestión de Riesgo de Operación (SL/TP por ROI)",
-            "[5] Editar Límites y Condiciones de Salida",
+            "[5] Editar Condiciones de Entrada y Salida",
             None,
             "[s] Guardar Cambios",
             "[c] Cancelar y Volver"
