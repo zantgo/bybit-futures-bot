@@ -64,16 +64,16 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     Calcula el precio de Stop Loss para una posición individual.
     Recibe el porcentaje de SL como argumento para permitir el ajuste dinámico.
     """
-    # --- INICIO DE LA MODIFICACIÓN (Objetivo 4: Corregir Bug Crítico en SL) ---
-    # Se añade una validación explícita para sl_pct ANTES de cualquier comparación.
+    # --- INICIO DE LA CORRECCIÓN DEL BUG CRÍTICO EN SL ---
+    # Se añade esta validación explícita para sl_pct ANTES de cualquier comparación.
     # Si sl_pct es None (porque el usuario lo desactivó) o no es un número finito,
-    # la función devuelve None inmediatamente, evitando un TypeError.
+    # la función devuelve None inmediatamente, evitando el TypeError.
     if not isinstance(sl_pct, (int, float)) or not np.isfinite(sl_pct):
         return None # No hay Stop Loss si el valor no es un número válido.
 
     if sl_pct <= 0:
         return None # No hay Stop Loss si el porcentaje es cero o negativo.
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- FIN DE LA CORRECCIÓN ---
 
     if not isinstance(entry_price, (int, float)) or not np.isfinite(entry_price) or entry_price <= 0:
         return None
@@ -149,14 +149,10 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
             entry_nominal_value = entry_price * size_contracts
             exit_nominal_value = exit_price * size_contracts
             
-            # --- INICIO DE LA MODIFICACIÓN (Objetivo 5: Precisión de Comisiones) ---
-            # La fórmula original podía subestimar la comisión. La fórmula correcta
-            # debe sumar el valor nominal de la entrada y la salida, ya que la
-            # comisión se paga en ambas transacciones.
+            # La fórmula correcta debe sumar el valor nominal de la entrada y la salida,
+            # ya que la comisión se paga en ambas transacciones.
             if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
-                # commission_usdt = (abs(exit_nominal_value)) * commission_rate # <-- LÍNEA ORIGINAL INEXACTA
                 commission_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * commission_rate
-            # --- FIN DE LA MODIFICACIÓN ---
 
             pnl_net_usdt = pnl_gross_usdt - commission_usdt
 

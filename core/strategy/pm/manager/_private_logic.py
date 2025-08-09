@@ -40,6 +40,13 @@ class _PrivateLogic:
 
             required_distance_pct = operacion.averaging_distance_pct
             
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se añade esta comprobación para evitar el TypeError si la promediación está desactivada.
+            # Si la distancia no está configurada (None) o es 0, la condición de distancia se considera cumplida.
+            if required_distance_pct is None or required_distance_pct <= 0:
+                return True
+            # --- FIN DE LA MODIFICACIÓN ---
+
             if side == 'long':
                 price_condition_met = current_price <= last_position_entry_price * (1 - required_distance_pct / 100)
             else: # side == 'short'
@@ -106,12 +113,8 @@ class _PrivateLogic:
                     pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
                     pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
                     
-                    # --- INICIO DE LA CORRECCIÓN DEL BUG ---
-                    # Faltaba copiar estos dos parámetros cruciales. Sin ellos,
-                    # el TSL nunca podía activarse.
                     pos_to_update_in_list.tsl_activation_pct_at_open = new_pos_data.tsl_activation_pct_at_open
                     pos_to_update_in_list.tsl_distance_pct_at_open = new_pos_data.tsl_distance_pct_at_open
-                    # --- FIN DE LA CORRECCIÓN DEL BUG ---
                 
                     self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones})
 
@@ -120,10 +123,7 @@ class _PrivateLogic:
 
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         try:
-            # --- INICIO DE LA SECCIÓN DE DEPURACIÓN ---
-            # Log #1: Confirma que la función está siendo llamada.
             self._memory_logger.log(f"[DEBUG TSL] Iniciando check para {side.upper()} pos_idx={index} @ price={current_price}", "DEBUG")
-            # --- FIN DE LA SECCIÓN DE DEPURACIÓN ---
 
             operacion = self._om_api.get_operation_by_side(side)
             if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
@@ -140,18 +140,14 @@ class _PrivateLogic:
             is_ts_active = position_to_update.ts_is_active
             entry_price = position_to_update.entry_price
 
-            # --- INICIO DE LA SECCIÓN DE DEPURACIÓN ---
-            # Log #2: Muestra los valores que se están evaluando. Esto habría revelado el bug.
             self._memory_logger.log(f"[DEBUG TSL ID:{pos_id_short}] Valores: act_pct={activation_pct}, dist_pct={distance_pct}, entry={entry_price}", "DEBUG")
-            # --- FIN DE LA SECCIÓN DE DEPURACIÓN ---
 
-            if not (activation_pct > 0 and distance_pct > 0 and entry_price is not None):
+            if not (activation_pct is not None and activation_pct > 0 and distance_pct is not None and distance_pct > 0 and entry_price is not None):
                 return
 
             if not is_ts_active:
                 activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
                 
-                # Log #3: Movido aquí para ser más útil, antes estaba después de la condición.
                 self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", "DEBUG")
 
                 if (side == 'long' and current_price >= activation_price) or \

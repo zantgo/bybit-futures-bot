@@ -224,19 +224,6 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    # def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
-    #     with self._lock:
-    #         target_op = self._get_operation_by_side_internal(side)
-    #         if not target_op or target_op.estado != 'PAUSADA':
-    #             return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
-    #         target_op.estado = 'ACTIVA'
-    #         if not target_op.tiempo_inicio_ejecucion:
-    #             target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
-    #     msg = f"OPERACIÓN {side.upper()} REANUDADA. El sistema está ahora ACTIVO para este lado."
-    #     self._memory_logger.log(msg, "WARN")
-    #     return True, msg
-    # --- FIN DE LA MODIFICACIÓN ---
-
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)

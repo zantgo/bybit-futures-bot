@@ -128,16 +128,7 @@ class SessionManager:
         self._last_known_valid_symbol = symbol
 
         self._pm.initialize(operation_mode=operation_mode)
-        
-        # --- INICIO DE LA MODIFICACIÓN (Solución final de apalancamiento) ---
-        # Se comentan estas líneas. El SessionManager ya no es responsable
-        # de establecer el apalancamiento. Esta responsabilidad ahora recae
-        # exclusivamente en el OperationManager al crear/modificar una operación.
-        # leverage = self._config.OPERATION_DEFAULTS["CAPITAL"].get('LEVERAGE')
-        # if leverage:
-        #     self._trading_api.set_leverage(symbol=symbol, buy_leverage=str(leverage), sell_leverage=str(leverage))
-        # --- FIN DE LA MODIFICACIÓN ---
-        
+    
         self._event_processor.initialize(
             operation_mode=operation_mode,
             pm_instance=self._pm

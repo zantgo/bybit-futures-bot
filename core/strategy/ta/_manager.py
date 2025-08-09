@@ -1,5 +1,3 @@
-# core/strategy/ta/_manager.py
-
 import pandas as pd
 import numpy as np
 import traceback
@@ -18,18 +16,14 @@ class TAManager:
     utiliza un calculador para generar indicadores. Cada instancia es independiente.
     """
 
-    # --- INICIO DE LA CORRECCIÓN: Inyectar config en el constructor ---
     def __init__(self, config_module: Any = config):
-    # --- FIN DE LA CORRECCIÓN ---
         """
         Inicializa el TAManager, creando su propio DataStore y
         estableciendo su estado inicial.
         """
-        # --- INICIO DE LA CORRECCIÓN ---
         self._config = config_module
         # El TAManager ahora es dueño de su propio DataStore, al cual le pasamos la config
         self._data_store = DataStore(self._config)
-        # --- FIN DE LA CORRECCIÓN ---
         
         self._latest_indicators = {}
         self.initialize()
@@ -66,29 +60,23 @@ class TAManager:
         current_raw_df = self._data_store.get_data()
 
         calculated_indicators = {}
-        # --- INICIO DE LA CORRECCIÓN ---
-        if self._config.SESSION_CONFIG["TA"]["ENABLED"]:
-        # --- FIN DE LA CORRECCIÓN ---
-            try:
-                calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
-            except Exception as e:
-                ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
-                memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
-                memory_logger.log(traceback.format_exc(), level="ERROR")
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se elimina la comprobación "ENABLED", asumiendo que el TA siempre está activo.
+        try:
+            calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
+        except Exception as e:
+            ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
+            memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
+            memory_logger.log(traceback.format_exc(), level="ERROR")
 
-                calculated_indicators = {
-                    'timestamp': raw_event_data.get('timestamp', pd.NaT),
-                    'price': raw_event_data.get('price', np.nan),
-                    'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
-                    'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
-                }
-        else:
+            # Fallback en caso de error en el cálculo
             calculated_indicators = {
                 'timestamp': raw_event_data.get('timestamp', pd.NaT),
                 'price': raw_event_data.get('price', np.nan),
                 'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
                 'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
             }
+        # --- FIN DE LA MODIFICACIÓN ---
 
         self._latest_indicators = calculated_indicators.copy()
         

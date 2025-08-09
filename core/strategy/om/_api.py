@@ -105,13 +105,3 @@ def revisar_y_transicionar_a_detenida(side: str):
     """Delega la llamada para revisar si una operación pausada debe detenerse."""
     if _om_instance:
         _om_instance.revisar_y_transicionar_a_detenida(side)
-
-# --- INICIO DE LA MODIFICACIÓN (Objetivo 6: Limpieza de Código) ---
-# Se comenta la función proxy 'actualizar_pnl_vivo'. El método correspondiente
-# en OperationManager fue eliminado porque la caché de PNL no realizado ya no
-# existe en la entidad Operacion.
-# def actualizar_pnl_vivo(side: str, pnl_no_realizado: float):
-#     """Delega la llamada para actualizar el PNL no realizado (en vivo) de una operación."""
-#     if _om_instance:
-#         _om_instance.actualizar_pnl_vivo(side, pnl_no_realizado)
-# --- FIN DE LA MODIFICACIÓN ---
