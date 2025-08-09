@@ -2,7 +2,7 @@
 
 import time
 import uuid
-import copy  # <-- INICIO DE LA CORRECCIÓN: Se añade la importación faltante
+import copy
 from typing import Any, Dict
 
 try:
@@ -50,7 +50,6 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
         time.sleep(3)
         return False
 
-    # Creamos una copia profunda al inicio para poder descartar los cambios.
     original_positions_state = copy.deepcopy(operacion.posiciones)
     params_changed = False
     
@@ -66,7 +65,13 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
             side
         )
 
-        disp.display_positions_table(operacion)
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Pasamos el precio actual a la tabla para calcular PNL y ROI.
+        disp.display_positions_table(operacion, current_price, side)
+        # Llamamos a la nueva función para mostrar el cuadro de parámetros.
+        disp.display_strategy_parameters(operacion)
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         disp.display_risk_panel(risk_metrics, current_price, side)
         
         has_pending = operacion.posiciones_pendientes_count > 0
@@ -137,7 +142,10 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
                     success, msg = pm_api.manual_close_logical_position_by_index(side, idx_to_close)
                     print(f"\nResultado: {msg}"); time.sleep(2.5)
                     if success:
-                        open_positions[idx_to_close].estado = 'PENDIENTE'
+                        # Refrescamos el objeto operacion para reflejar el cierre
+                        temp_op_refreshed = om_api.get_operation_by_side(side)
+                        if temp_op_refreshed:
+                            operacion.posiciones = temp_op_refreshed.posiciones
                         params_changed = True
 
             elif choice == 6: # Guardar Cambios y Volver

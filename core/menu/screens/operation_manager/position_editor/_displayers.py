@@ -7,6 +7,8 @@ import re
 try:
     from core.strategy.entities import Operacion, LogicalPosition
     from ...._helpers import _create_box_line, _truncate_text, _get_terminal_width, _clean_ansi_codes
+    # Se añade la importación de 'utils' para los cálculos de ROI.
+    from core import utils
 except ImportError:
     # Fallbacks para análisis estático
     def _create_box_line(content: str, width: int, alignment: str = 'left') -> str: return content
@@ -15,11 +17,12 @@ except ImportError:
     def _clean_ansi_codes(text: str) -> str: return text
     class Operacion: pass
     class LogicalPosition: pass
+    utils = None
 
-
-def display_positions_table(operacion: Operacion):
+def display_positions_table(operacion: Operacion, current_market_price: float, side: str):
     """
     Muestra una tabla detallada de las posiciones abiertas y pendientes.
+    Ahora incluye PNL y ROI en vivo para las posiciones abiertas.
     """
     box_width = _get_terminal_width() - 4
     
@@ -30,32 +33,29 @@ def display_positions_table(operacion: Operacion):
     if operacion.posiciones_abiertas:
         print("├" + "─" * box_width + "┤")
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Se ha ajustado el formato del encabezado y de las líneas para incluir los nuevos campos y mejorar la alineación.
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Nuevo encabezado con PNL y ROI, y anchos ajustados.
         header_open = (
             f"  {'ID':<8} {'Estado':<10} {'Entrada':>12} {'Capital':>12} {'Tamaño':>15} "
-            f"{'SL':>12} {'TP Act.':>12} {'TS Status'}"
+            f"{'PNL (U)':>15} {'ROI (%)':>12}"
         )
         print(_create_box_line(_truncate_text(header_open, box_width - 2), box_width + 2))
         print("├" + "─" * box_width + "┤")
         
         for pos in operacion.posiciones_abiertas:
-            sl_str = f"{pos.stop_loss_price:.4f}" if pos.stop_loss_price is not None else "N/A"
-            
-            tp_act_price = 0.0
-            tsl_act_pct = pos.tsl_activation_pct_at_open
+            pnl = 0.0
+            roi = 0.0
             entry_price = pos.entry_price or 0.0
+            size = pos.size_contracts or 0.0
             
-            if tsl_act_pct > 0 and entry_price > 0:
-                side = 'long' if 'LONG' in operacion.tendencia else 'short'
-                tp_act_price = entry_price * (1 + tsl_act_pct / 100) if side == 'long' else entry_price * (1 - tsl_act_pct / 100)
+            if current_market_price > 0 and entry_price > 0 and size > 0:
+                pnl = (current_market_price - entry_price) * size if side == 'long' else (entry_price - current_market_price) * size
             
-            tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
-            
-            ts_status_str = "Inactivo"
-            if pos.ts_is_active:
-                ts_stop = pos.ts_stop_price
-                ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
+            if utils and pos.capital_asignado > 0:
+                roi = utils.safe_division(pnl, pos.capital_asignado) * 100
+
+            pnl_color = "\033[92m" if pnl >= 0 else "\033[91m"
+            reset = "\033[0m"
 
             line = (
                 f"  {str(pos.id)[-6:]:<8} "
@@ -63,12 +63,11 @@ def display_positions_table(operacion: Operacion):
                 f"{entry_price:>12.4f} "
                 f"{pos.capital_asignado:>12.2f} "
                 f"{pos.size_contracts or 0.0:>15.4f} "
-                f"{sl_str:>12} "
-                f"{tp_act_str:>12} "
-                f"{ts_status_str}"
+                f"{pnl_color}{pnl:>15.4f}{reset} "
+                f"{pnl_color}{roi:>12.2f}{reset}"
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width + 2))
-        # --- FIN DE LA CORRECCIÓN ---
+        # --- FIN DE LA MODIFICACIÓN ---
 
     # --- Tabla de Posiciones Pendientes ---
     if operacion.posiciones_pendientes:
@@ -85,6 +84,32 @@ def display_positions_table(operacion: Operacion):
             print(_create_box_line(_truncate_text(line, box_width-2), box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+
+
+# --- INICIO DE LA MODIFICACIÓN ---
+def display_strategy_parameters(operacion: Operacion):
+    """
+    Muestra un cuadro con los parámetros estratégicos clave.
+    """
+    box_width = _get_terminal_width() - 4
+    print("\n┌" + "─" * box_width + "┐")
+    print(_create_box_line("Parámetros Estratégicos", box_width + 2, 'center'))
+    print("├" + "─" * box_width + "┤")
+    
+    params = {
+        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
+        "Distancia de Promediación (%)": f"{operacion.averaging_distance_pct:.2f}%"
+    }
+    
+    max_key_len = max(len(k) for k in params.keys()) if params else 0
+    
+    for key, value in params.items():
+        line = f"  {key:<{max_key_len}} : {value}"
+        print(_create_box_line(line, box_width + 2))
+
+    print("└" + "─" * box_width + "┘")
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
