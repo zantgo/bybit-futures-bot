@@ -82,15 +82,20 @@ class SignalGenerator:
                 signal = "HOLD_INITIALIZING"
                 reason = "Calculando indicadores iniciales..."
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se elimina la comprobación "ENABLED", asumiendo que la generación de señal siempre está activa.
-            else:
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Se restaura la comprobación de la bandera "ENABLED" para permitir
+            # que la generación de señales se pueda activar/desactivar desde config.py.
+            elif self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
                 if not self._strategy_is_ready and self._memory_logger:
                     self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
                     self._strategy_is_ready = True
 
                 signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
-            # --- FIN DE LA MODIFICACIÓN ---
+            
+            else:
+                signal = "HOLD_STRATEGY_DISABLED"
+                reason = "Estrategia de Señal desactivada en config"
+            # --- FIN DE LA CORRECCIÓN ---
 
         return self._data_handler.build_signal_dict(
             timestamp, price, ema, inc_pct, dec_pct, w_inc, w_dec, signal, reason

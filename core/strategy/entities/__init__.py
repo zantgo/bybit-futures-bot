@@ -146,28 +146,38 @@ class Operacion:
         """Calcula el Equity Histórico (contable) de la operación."""
         return self.capital_inicial_usdt + self.pnl_realizado_usdt
 
+    # --- INICIO DE LA MODIFICACIÓN ---
     @property
     def realized_twrr_roi(self) -> float:
         """
         Calcula el Time-Weighted Rate of Return (TWRR) basado únicamente en el PNL realizado
-        y los flujos de capital.
+        y los flujos de capital. Esto proporciona un ROI preciso a pesar de los cambios
+        en el capital operativo a lo largo del tiempo.
         """
+        # 1. Determinar el capital inicial para el período de cálculo actual.
         equity_inicial_periodo_actual = self.capital_inicial_usdt
         if self.capital_flows:
             last_flow = self.capital_flows[-1]
             equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
 
+        # 2. Calcular el PNL del período actual (solo PNL realizado).
+        # El equity actual basado en PNL realizado es `equity_total_usdt`.
         pnl_periodo_actual = self.equity_total_usdt - equity_inicial_periodo_actual
+        
+        # 3. Calcular el retorno del período actual.
         retorno_periodo_actual = safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
         
+        # 4. Encadenar con los retornos de los sub-períodos anteriores.
         total_return_factor = 1.0
         for r in self.sub_period_returns:
             total_return_factor *= r
         
         total_return_factor *= (1 + retorno_periodo_actual)
+        
+        # 5. Calcular el ROI final.
         return (total_return_factor - 1) * 100
+    # --- FIN DE LA MODIFICACIÓN ---
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
         Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado.
@@ -202,7 +212,6 @@ class Operacion:
             return None
             
         return target_price if target_price > 0 else None
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
         """

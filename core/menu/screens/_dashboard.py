@@ -248,7 +248,13 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         pnl_realizado = operacion.pnl_realizado_usdt
         pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
         equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
-        roi_realizado = operacion.realized_twrr_roi        
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Comentamos la línea de cálculo incorrecta y la reemplazamos por la llamada a la nueva propiedad.
+        # roi_realizado = utils.safe_division(pnl_realizado, operacion.capital_inicial_usdt) * 100
+        roi_realizado = operacion.realized_twrr_roi
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_operativo_logico_actual) * 100
         
         def get_color(value):
