@@ -1,3 +1,5 @@
+# Contenido completo, integrado y actualizado para: core/strategy/entities/__init__.py
+
 """
 Paquete Central de Entidades de Dominio.
 
@@ -10,7 +12,7 @@ y robusto.
 """
 import datetime
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Any # <<-- CAMBIO: Se añade 'Any' para type hinting
+from typing import Optional, Dict, List, Any # <<-- Se mantiene 'Any' de la versión original.
 
 try:
     from core._utils import safe_division
@@ -58,7 +60,7 @@ class PhysicalPosition:
     avg_entry_price: float = 0.0
     total_size_contracts: float = 0.0
     total_margin_usdt: float = 0.0
-    est_liq_price: Optional[float] = None
+    est_liq_price: Optional[datetime.datetime] = None
     last_update_ts: Optional[datetime.datetime] = None
 
 class Operacion:
@@ -73,6 +75,11 @@ class Operacion:
         self.tendencia: Optional[str] = None
         
         self.apalancamiento: float = 10.0
+        
+        # --- INICIO DE LA MODIFICACIÓN (Integración del código nuevo) ---
+        # Se añade el nuevo atributo para la distancia de promediación.
+        self.averaging_distance_pct: float = 0.5
+        # --- FIN DE LA MODIFICACIÓN ---
         
         self.sl_posicion_individual_pct: float = 10.0
         self.tsl_activacion_pct: float = 0.4
@@ -89,7 +96,7 @@ class Operacion:
         self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
         
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad - del código original) ---
         # Se comenta este atributo. Es redundante ya que get_live_performance calcula
         # el PNL no realizado en tiempo real, lo cual es más robusto y evita
         # problemas de sincronización. El EventProcessor ya no necesitará actualizarlo.
@@ -151,7 +158,7 @@ class Operacion:
         """Calcula el Equity Histórico (contable) de la operación."""
         return self.capital_inicial_usdt + self.pnl_realizado_usdt
 
-    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad - del código original) ---
     # Se comenta esta propiedad. Su cálculo era incorrecto para TWRR y dependía
     # del atributo pnl_no_realizado_usdt_vivo que fue eliminado. El cálculo
     # correcto ahora reside únicamente dentro de get_live_performance.
@@ -164,7 +171,7 @@ class Operacion:
     #     return self.capital_operativo_logico_actual + self.pnl_no_realizado_usdt_vivo
     # --- FIN DE LA MODIFICACIÓN ---
     
-    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+    # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad - del código original) ---
     # Se comenta esta propiedad. El ROI "estático" o en reposo es propenso a errores
     # y es redundante. El único ROI fiable es el que se calcula en tiempo real
     # con el precio de mercado actual, lo cual ya hace get_live_performance.
@@ -225,7 +232,7 @@ class Operacion:
             last_flow = self.capital_flows[-1]
             equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
 
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo 1: Corregir Cálculo TWRR) ---
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 1: Corregir Cálculo TWRR - del código original) ---
         # La línea original mezclaba flujos de capital con PNL. La nueva fórmula aísla
         # el PNL total del trading y lo compara contra la base de capital del período actual,
         # lo que anula el efecto de los depósitos/retiros en el cálculo del retorno.
@@ -261,7 +268,7 @@ class Operacion:
         self.comisiones_totales_usdt = 0.0
         self.profit_balance_acumulado = 0.0
         
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad) ---
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo 3: Simplificar Entidad - del código original) ---
         # Se comenta la línea que resetea el atributo pnl_no_realizado_usdt_vivo, ya que fue eliminado.
         # self.pnl_no_realizado_usdt_vivo = 0.0
         # --- FIN DE LA MODIFICACIÓN ---

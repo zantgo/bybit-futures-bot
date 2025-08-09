@@ -1,7 +1,8 @@
-# Contenido completo para: core/strategy/pm/manager/_private_logic.py
+# Contenido completo y corregido para: core/strategy/pm/manager/_private_logic.py
+
 import datetime
 import uuid
-import traceback  # <-- AÑADIDO
+import traceback
 from typing import Any
 from dataclasses import asdict
 
@@ -37,23 +38,29 @@ class _PrivateLogic:
                 self._memory_logger.log(f"Apertura omitida ({side.upper()}): No se pudo obtener el precio de mercado actual para calcular la distancia.", level="WARN")
                 return False
 
+            # --- INICIO DE LA MODIFICACIÓN CLAVE ---
+            # Leemos la distancia de promediación desde el objeto 'operacion',
+            # que fue configurado por el usuario en la TUI.
+            required_distance_pct = operacion.averaging_distance_pct
+            
             if side == 'long':
-                required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_LONG"]
                 price_condition_met = current_price <= last_position_entry_price * (1 - required_distance_pct / 100)
             else: # side == 'short'
-                required_distance_pct = self._config.OPERATION_DEFAULTS["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"]
                 price_condition_met = current_price >= last_position_entry_price * (1 + required_distance_pct / 100)
+            # --- FIN DE LA MODIFICACIÓN CLAVE ---
 
             if not price_condition_met:
                 price_diff_pct = (abs(current_price - last_position_entry_price) / last_position_entry_price) * 100
-                '''
+                
+                # He descomentado el log para que puedas depurar si lo necesitas.
+                # Si quieres desactivarlo, simplemente comenta este bloque.
                 self._memory_logger.log(
                     f"Apertura omitida ({side.upper()}): Distancia insuficiente. "
                     f"Última entrada: {last_position_entry_price:.4f}, Actual: {current_price:.4f}. "
                     f"Distancia: {price_diff_pct:.2f}%, Requerida: {required_distance_pct:.2f}%",
                     level="DEBUG"
                 )
-                '''
+                
                 return False
 
         return True
@@ -105,10 +112,7 @@ class _PrivateLogic:
                     pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
                     pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
                 
-                    # --- INICIO DE LA CORRECCIÓN CLAVE ---
-                    # Pasamos la lista de OBJETOS directamente, sin convertir a dicts.
                     self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones})
-                    # --- FIN DE LA CORRECCIÓN CLAVE ---
 
                     if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                         self._position_state.sync_positions_from_operation(op_to_update)
@@ -162,9 +166,7 @@ class _PrivateLogic:
                         self._memory_logger.log(f"TSL Stop Price Update [ID:{pos_id_short}]: Nuevo Stop en {new_stop_price:.4f}", level="DEBUG")
                         position_to_update.ts_stop_price = new_stop_price
 
-            # --- INICIO DE LA CORRECCIÓN CLAVE ---
             self._om_api.create_or_update_operation(side, {'posiciones': operacion.posiciones})
-            # --- FIN DE LA CORRECCIÓN CLAVE ---
             
         except AttributeError as ae:
             self._memory_logger.log(f"ERROR [TSL AttrErr] side={side} index={index} current_price={current_price}: {ae}", level="ERROR")
@@ -210,9 +212,7 @@ class _PrivateLogic:
                 pos_to_reset.api_filled_qty = None
 
             params = {
-                # --- INICIO DE LA CORRECCIÓN CLAVE ---
                 'posiciones': op_after.posiciones,
-                # --- FIN DE LA CORRECCIÓN CLAVE ---
                 'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
             }
             if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:

@@ -1,4 +1,4 @@
-# ./core/menu/screens/_session_config_editor.py
+# Contenido completo y unificado para: core/menu/screens/_session_config_editor.py
 
 """
 Módulo para la Pantalla de Edición de Configuración de la Sesión.
@@ -66,14 +66,15 @@ def show_session_config_editor_screen(config_module: Any) -> Dict[str, Any]:
     
     # --- INICIO DE LA MODIFICACIÓN: Copiamos también los valores de promediación ---
     # Los tratamos como parte de la configuración de sesión para poder editarlos en caliente.
-    if "RISK" not in temp_session_config:
-        temp_session_config["RISK"] = {}
+    # --- COMENTADO SEGÚN SOLICITUD: La lógica del "código nuevo" no incluye esta sección ---
+    # if "RISK" not in temp_session_config:
+    #     temp_session_config["RISK"] = {}
     
-    # Si los valores existen en OPERATION_DEFAULTS, los usamos como base
-    op_defaults = getattr(config_module, 'OPERATION_DEFAULTS', {})
-    risk_defaults = op_defaults.get('RISK', {})
-    temp_session_config["RISK"]["AVERAGING_DISTANCE_PCT_LONG"] = risk_defaults.get("AVERAGING_DISTANCE_PCT_LONG", 0.5)
-    temp_session_config["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"] = risk_defaults.get("AVERAGING_DISTANCE_PCT_SHORT", 0.5)
+    # # Si los valores existen en OPERATION_DEFAULTS, los usamos como base
+    # op_defaults = getattr(config_module, 'OPERATION_DEFAULTS', {})
+    # risk_defaults = op_defaults.get('RISK', {})
+    # temp_session_config["RISK"]["AVERAGING_DISTANCE_PCT_LONG"] = risk_defaults.get("AVERAGING_DISTANCE_PCT_LONG", 0.5)
+    # temp_session_config["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"] = risk_defaults.get("AVERAGING_DISTANCE_PCT_SHORT", 0.5)
     # --- FIN DE LA MODIFICACIÓN ---
 
     changes_made, changed_keys = _show_main_config_menu(temp_session_config)
@@ -81,8 +82,10 @@ def show_session_config_editor_screen(config_module: Any) -> Dict[str, Any]:
     if changes_made:
         # Aplicamos los cambios tanto a SESSION_CONFIG como a OPERATION_DEFAULTS para mantener la consistencia
         _apply_changes_to_real_config(temp_session_config, config_module.SESSION_CONFIG, logger)
-        if "RISK" in temp_session_config:
-             _apply_changes_to_real_config({"RISK": temp_session_config["RISK"]}, op_defaults, logger)
+        
+        # --- COMENTADO SEGÚN SOLICITUD: El "código nuevo" no aplica cambios a RISK/OPERATION_DEFAULTS ---
+        # if "RISK" in temp_session_config:
+        #      _apply_changes_to_real_config({"RISK": temp_session_config["RISK"]}, op_defaults, logger)
 
         return changed_keys
     
@@ -90,6 +93,7 @@ def show_session_config_editor_screen(config_module: Any) -> Dict[str, Any]:
 
 def _apply_changes_to_real_config(temp_cfg: Dict, real_cfg: Dict, logger: Any):
     if not logger: return
+    # Se mantiene la lógica de logging del código original, que es más completa.
     logger.log("Aplicando cambios de configuración...", "WARN")
     
     for category, params in temp_cfg.items():
@@ -102,8 +106,8 @@ def _apply_changes_to_real_config(temp_cfg: Dict, real_cfg: Dict, logger: Any):
                     real_cfg[category][key] = new_value
         else:
             new_value = params 
-            if new_value != real_cfg[category]:
-                logger.log(f"  -> {category}: '{real_cfg[category]}' -> '{new_value}'", "WARN")
+            if new_value != real_cfg.get(category): # Usamos .get() para más seguridad como en el código nuevo
+                logger.log(f"  -> {category}: '{real_cfg.get(category)}' -> '{new_value}'", "WARN")
                 real_cfg[category] = new_value
 
 def _display_config_box(temp_cfg: Dict, box_width: int):
@@ -111,7 +115,6 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
     print("\nValores Actuales:")
     print("┌" + "─" * (box_width - 2) + "┐")
 
-    # --- INICIO DE LA MODIFICACIÓN: Añadir nueva sección de Riesgo y Promediación ---
     sections = {
         "Ticker": {
             "Ticker Intervalo (s)": temp_cfg['TICKER_INTERVAL_SECONDS'],
@@ -127,17 +130,17 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
             "Umbral Decremento": temp_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'],
             "Umbral Incremento": temp_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'],
         },
-        "Riesgo y Promediación": {
-            "Distancia Prom. LONG (%)": temp_cfg.get('RISK', {}).get('AVERAGING_DISTANCE_PCT_LONG', 'N/A'),
-            "Distancia Prom. SHORT (%)": temp_cfg.get('RISK', {}).get('AVERAGING_DISTANCE_PCT_SHORT', 'N/A'),
-        },
+        # --- COMENTADO SEGÚN SOLICITUD: La sección "Riesgo y Promediación" no se muestra en el "código nuevo" ---
+        # "Riesgo y Promediación": {
+        #     "Distancia Prom. LONG (%)": temp_cfg.get('RISK', {}).get('AVERAGING_DISTANCE_PCT_LONG', 'N/A'),
+        #     "Distancia Prom. SHORT (%)": temp_cfg.get('RISK', {}).get('AVERAGING_DISTANCE_PCT_SHORT', 'N/A'),
+        # },
         "Gestión de Profit": {
             "Tarifa Comisión (%)": f"{temp_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
             "Porcentaje Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
             "Monto Mín. Transferencia": f"${temp_cfg['PROFIT']['MIN_TRANSFER_AMOUNT_USDT']:.4f}",
         }
     }
-    # --- FIN DE LA MODIFICACIÓN ---
     
     all_labels = []
     for section_params in sections.values():
@@ -169,18 +172,17 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
         box_width = min(_get_terminal_width() - 2, 90)
         _display_config_box(temp_cfg, box_width)
 
-        # --- INICIO DE LA MODIFICACIÓN: Añadir nueva opción al menú ---
         menu_items = [
             "[1] Editar Parámetros de Ticker",
             "[2] Editar Parámetros de Análisis Técnico (TA)",
             "[3] Editar Parámetros de Señal",
-            "[4] Editar Parámetros de Riesgo y Promediación",
-            "[5] Editar Parámetros de Profit",
+            # --- COMENTADO SEGÚN SOLICITUD: El "código nuevo" elimina esta opción del menú ---
+            # "[4] Editar Parámetros de Riesgo y Promediación",
+            "[4] Editar Parámetros de Profit", # <-- Re-numerado de 5 a 4
             None,
             "[s] Guardar Cambios y Volver",
             "[c] Cancelar (Descartar Cambios)"
         ]
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -189,6 +191,7 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
         choice = menu.show()
 
         try:
+            # --- LÓGICA DE MENÚ AJUSTADA a la numeración del "código nuevo" ---
             if choice == 0:
                 original = temp_cfg['TICKER_INTERVAL_SECONDS']
                 new_val = get_input("\nNuevo Intervalo (s)", float, original, min_val=0.1)
@@ -200,15 +203,14 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
             elif choice == 2:
                 _edit_signal_submenu(temp_cfg['SIGNAL'], changed_keys)
 
-            # --- INICIO DE LA MODIFICACIÓN: Añadir lógica para el nuevo submenú ---
-            elif choice == 3:
-                _edit_risk_submenu(temp_cfg['RISK'], changed_keys)
-            # --- FIN DE LA MODIFICACIÓN ---
-
-            elif choice == 4:
+            # --- COMENTADO SEGÚN SOLICITUD: El "código nuevo" no tiene lógica para esta opción ---
+            # elif choice == 3:
+            #     _edit_risk_submenu(temp_cfg['RISK'], changed_keys)
+            
+            elif choice == 3: # <-- Re-numerado de 4 a 3
                 _edit_profit_submenu(temp_cfg['PROFIT'], changed_keys)
             
-            elif choice == 6:
+            elif choice == 5: # <-- Re-numerado de 6 a 5
                 if changed_keys:
                     print("\nCambios guardados."); time.sleep(2)
                     return True, changed_keys
@@ -216,7 +218,7 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     return False, {}
             
-            elif choice == 7 or choice is None:
+            elif choice == 6 or choice is None: # <-- Re-numerado de 7 a 6
                 if changed_keys:
                     if TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show() == 0:
                         print("\nCambios descartados."); time.sleep(1.5)
@@ -284,31 +286,32 @@ def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict):
         else:
             break
 
-# --- INICIO DE LA MODIFICACIÓN: Nuevo submenú para Riesgo y Promediación ---
-def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
-    """Submenú para editar los parámetros de riesgo y promediación."""
-    while True:
-        menu_items = [
-            f"[1] Distancia Prom. LONG (%) ({risk_cfg['AVERAGING_DISTANCE_PCT_LONG']})",
-            f"[2] Distancia Prom. SHORT (%) ({risk_cfg['AVERAGING_DISTANCE_PCT_SHORT']})",
-            None,
-            "[b] Volver"
-        ]
-        submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Riesgo:", **MENU_STYLE).show()
+# --- COMENTADO SEGÚN SOLICITUD: La función _edit_risk_submenu no existe en el "código nuevo" ---
+# # --- INICIO DE LA MODIFICACIÓN: Nuevo submenú para Riesgo y Promediación ---
+# def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
+#     """Submenú para editar los parámetros de riesgo y promediación."""
+#     while True:
+#         menu_items = [
+#             f"[1] Distancia Prom. LONG (%) ({risk_cfg['AVERAGING_DISTANCE_PCT_LONG']})",
+#             f"[2] Distancia Prom. SHORT (%) ({risk_cfg['AVERAGING_DISTANCE_PCT_SHORT']})",
+#             None,
+#             "[b] Volver"
+#         ]
+#         submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Riesgo:", **MENU_STYLE).show()
         
-        if submenu == 0:
-            original = risk_cfg['AVERAGING_DISTANCE_PCT_LONG']
-            new_val = get_input("Nueva Distancia de Promediación para LONG (%)", float, original, min_val=0.0)
-            if new_val != original:
-                changed_keys['AVERAGING_DISTANCE_PCT_LONG'] = risk_cfg['AVERAGING_DISTANCE_PCT_LONG'] = new_val
-        elif submenu == 1:
-            original = risk_cfg['AVERAGING_DISTANCE_PCT_SHORT']
-            new_val = get_input("Nueva Distancia de Promediación para SHORT (%)", float, original, min_val=0.0)
-            if new_val != original:
-                changed_keys['AVERAGING_DISTANCE_PCT_SHORT'] = risk_cfg['AVERAGING_DISTANCE_PCT_SHORT'] = new_val
-        else:
-            break
-# --- FIN DE LA MODIFICACIÓN ---
+#         if submenu == 0:
+#             original = risk_cfg['AVERAGING_DISTANCE_PCT_LONG']
+#             new_val = get_input("Nueva Distancia de Promediación para LONG (%)", float, original, min_val=0.0)
+#             if new_val != original:
+#                 changed_keys['AVERAGING_DISTANCE_PCT_LONG'] = risk_cfg['AVERAGING_DISTANCE_PCT_LONG'] = new_val
+#         elif submenu == 1:
+#             original = risk_cfg['AVERAGING_DISTANCE_PCT_SHORT']
+#             new_val = get_input("Nueva Distancia de Promediación para SHORT (%)", float, original, min_val=0.0)
+#             if new_val != original:
+#                 changed_keys['AVERAGING_DISTANCE_PCT_SHORT'] = risk_cfg['AVERAGING_DISTANCE_PCT_SHORT'] = new_val
+#         else:
+#             break
+# # --- FIN DE LA MODIFICACIÓN ---
 
 def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
     while True:

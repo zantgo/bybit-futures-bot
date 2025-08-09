@@ -75,16 +75,9 @@ class OperationManager:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
             
-            copied_op = Operacion(id=original_op.id)
-            for attr, value in original_op.__dict__.items():
-                if attr not in ['posiciones', 'capital_flows', 'sub_period_returns']:
-                    setattr(copied_op, attr, value)
-            
-            # Realizamos una copia profunda de las posiciones para evitar mutaciones accidentales
-            copied_op.posiciones = copy.deepcopy(original_op.posiciones)
-            copied_op.capital_flows = copy.deepcopy(original_op.capital_flows)
-            copied_op.sub_period_returns = original_op.sub_period_returns[:] 
-            return copied_op
+            # Usamos deepcopy para asegurar que el consumidor obtiene una copia segura
+            # y que el estado interno no puede ser modificado desde fuera.
+            return copy.deepcopy(original_op)
 
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
@@ -93,21 +86,25 @@ class OperationManager:
 
             estado_original = target_op.estado
             changes_log = []
-            
-            # --- INICIO DE LA CORRECCIÓN CLAVE ---
-            # El PM nos enviará una lista de objetos `LogicalPosition`.
-            nuevas_posiciones = params.get('posiciones')
 
+            # --- INICIO DE LA CORRECCIÓN TOTAL ---
+            nuevas_posiciones = params.get('posiciones')
+            
             nuevo_capital_operativo = 0.0
             if nuevas_posiciones is not None:
-                # Calculamos el capital directamente desde los objetos
-                nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
-            # --- FIN DE LA CORRECCIÓN CLAVE ---
+                # Nos aseguramos de que es una lista y que contiene objetos LogicalPosition
+                if isinstance(nuevas_posiciones, list) and all(isinstance(p, LogicalPosition) for p in nuevas_posiciones):
+                    nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
+                else:
+                    # Si recibimos algo que no es una lista de objetos, lo rechazamos y logueamos.
+                    self._memory_logger.log(f"ERROR [OM]: Se intentó actualizar la operación {side} con un formato de posiciones inválido.", "ERROR")
+                    nuevas_posiciones = None # Ignoramos el cambio
+            # --- FIN DE LA CORRECCIÓN TOTAL ---
             
             capital_operativo_anterior = target_op.capital_operativo_logico_actual
             diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
 
-            if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and abs(diferencia_capital) > 1e-9:
+            if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and nuevas_posiciones is not None and abs(diferencia_capital) > 1e-9:
                 current_price = sm_api.get_session_summary().get('current_market_price', 0.0) if sm_api else 0.0
                 live_performance = target_op.get_live_performance(current_price, self._utils)
                 equity_before_flow = live_performance.get("equity_actual_vivo", target_op.equity_total_usdt)
@@ -129,15 +126,14 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
-            # --- INICIO DE LA CORRECCIÓN CLAVE ---
+            # --- INICIO DE LA CORRECCIÓN TOTAL ---
             if nuevas_posiciones is not None:
-                # Asignamos directamente la lista de objetos, usando deepcopy para seguridad.
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
-                changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} posiciones.")
-            # --- FIN DE LA CORRECCIÓN CLAVE ---
+                changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} objetos.")
+            # --- FIN DE LA CORRECCIÓN TOTAL ---
 
             if estado_original == 'DETENIDA' and params:
-                target_op.capital_inicial_usdt = nuevo_capital_operativo
+                target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 changes_log.append(f"'capital_inicial_usdt' (Base ROI) fijado en: {target_op.capital_inicial_usdt:.2f}$")
                 if target_op.tipo_cond_entrada == 'MARKET':
                     target_op.estado = 'ACTIVA'
