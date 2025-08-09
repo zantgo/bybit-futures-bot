@@ -61,6 +61,7 @@ SESSION_CONFIG = {
     
     # Parámetros de Análisis Técnico (TA)
     "TA": {
+        "ENABLED": True, 
         "EMA_WINDOW": 50,  
         "WEIGHTED_INC_WINDOW": 25, 
         "WEIGHTED_DEC_WINDOW": 25,  
@@ -68,6 +69,7 @@ SESSION_CONFIG = {
 
     # Parámetros de Generación de Señales
     "SIGNAL": {
+        "ENABLED": True, 
         "PRICE_CHANGE_BUY_PERCENTAGE": -0.1,
         "PRICE_CHANGE_SELL_PERCENTAGE": 0.1,
         "WEIGHTED_DECREMENT_THRESHOLD": 0.45,
