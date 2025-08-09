@@ -29,30 +29,58 @@ def display_positions_table(operacion: Operacion):
     # --- Tabla de Posiciones Abiertas ---
     if operacion.posiciones_abiertas:
         print("├" + "─" * box_width + "┤")
-        header_open = f"  {'ID':<10} {'Estado':<12} {'Entrada':>15} {'Capital':>15} {'Tamaño (Contratos)':>20}"
-        print(_create_box_line(_truncate_text(header_open, box_width -2), box_width + 2))
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se ha ajustado el formato del encabezado y de las líneas para incluir los nuevos campos y mejorar la alineación.
+        header_open = (
+            f"  {'ID':<8} {'Estado':<10} {'Entrada':>12} {'Capital':>12} {'Tamaño':>15} "
+            f"{'SL':>12} {'TP Act.':>12} {'TS Status'}"
+        )
+        print(_create_box_line(_truncate_text(header_open, box_width - 2), box_width + 2))
         print("├" + "─" * box_width + "┤")
+        
         for pos in operacion.posiciones_abiertas:
+            sl_str = f"{pos.stop_loss_price:.4f}" if pos.stop_loss_price is not None else "N/A"
+            
+            tp_act_price = 0.0
+            tsl_act_pct = pos.tsl_activation_pct_at_open
+            entry_price = pos.entry_price or 0.0
+            
+            if tsl_act_pct > 0 and entry_price > 0:
+                side = 'long' if 'LONG' in operacion.tendencia else 'short'
+                tp_act_price = entry_price * (1 + tsl_act_pct / 100) if side == 'long' else entry_price * (1 - tsl_act_pct / 100)
+            
+            tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
+            
+            ts_status_str = "Inactivo"
+            if pos.ts_is_active:
+                ts_stop = pos.ts_stop_price
+                ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
+
             line = (
-                f"  {str(pos.id)[-6:]:<10} "
-                f"\033[92m{pos.estado:<12}\033[0m "
-                f"{pos.entry_price or 0.0:>15.4f} "
-                f"{pos.capital_asignado:>15.2f} USDT"
-                f"{pos.size_contracts or 0.0:>20.4f}"
+                f"  {str(pos.id)[-6:]:<8} "
+                f"\033[92m{pos.estado:<10}\033[0m "
+                f"{entry_price:>12.4f} "
+                f"{pos.capital_asignado:>12.2f} "
+                f"{pos.size_contracts or 0.0:>15.4f} "
+                f"{sl_str:>12} "
+                f"{tp_act_str:>12} "
+                f"{ts_status_str}"
             )
-            print(_create_box_line(_truncate_text(line, box_width-2), box_width + 2))
+            print(_create_box_line(_truncate_text(line, box_width - 2), box_width + 2))
+        # --- FIN DE LA CORRECCIÓN ---
 
     # --- Tabla de Posiciones Pendientes ---
     if operacion.posiciones_pendientes:
         print("├" + "─" * box_width + "┤")
-        header_pending = f"  {'ID':<10} {'Estado':<12} {'Capital Asignado':>15}"
+        header_pending = f"  {'ID':<10} {'Estado':<12} {'Capital Asignado':>20}"
         print(_create_box_line(_truncate_text(header_pending, box_width-2), box_width + 2))
         print("├" + "─" * box_width + "┤")
         for pos in operacion.posiciones_pendientes:
             line = (
                 f"  {str(pos.id)[-6:]:<10} "
                 f"\033[96m{pos.estado:<12}\033[0m "
-                f"{pos.capital_asignado:>15.2f} USDT"
+                f"{pos.capital_asignado:>20.2f} USDT"
             )
             print(_create_box_line(_truncate_text(line, box_width-2), box_width + 2))
 
