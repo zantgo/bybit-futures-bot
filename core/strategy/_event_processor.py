@@ -156,11 +156,10 @@ class EventProcessor:
                     live_performance = operacion.get_live_performance(current_price, self._utils)
                     roi = live_performance.get("roi_twrr_vivo", 0.0)
                     
-                    # --- INICIO DE LA MODIFICACIÓN ---
                     risk_condition_met = False
                     risk_reason = ""
 
-                    # 2.1 Chequear condiciones de RIESGO (acción siempre es DETENER)
+                    # 2.1 Chequear condiciones de RIESGO
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
                     
@@ -193,15 +192,24 @@ class EventProcessor:
                             risk_condition_met, risk_reason = True, f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
 
                     if risk_condition_met:
-                        log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción forzosa: DETENER."
+                        # --- INICIO DE LA MODIFICACIÓN ---
+                        # Leemos la acción a tomar desde la configuración para mayor claridad.
+                        risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
+                        log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
-                        continue # Pasar al siguiente lado, ya que esta operación se está deteniendo
+                        
+                        if risk_action == 'DETENER':
+                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                        else: # Por defecto o si se configura 'PAUSAR'
+                            self._om_api.pausar_operacion(side)
+                        
+                        continue # Pasar al siguiente lado
+                        # --- FIN DE LA MODIFICACIÓN ---
 
                     # 2.2 Chequear Límites y Condiciones de Salida (acción configurable)
                     exit_condition_met = False
                     exit_reason = ""
-                    if not risk_condition_met: # Solo chequear si no se activó una de riesgo
+                    if not risk_condition_met:
                         if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                             exit_condition_met, exit_reason = True, f"Límite de {operacion.max_comercios} trades"
                         
@@ -221,8 +229,7 @@ class EventProcessor:
                             self._memory_logger.log(log_msg, "WARN")
                             if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side)
                             elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
-                            else: self._om_api.pausar_operacion(side) # Default a pausar por seguridad
-                    # --- FIN DE LA MODIFICACIÓN ---
+                            else: self._om_api.pausar_operacion(side)
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")

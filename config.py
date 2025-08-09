@@ -61,31 +61,15 @@ SESSION_CONFIG = {
     
     # Parámetros de Análisis Técnico (TA)
     "TA": {
-        "ENABLED": True,
-        
-        # Ventana (en número de velas) utilizada para calcular la Media Móvil Exponencial (EMA).
-        # Un valor más alto suaviza más la curva, pero responde más lento a cambios de tendencia.
         "EMA_WINDOW": 50,  
-
-        # Número de velas consideradas para calcular el momentum ponderado de incrementos.
-        # Se usa para detectar consistencia en movimientos alcistas.
-
         "WEIGHTED_INC_WINDOW": 25, 
-
-        # Número de velas consideradas para calcular el momentum ponderado de decrementos.
-        # Se usa para detectar consistencia en movimientos bajistas. 
         "WEIGHTED_DEC_WINDOW": 25,  
     },
 
     # Parámetros de Generación de Señales
     "SIGNAL": {
-        "ENABLED": True,
-
-        # Umbrales de cambio porcentual respecto al primer precio en la ventana
         "PRICE_CHANGE_BUY_PERCENTAGE": -0.1,
         "PRICE_CHANGE_SELL_PERCENTAGE": 0.1,
-
-        # Umbrales de momentum ponderado entre precios sucesivos
         "WEIGHTED_DECREMENT_THRESHOLD": 0.45,
         "WEIGHTED_INCREMENT_THRESHOLD": 0.45,
     },
@@ -96,7 +80,6 @@ SESSION_CONFIG = {
         "REINVEST_PROFIT_PCT": 10.0,
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
     },
-
 }
 
 # --- 3. CONFIGURACIÓN POR DEFECTO PARA NUEVAS OPERACIONES ---
@@ -110,31 +93,46 @@ OPERATION_DEFAULTS = {
         "LEVERAGE": 10.0,
     },
     "RISK": {
-        "INDIVIDUAL_SL_PCT": 10.0,
-        "TSL_ACTIVATION_PCT": 0.5,
-        "TSL_DISTANCE_PCT": 0.05,
-        "AVERAGING_DISTANCE_PCT_LONG": 0.5, # Para un LONG, el precio debe CAER este % para volver a comprar.
-        "AVERAGING_DISTANCE_PCT_SHORT": 0.5, # Para un SHORT, el precio debe SUBIR este % para volver a vender.
-    },
-    "OPERATION_LIMITS": {
-        "ENABLED": False,
-        "AFTER_STATE": 'PAUSADO', # PAUSADO O DETENIDO 
-        "MAX_TRADES": {
-            "ENABLED": False,
-            "VALUE": 1000,  # debe ser mayor a cero.
+        "INDIVIDUAL_SL": {
+            "ENABLED": False, 
+            "PERCENTAGE": 10.0, 
         },
-        "MAX_DURATION": {
-            "ENABLED": False,
-            "MINUTES": 10080, # ~7 días. 0 para ilimitado.
-        },
-        "ROI_SL_PCT": {
+        "INDIVIDUAL_TSL": {
             "ENABLED": True, 
-            "PERCENTAGE": -50.0, 
+            "TSL_ACTIVATION_PCT": 0.5,
+            "TSL_DISTANCE_PCT": 0.05,
+        },
+        "AVERAGING": {
+            "ENABLED": True, 
+            "DISTANCE_PCT_LONG": 0.5,
+            "DISTANCE_PCT_SHORT": 0.5,
+        },
+    },
+    # Parámetros de RIESGO a nivel de OPERACIÓN COMPLETA.
+    # La acción al cumplirse (PAUSAR o DETENER) se configura en el config.py
+    "OPERATION_RISK": {
+        "AFTER_STATE": 'DETENER', # PAUSAR O DETENER
+        "ROI_SL_TP": {
+            "ENABLED": True, 
+            "PERCENTAGE": -25.0, 
         },
         "ROI_TSL": {
             "ENABLED": True,
             "ACTIVATION_PCT": 25.0,
             "DISTANCE_PCT": 5.0,
+        },
+    },
+    # Parámetros de LÍMITES OPERATIVOS.
+    # La acción al cumplirse (PAUSAR o DETENER) es configurable en la TUI.
+    "OPERATION_LIMITS": {
+        "AFTER_STATE": 'PAUSAR', # PAUSAR O DETENER
+        "MAX_TRADES": {
+            "ENABLED": False,
+            "VALUE": 1000,
+        },
+        "MAX_DURATION": {
+            "ENABLED": False,
+            "MINUTES": 1440 # 24 hrs
         },
     }
 }
@@ -168,9 +166,9 @@ PRECISION_FALLBACKS = {
 
 # Rutas de Archivos de Log y Resultados
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
-RESULTS_DIR = os.path.join(PROJECT_ROOT, "results") # <-- AÑADIR ESTA LÍNEA
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True) # <-- AÑADIR ESTA LÍNEA
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 LOG_FILES = {
     "SIGNAL": os.path.join(LOG_DIR, "signals_log.jsonl"),

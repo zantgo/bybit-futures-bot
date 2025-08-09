@@ -17,7 +17,7 @@ from ..._helpers import (
     MENU_STYLE,
     UserInputCancelled,
     _get_terminal_width,
-    _create_config_box_line, # <-- Ya se importa correctamente aquí
+    _create_config_box_line,
     _truncate_text,
     _clean_ansi_codes,
 )
@@ -51,17 +51,10 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     def _print_line(label, value, key_len):
         content = f"  {label:<{key_len}} : {value}"
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Usamos la función _create_config_box_line que ya está en el ámbito del módulo.
-        # No necesitamos importarla de nuevo.
         print(_create_config_box_line(content, box_width))
-        # --- FIN DE LA CORRECCIÓN ---
 
     def _print_section_header(title):
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Usamos la función _create_config_box_line que ya está en el ámbito del módulo.
         print(_create_config_box_line(f"\033[96m{title.center(box_width - 6)}\033[0m", box_width))
-        # --- FIN DE LA CORRECCIÓN ---
 
     _print_section_header("Capital y Posiciones")
     capital_data = {
@@ -76,7 +69,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     _print_section_header("Estrategia Global")
     strategy_data = {
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
-        "Distancia Promediación (%)": operacion.averaging_distance_pct,
+        "Distancia Promediación (%)": operacion.averaging_distance_pct if operacion.averaging_distance_pct is not None else "Desactivado",
     }
     max_key_len = max(len(k) for k in strategy_data.keys()) if strategy_data else 0
     for label, value in strategy_data.items():
@@ -151,20 +144,38 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.tendencia = "LONG_ONLY" if side == 'long' else "SHORT_ONLY"
         temp_op.apalancamiento = apalancamiento
         
-        if side == 'long':
-            temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING_DISTANCE_PCT_LONG"]
+        # --- INICIO DE LA MODIFICACIÓN: Lectura de nueva estructura de config ---
+        if defaults["RISK"]["AVERAGING"]["ENABLED"]:
+            if side == 'long':
+                temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"]
+            else:
+                temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_SHORT"]
         else:
-            temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING_DISTANCE_PCT_SHORT"]
+            temp_op.averaging_distance_pct = None
 
-        temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL_PCT"]
-        temp_op.tsl_activacion_pct = defaults["RISK"]["TSL_ACTIVATION_PCT"]
-        temp_op.tsl_distancia_pct = defaults["RISK"]["TSL_DISTANCE_PCT"]
-        temp_op.sl_roi_pct = defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["PERCENTAGE"] if defaults["OPERATION_LIMITS"]["ROI_SL_PCT"]["ENABLED"] else None
-        temp_op.tsl_roi_activacion_pct = defaults["OPERATION_LIMITS"]["ROI_TSL"].get("ACTIVATION_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None
-        temp_op.tsl_roi_distancia_pct = defaults["OPERATION_LIMITS"]["ROI_TSL"].get("DISTANCE_PCT") if defaults["OPERATION_LIMITS"]["ROI_TSL"]["ENABLED"] else None
+        temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL"]["PERCENTAGE"] if defaults["RISK"]["INDIVIDUAL_SL"]["ENABLED"] else None
+        
+        if defaults["RISK"]["INDIVIDUAL_TSL"]["ENABLED"]:
+            temp_op.tsl_activacion_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_ACTIVATION_PCT"]
+            temp_op.tsl_distancia_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_DISTANCE_PCT"]
+        else:
+            temp_op.tsl_activacion_pct = None
+            temp_op.tsl_distancia_pct = None
+        
+        temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
+        
+        if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]:
+            temp_op.tsl_roi_activacion_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT")
+            temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
+        else:
+            temp_op.tsl_roi_activacion_pct = None
+            temp_op.tsl_roi_distancia_pct = None
+        
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
         temp_op.tiempo_maximo_min = defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None
+        
         temp_op.accion_al_finalizar = defaults["OPERATION_LIMITS"]["AFTER_STATE"]
+        # --- FIN DE LA MODIFICACIÓN ---
         
         for _ in range(max_pos):
             new_pos = LogicalPosition(
@@ -218,7 +229,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     params_changed = True
 
                 prompt_text = f"Nueva Distancia de Promediación para {side.upper()} (%)"
-                temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.0)
+                temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.0, is_optional=True)
                 params_changed = True
 
             elif choice == 2:
