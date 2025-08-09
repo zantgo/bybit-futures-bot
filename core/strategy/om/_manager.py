@@ -23,6 +23,8 @@ except ImportError:
             self.tiempo_inicio_ejecucion = None; self.pnl_realizado_usdt = 0.0
             self.comisiones_totales_usdt = 0.0; self.total_reinvertido_usdt = 0.0
             self.profit_balance_acumulado = 0.0
+            self.tsl_roi_activo = False # Añadido para fallback
+            self.tsl_roi_peak_pct = 0.0 # Añadido para fallback
         def reset(self): pass
         @property
         def capital_operativo_logico_actual(self) -> float: return 0.0
@@ -194,17 +196,46 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # La siguiente función 'reanudar_operacion' ha sido actualizada para resetear
+    # las banderas de las condiciones de salida (ej. TSL por ROI).
+    # Se comenta la versión original a continuación para referencia.
+
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'PAUSADA':
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
+            
             target_op.estado = 'ACTIVA'
+            
+            # Al reanudar una operación manualmente, es crucial resetear las banderas
+            # de las condiciones de salida. De lo contrario, si la operación fue pausada
+            # por un TSL por ROI, nunca podría volver a operar.
+            target_op.tsl_roi_activo = False
+            target_op.tsl_roi_peak_pct = 0.0
+            # Si se añadieran otras banderas de salida en el futuro (ej. tp_general_activado),
+            # también deberían resetearse aquí.
+
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+                
         msg = f"OPERACIÓN {side.upper()} REANUDADA. El sistema está ahora ACTIVO para este lado."
         self._memory_logger.log(msg, "WARN")
         return True, msg
+
+    # def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado != 'PAUSADA':
+    #             return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
+    #         target_op.estado = 'ACTIVA'
+    #         if not target_op.tiempo_inicio_ejecucion:
+    #             target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+    #     msg = f"OPERACIÓN {side.upper()} REANUDADA. El sistema está ahora ACTIVO para este lado."
+    #     self._memory_logger.log(msg, "WARN")
+    #     return True, msg
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:

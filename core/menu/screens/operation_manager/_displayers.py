@@ -48,6 +48,7 @@ except ImportError:
         def posiciones_pendientes(self) -> list: return []
         @property
         def posiciones_abiertas_count(self) -> int: return 0
+        def get_roi_sl_tp_price(self): return None
 
 
 # --- Inyección de Dependencias ---
@@ -68,6 +69,7 @@ def _get_terminal_width():
 
 def _get_unified_box_width() -> int:
     terminal_width = _get_terminal_width()
+    # Mantenemos el cálculo original para asegurar compatibilidad visual
     open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
     pending_pos_content_width = 12 + 22 + 22
     content_width = max(open_pos_content_width, pending_pos_content_width) + 4
@@ -277,12 +279,11 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
-
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
     print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line("Condiciones de la Operación", box_width, 'center'))
+    print(_create_box_line("Condiciones y Límites", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
 
     status_color_map = {'ACTIVA': "\033[92m", 'PAUSADA': "\033[93m", 'DETENIDA': "\033[90m", 'EN_ESPERA': "\033[96m", 'DETENIENDO': "\033[91m"}
@@ -290,50 +291,56 @@ def _display_operation_conditions(operacion: Operacion):
     reset = "\033[0m"
 
     print(_create_box_line(f"Estado Actual: {color}{operacion.estado}{reset}", box_width))
-    if operacion.estado != 'DETENIDA':
-        print(_create_box_line(f"Acción al Finalizar por Límite: {operacion.accion_al_finalizar.upper()}", box_width))
 
-    print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_box_line("Condición de Entrada:", box_width))
-    cond_in_str = "No definida (Operación Inactiva)"
     if operacion.estado != 'DETENIDA':
+        # --- Condición de Entrada ---
+        print("├" + "─" * (box_width - 2) + "┤")
+        print(_create_box_line("\033[96mCondición de Entrada\033[0m", box_width, 'center'))
+        cond_in_str = "No definida (Operación Inactiva)"
         if operacion.tipo_cond_entrada == 'MARKET':
             cond_in_str = "- Inmediata (Precio de Mercado)"
         elif operacion.tipo_cond_entrada and operacion.valor_cond_entrada is not None:
             op = ">" if operacion.tipo_cond_entrada == 'PRICE_ABOVE' else "<"
             cond_in_str = f"- Precio {op} {operacion.valor_cond_entrada:.4f}"
-    print(_create_box_line(f"  {cond_in_str}", box_width))
+        print(_create_box_line(f"  {cond_in_str}", box_width))
 
-    print("├" + "─" * (box_width - 2) + "┤")
-    print(_create_box_line("Condiciones de Salida (CUALQUIERA activa la acción):", box_width))
-    exit_conditions = []
-    if operacion.tipo_cond_salida and operacion.valor_cond_salida is not None:
-        op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
-        exit_conditions.append(f"Precio {op} {operacion.valor_cond_salida:.4f}")
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # --- Gestión de Riesgo de Operación ---
+        print("├" + "─" * (box_width - 2) + "┤")
+        print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
+        
+        # Calcular y mostrar precio de SL/TP por ROI
+        target_price = operacion.get_roi_sl_tp_price()
+        sl_tp_price_str = f"(Precio Obj: ~{target_price:.4f})" if target_price is not None else ""
+        
+        sl_roi_str = f"SL/TP por ROI: {operacion.sl_roi_pct}% {sl_tp_price_str}" if operacion.sl_roi_pct is not None else "SL/TP por ROI: Desactivado"
+        print(_create_box_line(f"  - {sl_roi_str}", box_width))
 
-    if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
-        tsl_config_str = (f"TSL-ROI: Activa a +{operacion.tsl_roi_activacion_pct}%, Distancia {operacion.tsl_roi_distancia_pct}%")
-        if operacion.tsl_roi_activo:
-            tsl_config_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
-        exit_conditions.append(tsl_config_str)
+        tsl_roi_str = "TSL por ROI: Desactivado"
+        if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
+            tsl_roi_str = (f"TSL por ROI: Activa a +{operacion.tsl_roi_activacion_pct}%, Distancia {operacion.tsl_roi_distancia_pct}%")
+            if operacion.tsl_roi_activo:
+                tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
+        print(_create_box_line(f"  - {tsl_roi_str}", box_width))
 
-    if operacion.sl_roi_pct is not None:
-        if operacion.sl_roi_pct < 0:
-            exit_conditions.append(f"SL-ROI <= {operacion.sl_roi_pct}%")
+        # --- Límites de Salida de Operación ---
+        print("├" + "─" * (box_width - 2) + "┤")
+        print(_create_box_line(f"\033[96mLímites de Salida (Acción: {operacion.accion_al_finalizar.upper()})\033[0m", box_width, 'center'))
+        exit_limits = []
+        if operacion.tipo_cond_salida and operacion.valor_cond_salida is not None:
+            op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
+            exit_limits.append(f"Precio de Salida: {op} {operacion.valor_cond_salida:.4f}")
+
+        if operacion.tiempo_maximo_min is not None:
+            exit_limits.append(f"Duración Máxima: {operacion.tiempo_maximo_min} min")
+        if operacion.max_comercios is not None:
+            exit_limits.append(f"Máximo de Trades: {operacion.max_comercios}")
+        
+        if not exit_limits:
+            print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
         else:
-            exit_conditions.append(f"TP-ROI >= {operacion.sl_roi_pct}%")
-
-    if operacion.tiempo_maximo_min is not None:
-        exit_conditions.append(f"Tiempo >= {operacion.tiempo_maximo_min} min")
-    if operacion.max_comercios is not None:
-        exit_conditions.append(f"Trades >= {operacion.max_comercios}")
-
-    if not exit_conditions and operacion.estado != 'DETENIDA':
-        print(_create_box_line("  - Ninguna (finalización manual)", box_width))
-    elif not exit_conditions:
-         print(_create_box_line("  (Operación inactiva)", box_width))
-    else:
-        for cond in exit_conditions:
-            print(_create_box_line(f"  - {cond}", box_width))
+            for limit in exit_limits:
+                print(_create_box_line(f"  - {limit}", box_width))
+        # --- FIN DE LA MODIFICACIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
