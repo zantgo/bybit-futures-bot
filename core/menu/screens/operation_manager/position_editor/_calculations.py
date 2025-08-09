@@ -150,10 +150,9 @@ def calculate_projected_risk_metrics(
     
     live_metrics = calculate_avg_entry_and_liquidation(open_positions, leverage, side)
 
-    # --- INICIO DE LA CORRECCIÓN: Llamada a función con argumentos correctos ---
+    # Llamada a función con argumentos correctos
     last_real_avg_price = live_metrics['avg_entry_price'] or current_market_price
     coverage_metrics = calculate_coverage_metrics(pending_positions, distance_pct, last_real_avg_price, side)
-    # --- FIN DE LA CORRECCIÓN ---
 
     sim_total_value = sum(p.size_contracts * p.entry_price for p in open_positions if p.size_contracts and p.entry_price)
     sim_total_size = sum(p.size_contracts for p in open_positions if p.size_contracts)

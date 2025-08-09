@@ -65,12 +65,10 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
             side
         )
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Pasamos el precio actual a la tabla para calcular PNL y ROI.
+        # Se pasa el precio actual a la tabla para calcular PNL y ROI.
         disp.display_positions_table(operacion, current_price, side)
-        # Llamamos a la nueva función para mostrar el cuadro de parámetros.
+        # Se llama a la función para mostrar el cuadro de parámetros.
         disp.display_strategy_parameters(operacion)
-        # --- FIN DE LA MODIFICACIÓN ---
         
         disp.display_risk_panel(risk_metrics, current_price, side)
         

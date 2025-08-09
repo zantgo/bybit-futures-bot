@@ -4,15 +4,11 @@ from typing import Any, Dict, List, Optional
 import shutil
 import re
 
-# --- INICIO DE LA CORRECCIÓN ---
-# Movemos las importaciones críticas fuera del try/except para que fallen ruidosamente
-# si no se encuentran, en lugar de fallar silenciosamente.
 try:
     from ...._helpers import _create_box_line, _truncate_text, _get_terminal_width, _clean_ansi_codes
     from core.strategy.entities import Operacion, LogicalPosition
     from core import utils
 except ImportError:
-    # Estos fallbacks son solo para que el linter no se queje, pero el programa no debería llegar aquí.
     def _create_box_line(content: str, width: int, alignment: str = 'left') -> str: return content
     def _truncate_text(text: str, max_length: int) -> str: return text
     def _get_terminal_width() -> int: return 90
@@ -20,12 +16,11 @@ except ImportError:
     class Operacion: pass
     class LogicalPosition: pass
     utils = None
-# --- FIN DE LA CORRECCIÓN ---
 
 def display_positions_table(operacion: Operacion, current_market_price: float, side: str):
     """
     Muestra una tabla detallada de las posiciones abiertas y pendientes.
-    Incluye PNL y ROI en vivo, con formato mejorado para mayor precisión.
+    Se ha añadido la columna ROI (%) para un análisis más completo por posición.
     """
     box_width = _get_terminal_width() - 4
     
@@ -35,10 +30,14 @@ def display_positions_table(operacion: Operacion, current_market_price: float, s
     if operacion.posiciones_abiertas:
         print("├" + "─" * box_width + "┤")
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añade la columna 'ROI (%)' al encabezado y se reajustan los anchos.
         header_open = (
-            f"  {'ID':<8} {'Estado':<10} {'Entrada':>12} {'Capital':>12} {'Tamaño':>15} "
-            f"{'PNL (U)':>15} {'ROI (%)':>12}"
+            f"  {'ID':<8} {'Estado':<10} {'Entrada':>12} {'Capital':>12} {'Tamaño':>12} "
+            f"{'PNL (U)':>13} {'ROI (%)':>10}"
         )
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         print(_create_box_line(_truncate_text(header_open, box_width - 2), box_width + 2))
         print("├" + "─" * box_width + "┤")
         
@@ -50,26 +49,29 @@ def display_positions_table(operacion: Operacion, current_market_price: float, s
             
             if current_market_price > 0 and entry_price > 0 and size > 0:
                 pnl = (current_market_price - entry_price) * size if side == 'long' else (entry_price - current_market_price) * size
-            
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Aseguramos que 'utils' existe y calculamos el ROI.
-            if utils and pos.capital_asignado > 0:
-                roi = utils.safe_division(pnl, pos.capital_asignado) * 100
 
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se calcula el ROI basado en el PNL y el capital asignado a la posición.
+            if pos.capital_asignado and pos.capital_asignado > 0:
+                roi = (pnl / pos.capital_asignado) * 100
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             pnl_color = "\033[92m" if pnl >= 0 else "\033[91m"
             reset = "\033[0m"
 
-            # Formateo mejorado: PNL con 4 decimales, ROI con 3 para más precisión.
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se añade el ROI formateado a la línea de la tabla.
             line = (
                 f"  {str(pos.id)[-6:]:<8} "
                 f"\033[92m{pos.estado:<10}\033[0m "
                 f"{entry_price:>12.4f} "
                 f"{pos.capital_asignado:>12.2f} "
-                f"{pos.size_contracts or 0.0:>15.4f} "
-                f"{pnl_color}{pnl:>15.4f}{reset} "
-                f"{pnl_color}{roi:>12.3f}{reset}" # <-- CAMBIO CLAVE: .2f a .3f
+                f"{pos.size_contracts or 0.0:>12.4f} "
+                f"{pnl_color}{pnl:>13.4f}{reset}"
+                f"{pnl_color}{roi:>9.2f}%{reset}"
             )
-            # --- FIN DE LA CORRECCIÓN ---
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width + 2))
 
     if operacion.posiciones_pendientes:
