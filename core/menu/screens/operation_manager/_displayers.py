@@ -31,6 +31,7 @@ except ImportError:
             self.tiempo_inicio_ejecucion, self.tipo_cond_salida = None, None
             self.tsl_roi_activo = False
             self.posiciones: List[LogicalPosition] = []
+            self.profit_balance_acumulado = 0.0
         
         def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
             return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
@@ -69,7 +70,6 @@ def _get_terminal_width():
 
 def _get_unified_box_width() -> int:
     terminal_width = _get_terminal_width()
-    # Mantenemos el cálculo original para asegurar compatibilidad visual
     open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
     pending_pos_content_width = 12 + 22 + 22
     content_width = max(open_pos_content_width, pending_pos_content_width) + 4
@@ -178,6 +178,9 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     equity_total_historico = operacion.equity_total_usdt
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
     total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
+    # --- INICIO DE LA MODIFICACIÓN ---
+    total_transferido = getattr(operacion, 'profit_balance_acumulado', 0.0)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_color(value): 
         return "\033[92m" if value >= 0 else "\033[91m"
@@ -197,6 +200,9 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "--- CONTADORES ---": "",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
+        # --- INICIO DE LA MODIFICACIÓN ---
+        "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
+        # --- FIN DE LA MODIFICACIÓN ---
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
 
@@ -279,6 +285,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -304,12 +311,10 @@ def _display_operation_conditions(operacion: Operacion):
             cond_in_str = f"- Precio {op} {operacion.valor_cond_entrada:.4f}"
         print(_create_box_line(f"  {cond_in_str}", box_width))
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         # --- Gestión de Riesgo de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        # Calcular y mostrar precio de SL/TP por ROI
         target_price = operacion.get_roi_sl_tp_price()
         sl_tp_price_str = f"(Precio Obj: ~{target_price:.4f})" if target_price is not None else ""
         
@@ -341,6 +346,5 @@ def _display_operation_conditions(operacion: Operacion):
         else:
             for limit in exit_limits:
                 print(_create_box_line(f"  - {limit}", box_width))
-        # --- FIN DE LA MODIFICACIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
