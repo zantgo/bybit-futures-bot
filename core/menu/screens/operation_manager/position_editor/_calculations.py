@@ -61,7 +61,12 @@ def calculate_coverage_metrics(
     """
     Calcula la cobertura porcentual y el rango de precios que cubren las posiciones pendientes.
     """
-    if not pending_positions or averaging_distance_pct <= 0 or not start_price:
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # La línea original fallaba si averaging_distance_pct era None.
+    # Se añade una comprobación para asegurar que es un número válido antes de la comparación.
+    # if not pending_positions or averaging_distance_pct <= 0 or not start_price: # <-- LÍNEA ORIGINAL COMENTADA
+    if not pending_positions or not isinstance(averaging_distance_pct, (int, float)) or averaging_distance_pct <= 0 or not start_price:
+    # --- FIN DE LA MODIFICACIÓN ---
         return {
             'coverage_pct': 0.0,
             'covered_price_range_start': start_price,
@@ -158,14 +163,15 @@ def calculate_projected_risk_metrics(
     sim_total_size = sum(p.size_contracts for p in open_positions if p.size_contracts)
     sim_avg_price = live_metrics['avg_entry_price'] or current_market_price
 
-    for pos in pending_positions:
-        next_entry_price = sim_avg_price * (1 - distance_pct / 100) if side == 'long' else sim_avg_price * (1 + distance_pct / 100)
-        size = utils.safe_division(pos.capital_asignado * leverage, next_entry_price)
-        if size <= 0: continue
-        
-        sim_total_value += next_entry_price * size
-        sim_total_size += size
-        sim_avg_price = utils.safe_division(sim_total_value, sim_total_size)
+    if distance_pct is not None and distance_pct > 0:
+        for pos in pending_positions:
+            next_entry_price = sim_avg_price * (1 - distance_pct / 100) if side == 'long' else sim_avg_price * (1 + distance_pct / 100)
+            size = utils.safe_division(pos.capital_asignado * leverage, next_entry_price)
+            if size <= 0: continue
+            
+            sim_total_value += next_entry_price * size
+            sim_total_size += size
+            sim_avg_price = utils.safe_division(sim_total_value, sim_total_size)
 
     projected_liq_metrics = calculate_avg_entry_and_liquidation(
         [LogicalPosition('proj', 0, entry_price=sim_avg_price, size_contracts=sim_total_size)], leverage, side)
@@ -179,7 +185,11 @@ def calculate_projected_risk_metrics(
             liquidation_distance_pct = ((projected_liq_price - current_market_price) / current_market_price) * 100
     
     avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
-    max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
+    
+    # Solo simular si la distancia es válida
+    max_sim_metrics = {}
+    if distance_pct is not None and distance_pct > 0:
+        max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
 
     final_metrics = {
         'avg_entry_price': live_metrics['avg_entry_price'],
