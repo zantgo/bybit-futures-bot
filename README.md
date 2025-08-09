@@ -1,4 +1,4 @@
-# Bybit Futures Bot - Versión 35+ (Modelo de Hitos y Tendencias)
+# Bybit Futures Bot - Versión 45+ (Modelo de Hitos y Tendencias)
 
 Este es un bot de trading algorítmico avanzado para futuros de Bybit, diseñado con una arquitectura modular y una potente interfaz de usuario en la terminal (TUI) para un control total en tiempo real.
 
