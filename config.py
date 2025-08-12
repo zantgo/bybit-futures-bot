@@ -91,7 +91,7 @@ SESSION_CONFIG = {
 OPERATION_DEFAULTS = {
     "CAPITAL": {
         "BASE_SIZE_USDT": 1.0,
-        "MAX_POSITIONS": 5,
+        "MAX_POSITIONS": 10,
         "LEVERAGE": 10.0,
     },
     "RISK": {
