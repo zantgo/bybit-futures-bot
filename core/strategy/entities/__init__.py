@@ -81,6 +81,10 @@ class Operacion:
         self.tsl_roi_activacion_pct: Optional[float] = None
         self.tsl_roi_distancia_pct: Optional[float] = None
         self.sl_roi_pct: Optional[float] = None
+        # --- INICIO DE LA MODIFICACIÓN ---
+        self.dynamic_roi_sl_enabled: bool = False
+        self.dynamic_roi_sl_trail_pct: Optional[float] = None
+        # --- FIN DE LA MODIFICACIÓN ---
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
         self.tipo_cond_salida: Optional[str] = None
@@ -269,6 +273,12 @@ class Operacion:
         
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # No es estrictamente necesario resetear los parámetros de config,
+        # pero es buena práctica si la operación se reutiliza.
+        self.dynamic_roi_sl_enabled = False
+        self.dynamic_roi_sl_trail_pct = None
+        # --- FIN DE LA MODIFICACIÓN ---
 
         self.posiciones = []
         self.capital_flows = []

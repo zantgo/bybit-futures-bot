@@ -153,6 +153,15 @@ class EventProcessor:
                 # 2. Lógica de SALIDA y GESTIÓN (aplica a todos los estados activos o pausados)
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
                     
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Si el SL/TP dinámico está activado, recalculamos el umbral en cada tick.
+                    # Esto sobreescribe el 'sl_roi_pct' de la operación solo para esta comprobación.
+                    if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
+                        realized_roi = operacion.realized_twrr_roi
+                        # La fórmula: el nuevo SL/TP sigue al ROI realizado a una distancia fija.
+                        operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
+                    # --- FIN DE LA MODIFICACIÓN ---
+                    
                     live_performance = operacion.get_live_performance(current_price, self._utils)
                     roi = live_performance.get("roi_twrr_vivo", 0.0)
                     

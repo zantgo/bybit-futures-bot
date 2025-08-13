@@ -25,10 +25,12 @@ from ..._helpers import (
 try:
     from core.strategy.entities import Operacion, LogicalPosition
     from core.strategy.pm import api as pm_api
+    from core.strategy.om import api as om_api # Se añade import de om_api para guardar
     from . import position_editor
 except ImportError:
     position_editor = None
     pm_api = None
+    om_api = None
     class Operacion: pass
     class LogicalPosition: pass
 
@@ -88,10 +90,18 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Gestión de Riesgo de Operación (Acción: DETENER)")
-    op_risk_data = {
-        "Límite SL/TP por ROI (%)": f"{operacion.sl_roi_pct}" if operacion.sl_roi_pct is not None else "Desactivado",
-        "Límite TSL-ROI (Act/Dist %)": f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado",
-    }
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    op_risk_data = {}
+    if getattr(operacion, 'dynamic_roi_sl_enabled', False):
+        trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
+        op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {trail_pct}%)"
+    else:
+        op_risk_data["Límite SL/TP por ROI (%)"] = f"{operacion.sl_roi_pct}" if operacion.sl_roi_pct is not None else "Desactivado"
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
+
     max_key_len = max(len(k) for k in op_risk_data.keys()) if op_risk_data else 0
     for label, value in op_risk_data.items():
         _print_line(label, value, max_key_len)
@@ -144,7 +154,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.tendencia = "LONG_ONLY" if side == 'long' else "SHORT_ONLY"
         temp_op.apalancamiento = apalancamiento
         
-        # --- INICIO DE LA MODIFICACIÓN: Lectura de nueva estructura de config ---
         if defaults["RISK"]["AVERAGING"]["ENABLED"]:
             if side == 'long':
                 temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"]
@@ -162,8 +171,19 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             temp_op.tsl_activacion_pct = None
             temp_op.tsl_distancia_pct = None
         
-        temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Cargar defaults para el SL/TP dinámico
+        dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
+        temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
+        temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT") if temp_op.dynamic_roi_sl_enabled else None
         
+        # Si el dinámico está activado por defecto, el manual debe estar desactivado.
+        if temp_op.dynamic_roi_sl_enabled:
+            temp_op.sl_roi_pct = None
+        else:
+            temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
+        # --- FIN DE LA MODIFICACIÓN ---
+
         if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]:
             temp_op.tsl_roi_activacion_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT")
             temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
@@ -175,7 +195,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.tiempo_maximo_min = defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None
         
         temp_op.accion_al_finalizar = defaults["OPERATION_LIMITS"]["AFTER_STATE"]
-        # --- FIN DE LA MODIFICACIÓN ---
         
         for _ in range(max_pos):
             new_pos = LogicalPosition(
@@ -281,7 +300,40 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
 def _edit_operation_risk_submenu(temp_op: Operacion):
     """Submenú para editar los parámetros de riesgo a nivel de operación."""
     print("\n--- Editando Gestión de Riesgo de Operación (Acción Forzosa: DETENER) ---")
-    temp_op.sl_roi_pct = get_input("Límite SL/TP por ROI (%)", float, temp_op.sl_roi_pct, is_optional=True)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Preguntar al usuario qué tipo de SL/TP por ROI desea usar
+    risk_mode_title = "\nSelecciona el modo para el Límite SL/TP por ROI:"
+    risk_mode_menu = TerminalMenu(
+        ["[1] Límite Manual (Fijo)", "[2] Límite Dinámico (Automático)", "[d] Desactivar por completo"],
+        title=risk_mode_title,
+        **MENU_STYLE
+    )
+    choice = risk_mode_menu.show()
+
+    if choice == 0: # Modo Manual
+        temp_op.dynamic_roi_sl_enabled = False
+        temp_op.dynamic_roi_sl_trail_pct = None
+        temp_op.sl_roi_pct = get_input("Límite SL/TP por ROI (%) [Manual]", float, temp_op.sl_roi_pct)
+    
+    elif choice == 1: # Modo Dinámico
+        temp_op.dynamic_roi_sl_enabled = True
+        temp_op.sl_roi_pct = None # Desactivamos el manual para evitar conflictos
+        default_trail = temp_op.dynamic_roi_sl_trail_pct or 10.0
+        temp_op.dynamic_roi_sl_trail_pct = get_input(
+            "Distancia del Trailing Stop al ROI Realizado (%)", 
+            float, 
+            default_trail,
+            min_val=0.1
+        )
+    
+    elif choice == 2: # Desactivar
+        temp_op.dynamic_roi_sl_enabled = False
+        temp_op.dynamic_roi_sl_trail_pct = None
+        temp_op.sl_roi_pct = None
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    # La lógica para el TSL-ROI se mantiene igual
     tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_op.tsl_roi_activacion_pct, min_val=0.0, is_optional=True)
     if tsl_act:
         temp_op.tsl_roi_activacion_pct = tsl_act

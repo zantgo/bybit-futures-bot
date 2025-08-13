@@ -123,6 +123,11 @@ OPERATION_DEFAULTS = {
             "ACTIVATION_PCT": 25.0,
             "DISTANCE_PCT": 5.0,
         },
+        # NUEVOS PARÁMETROS PARA EL SL/TP DINÁMICO
+        "DYNAMIC_ROI_SL": {
+            "ENABLED": False, # Por defecto, está desactivado.
+            "TRAIL_PCT": 10.0 # El valor a restar del ROI realizado. (ej. ROI 20% - 10% = SL/TP en +10%)
+        },
     },
     # Parámetros de LÍMITES OPERATIVOS.
     # La acción al cumplirse (PAUSAR o DETENER) es configurable en la TUI.
