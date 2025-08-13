@@ -128,8 +128,9 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     profit_cfg = config.SESSION_CONFIG["PROFIT"]
     commission_rate = profit_cfg["COMMISSION_RATE"]
     reinvest_fraction = profit_cfg["REINVEST_PROFIT_PCT"] / 100.0
-
+    slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) / 100.0
     pnl_gross_usdt = 0.0
+    slippage_cost_usdt = 0.0
     commission_usdt = 0.0
     pnl_net_usdt = 0.0
     amount_reinvested = 0.0
@@ -148,14 +149,23 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
 
             entry_nominal_value = entry_price * size_contracts
             exit_nominal_value = exit_price * size_contracts
+
+                        # --- AÑADIR ESTE BLOQUE ---
+            # Calcular coste de slippage sobre el valor nominal de entrada y salida
+            if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
+                slippage_cost_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * slippage_pct
+            
+            # Ajustar el PNL bruto por el coste de slippage
+            pnl_gross_adjusted = pnl_gross_usdt - slippage_cost_usdt
+            # --- FIN DEL BLOQUE AÑADIDO ---
             
             # La fórmula correcta debe sumar el valor nominal de la entrada y la salida,
             # ya que la comisión se paga en ambas transacciones.
             if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
                 commission_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * commission_rate
 
-            pnl_net_usdt = pnl_gross_usdt - commission_usdt
-
+            pnl_net_usdt = pnl_gross_adjusted - commission_usdt
+            
             if pnl_net_usdt > 0:
                 amount_reinvested = pnl_net_usdt * reinvest_fraction
                 amount_transferable = pnl_net_usdt - amount_reinvested

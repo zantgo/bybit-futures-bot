@@ -81,6 +81,7 @@ SESSION_CONFIG = {
         "COMMISSION_RATE": 0.001,
         "REINVEST_PROFIT_PCT": 10.0,
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
+        "SLIPPAGE_PCT": 0.01, 
     },
 }
 
@@ -141,7 +142,10 @@ OPERATION_DEFAULTS = {
             "ENABLED": False,
             "MINUTES": 1440 # 24 hrs
         },
-    }
+    },
+    "PROFIT_MANAGEMENT": {
+        "AUTO_REINVEST_ENABLED": False, # <-- AÑADIR ESTA NUEVA SECCIÓN Y PARÁMETRO
+        },
 }
 
 # --- 4. CONSTANTES Y RUTAS (No deben ser modificadas por el usuario) ---

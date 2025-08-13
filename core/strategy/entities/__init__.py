@@ -90,7 +90,7 @@ class Operacion:
         self.tipo_cond_salida: Optional[str] = None
         self.valor_cond_salida: Optional[float] = None
         self.accion_al_finalizar: str = 'PAUSAR'
-        
+        self.auto_reinvest_enabled: bool = False 
         # --- Atributos de Estado Financiero y Contadores ---
         self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
@@ -270,7 +270,7 @@ class Operacion:
         self.tiempo_inicio_ejecucion = None
         self.comisiones_totales_usdt = 0.0
         self.profit_balance_acumulado = 0.0
-        
+        self.auto_reinvest_enabled = False
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
         # --- INICIO DE LA MODIFICACIÓN ---
@@ -279,7 +279,6 @@ class Operacion:
         self.dynamic_roi_sl_enabled = False
         self.dynamic_roi_sl_trail_pct = None
         # --- FIN DE LA MODIFICACIÓN ---
-
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []

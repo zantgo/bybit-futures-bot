@@ -206,6 +206,17 @@ class _PrivateLogic:
             
             pos_to_reset = next((p for p in op_after.posiciones if p.id == pos_to_close.id), None)
             if pos_to_reset:
+                # --- INICIO DE LA MODIFICACIÓN ---
+                # Si la reinversión automática está activada, aumentamos el capital de esta posición.
+                if op_after.auto_reinvest_enabled and reinvest_amount > 0:
+                    capital_anterior = pos_to_reset.capital_asignado
+                    pos_to_reset.capital_asignado += reinvest_amount
+                    self._memory_logger.log(
+                        f"REINVERSIÓN: Capital de Posición ID ...{str(pos_to_reset.id)[-6:]} aumentado en ${reinvest_amount:.4f}. "
+                        f"Nuevo capital: ${pos_to_reset.capital_asignado:.4f} (anterior: ${capital_anterior:.4f})",
+                        level="INFO"
+                    )
+                # --- FIN DE LA MODIFICACIÓN ---
                 pos_to_reset.estado = 'PENDIENTE'
                 pos_to_reset.entry_timestamp = None
                 pos_to_reset.entry_price = None
