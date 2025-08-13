@@ -68,6 +68,7 @@ class Operacion:
     def __init__(self, id: str):
         self.id: str = id
         self.estado: str = 'DETENIDA'
+        self.estado_razon: str = 'Estado inicial' # <-- NUEVO ATRIBUTO
         
         # --- Parámetros de Configuración de la Operación ---
         self.tipo_cond_entrada: Optional[str] = 'MARKET'
@@ -263,6 +264,7 @@ class Operacion:
 
     def reset(self):
         self.estado = 'DETENIDA'
+        self.estado_razon = 'Operación finalizada y reseteada' # <-- ATRIBUTO ACTUALIZADO
         self.capital_inicial_usdt = 0.0
         self.pnl_realizado_usdt = 0.0
         self.total_reinvertido_usdt = 0.0

@@ -22,6 +22,8 @@ except ImportError:
     class Operacion:
         def __init__(self):
             self.estado, self.tendencia, self.accion_al_finalizar, self.tipo_cond_entrada = 'DESCONOCIDO', 'N/A', 'N/A', 'N/A'
+            # Añadido estado_razon al fallback para evitar AttributeError en casos de error de importación
+            self.estado_razon = "Razón no disponible (fallback)."
             self.apalancamiento, self.pnl_realizado_usdt = 10.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
             self.total_reinvertido_usdt, self.valor_cond_entrada, self.valor_cond_salida = 0.0, 0.0, None
@@ -296,8 +298,21 @@ def _display_operation_conditions(operacion: Operacion):
     status_color_map = {'ACTIVA': "\033[92m", 'PAUSADA': "\033[93m", 'DETENIDA': "\033[90m", 'EN_ESPERA': "\033[96m", 'DETENIENDO': "\033[91m"}
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Ahora mostramos tanto el estado como la razón.
+    # Usamos max_key_len para alinear los dos puntos.
+    estado_data = {
+        "Estado Actual": f"{color}{operacion.estado}{reset}",
+        "Razón de Estado": f"\033[94m{operacion.estado_razon}\033[0m"
+    }
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
-    print(_create_box_line(f"Estado Actual: {color}{operacion.estado}{reset}", box_width))
+    for key, value in estado_data.items():
+        # Usamos _truncate_text para asegurarnos de que el texto no desborde la caja
+        content = f"{key:<{max_key_len}} : {value}"
+        print(_create_box_line(_truncate_text(content, box_width - 4), box_width))
+    # --- FIN DE LA MODIFICACIÓN ---
 
     if operacion.estado != 'DETENIDA':
         # --- Condición de Entrada ---

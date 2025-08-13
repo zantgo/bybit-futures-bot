@@ -16,7 +16,7 @@ except ImportError:
     asdict = lambda x: x
     class Operacion:
         def __init__(self, id: str):
-            self.id = id; self.estado = 'DETENIDA'; self.posiciones: list = []
+            self.id = id; self.estado = 'DETENIDA'; self.estado_razon = 'Inicial'; self.posiciones: list = []
             self.capital_flows: list = []; self.sub_period_returns: list = []
             self.capital_inicial_usdt = 0.0; self.apalancamiento = 10.0
             self.tipo_cond_entrada = None; self.valor_cond_entrada = None
@@ -77,8 +77,6 @@ class OperationManager:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
             
-            # Usamos deepcopy para asegurar que el consumidor obtiene una copia segura
-            # y que el estado interno no puede ser modificado desde fuera.
             return copy.deepcopy(original_op)
 
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
@@ -89,19 +87,15 @@ class OperationManager:
             estado_original = target_op.estado
             changes_log = []
 
-            # --- INICIO DE LA CORRECCIÓN TOTAL ---
             nuevas_posiciones = params.get('posiciones')
             
             nuevo_capital_operativo = 0.0
             if nuevas_posiciones is not None:
-                # Nos aseguramos de que es una lista y que contiene objetos LogicalPosition
                 if isinstance(nuevas_posiciones, list) and all(isinstance(p, LogicalPosition) for p in nuevas_posiciones):
                     nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
                 else:
-                    # Si recibimos algo que no es una lista de objetos, lo rechazamos y logueamos.
                     self._memory_logger.log(f"ERROR [OM]: Se intentó actualizar la operación {side} con un formato de posiciones inválido.", "ERROR")
-                    nuevas_posiciones = None # Ignoramos el cambio
-            # --- FIN DE LA CORRECCIÓN TOTAL ---
+                    nuevas_posiciones = None 
             
             capital_operativo_anterior = target_op.capital_operativo_logico_actual
             diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
@@ -128,20 +122,20 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
             
-            # --- INICIO DE LA CORRECCIÓN TOTAL ---
             if nuevas_posiciones is not None:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} objetos.")
-            # --- FIN DE LA CORRECCIÓN TOTAL ---
 
             if estado_original == 'DETENIDA' and params:
                 target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 changes_log.append(f"'capital_inicial_usdt' (Base ROI) fijado en: {target_op.capital_inicial_usdt:.2f}$")
                 if target_op.tipo_cond_entrada == 'MARKET':
                     target_op.estado = 'ACTIVA'
+                    target_op.estado_razon = "Operación iniciada (condición de mercado)." # <-- MODIFICADO
                     target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
                 else:
                     target_op.estado = 'EN_ESPERA'
+                    target_op.estado_razon = "Operación iniciada, en espera de condición de entrada." # <-- MODIFICADO
                 changes_log.append(f"'estado': DETENIDA -> {target_op.estado}")
 
             elif estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
@@ -154,6 +148,7 @@ class OperationManager:
                                               (cond_type == 'PRICE_BELOW' and current_price < cond_value)))
                 if not met:
                     target_op.estado = 'EN_ESPERA'
+                    target_op.estado_razon = "Condición de entrada ya no se cumple." # <-- MODIFICADO
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
 
         if changes_log:
@@ -185,21 +180,47 @@ class OperationManager:
         self._memory_logger.log(log_message, "WARN")
         return True, f"Operación {side.upper()} actualizada con éxito."
 
-    def pausar_operacion(self, side: str) -> Tuple[bool, str]:
+    # def pausar_operacion(self, side: str) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
+    #             return False, f"Solo se puede pausar una operación ACTIVA o EN_ESPERA del lado {side.upper()}."
+    #         estado_anterior = target_op.estado
+    #         target_op.estado = 'PAUSADA'
+    #     msg = f"OPERACIÓN {side.upper()} PAUSADA (estado anterior: {estado_anterior}). No se abrirán nuevas posiciones."
+    #     self._memory_logger.log(msg, "WARN")
+    #     return True, msg
+
+    def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
                 return False, f"Solo se puede pausar una operación ACTIVA o EN_ESPERA del lado {side.upper()}."
-            estado_anterior = target_op.estado
+            
             target_op.estado = 'PAUSADA'
-        msg = f"OPERACIÓN {side.upper()} PAUSADA (estado anterior: {estado_anterior}). No se abrirán nuevas posiciones."
+            target_op.estado_razon = reason if reason else "Pausada manualmente por el usuario." # <-- MODIFICADO
+        
+        msg = f"OPERACIÓN {side.upper()} PAUSADA (Razón: {target_op.estado_razon}). No se abrirán nuevas posiciones."
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # La siguiente función 'reanudar_operacion' ha sido actualizada para resetear
-    # las banderas de las condiciones de salida (ej. TSL por ROI).
-    # Se comenta la versión original a continuación para referencia.
+    # def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado != 'PAUSADA':
+    #             return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
+            
+    #         target_op.estado = 'ACTIVA'
+            
+    #         target_op.tsl_roi_activo = False
+    #         target_op.tsl_roi_peak_pct = 0.0
+
+    #         if not target_op.tiempo_inicio_ejecucion:
+    #             target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+                
+    #     msg = f"OPERACIÓN {side.upper()} REANUDADA. El sistema está ahora ACTIVO para este lado."
+    #     self._memory_logger.log(msg, "WARN")
+    #     return True, msg
 
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
@@ -208,14 +229,10 @@ class OperationManager:
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
             
             target_op.estado = 'ACTIVA'
+            target_op.estado_razon = "Reanudada manualmente por el usuario." # <-- MODIFICADO
             
-            # Al reanudar una operación manualmente, es crucial resetear las banderas
-            # de las condiciones de salida. De lo contrario, si la operación fue pausada
-            # por un TSL por ROI, nunca podría volver a operar.
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
-            # Si se añadieran otras banderas de salida en el futuro (ej. tp_general_activado),
-            # también deberían resetearse aquí.
 
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
@@ -224,42 +241,85 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
+    # def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado != 'EN_ESPERA':
+    #             return False, f"Solo se puede forzar la activación de una operación EN_ESPERA."
+    #         target_op.estado = 'ACTIVA'
+    #         if not target_op.tiempo_inicio_ejecucion:
+    #             target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+    #     msg = f"OPERACIÓN {side.upper()} FORZADA A ESTADO ACTIVO manualmente."
+    #     self._memory_logger.log(msg, "WARN")
+    #     return True, msg
+
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'EN_ESPERA':
                 return False, f"Solo se puede forzar la activación de una operación EN_ESPERA."
             target_op.estado = 'ACTIVA'
+            target_op.estado_razon = "Activación forzada manualmente." # <-- MODIFICADO
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
         msg = f"OPERACIÓN {side.upper()} FORZADA A ESTADO ACTIVO manualmente."
         self._memory_logger.log(msg, "WARN")
         return True, msg
         
+    # def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado != 'EN_ESPERA':
+    #             return False, "La operación no estaba esperando una condición."
+    #         target_op.estado = 'ACTIVA'
+    #         if not target_op.tiempo_inicio_ejecucion:
+    #              target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+    #     msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE por condición de entrada."
+    #     self._memory_logger.log(msg, "WARN")
+    #     return True, msg
+
     def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'EN_ESPERA':
                 return False, "La operación no estaba esperando una condición."
             target_op.estado = 'ACTIVA'
+            target_op.estado_razon = "Condición de entrada de precio alcanzada." # <-- MODIFICADO
             if not target_op.tiempo_inicio_ejecucion:
                  target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
         msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE por condición de entrada."
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
+    # def detener_operacion(self, side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
+    #     with self._lock:
+    #         target_op = self._get_operation_by_side_internal(side)
+    #         if not target_op or target_op.estado == 'DETENIDA':
+    #             return False, f"La operación {side.upper()} ya está detenida o no existe."
+    #         target_op.estado = 'DETENIENDO'
+    #         self._memory_logger.log(f"OPERACIÓN {side.upper()} en estado DETENIENDO. Esperando cierre de posiciones.", "WARN")
+    #         if not target_op.posiciones_abiertas:
+    #             self.revisar_y_transicionar_a_detenida(side)
+    #             return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
+    #     return True, f"Proceso de detención para {side.upper()} iniciado."
+    
+    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado == 'DETENIDA':
                 return False, f"La operación {side.upper()} ya está detenida o no existe."
+            
             target_op.estado = 'DETENIENDO'
-            self._memory_logger.log(f"OPERACIÓN {side.upper()} en estado DETENIENDO. Esperando cierre de posiciones.", "WARN")
+            target_op.estado_razon = reason if reason else "Detenida manualmente, esperando cierre de posiciones." # <-- MODIFICADO
+            
+            log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon}). Esperando cierre de posiciones."
+            self._memory_logger.log(log_msg, "WARN")
+
             if not target_op.posiciones_abiertas:
                 self.revisar_y_transicionar_a_detenida(side)
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
         return True, f"Proceso de detención para {side.upper()} iniciado."
-    
+
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)

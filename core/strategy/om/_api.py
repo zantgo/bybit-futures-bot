@@ -54,11 +54,11 @@ def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool,
         return False, "OM no instanciado"
     return _om_instance.create_or_update_operation(side, params)
 
-def pausar_operacion(side: str) -> Tuple[bool, str]:
+def pausar_operacion(side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para pausar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.pausar_operacion(side)
+    return _om_instance.pausar_operacion(side, reason)
 
 def reanudar_operacion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para reanudar la operación."""
@@ -78,11 +78,11 @@ def activar_por_condicion(side: str) -> Tuple[bool, str]:
         return False, "OM no instanciado"
     return _om_instance.activar_por_condicion(side)
 
-def detener_operacion(side: str, forzar_cierre_posiciones: bool) -> Tuple[bool, str]:
+def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para detener completamente la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.detener_operacion(side, forzar_cierre_posiciones)
+    return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason)
 
 # --- Funciones de Actualización de Estado ---
 

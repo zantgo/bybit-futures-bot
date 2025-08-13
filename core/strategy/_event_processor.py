@@ -208,9 +208,9 @@ class EventProcessor:
                         self._memory_logger.log(log_msg, "WARN")
                         
                         if risk_action == 'DETENER':
-                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason) # <-- MODIFICADO
                         else: # Por defecto o si se configura 'PAUSAR'
-                            self._om_api.pausar_operacion(side)
+                            self._om_api.pausar_operacion(side, reason=risk_reason) # <-- MODIFICADO
                         
                         continue # Pasar al siguiente lado
                         # --- FIN DE LA MODIFICACIÓN ---
@@ -236,9 +236,9 @@ class EventProcessor:
                             accion_final = operacion.accion_al_finalizar
                             log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}"
                             self._memory_logger.log(log_msg, "WARN")
-                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side)
-                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True)
-                            else: self._om_api.pausar_operacion(side)
+                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason) # <-- MODIFICADO
+                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason) # <-- MODIFICADO
+                            else: self._om_api.pausar_operacion(side, reason=exit_reason) # <-- MODIFICADO
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
