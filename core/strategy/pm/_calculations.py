@@ -1,3 +1,5 @@
+# Contenido completo y corregido para: core/strategy/pm/_calculations.py
+
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
@@ -128,7 +130,14 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     profit_cfg = config.SESSION_CONFIG["PROFIT"]
     commission_rate = profit_cfg["COMMISSION_RATE"]
     reinvest_fraction = profit_cfg["REINVEST_PROFIT_PCT"] / 100.0
-    slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) / 100.0
+    
+    # --- INICIO DE LA CORRECCIÓN DEL BUG ---
+    # El valor en config.py ya es el decimal correcto (0.01 para 1%).
+    # Eliminar la división extra por 100.
+    # slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) / 100.0 # <-- LÍNEA INCORRECTA
+    slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) # <-- LÍNEA CORRECTA
+    # --- FIN DE LA CORRECCIÓN DEL BUG ---
+
     pnl_gross_usdt = 0.0
     slippage_cost_usdt = 0.0
     commission_usdt = 0.0
@@ -150,14 +159,12 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
             entry_nominal_value = entry_price * size_contracts
             exit_nominal_value = exit_price * size_contracts
 
-                        # --- AÑADIR ESTE BLOQUE ---
             # Calcular coste de slippage sobre el valor nominal de entrada y salida
             if np.isfinite(entry_nominal_value) and np.isfinite(exit_nominal_value):
                 slippage_cost_usdt = (abs(entry_nominal_value) + abs(exit_nominal_value)) * slippage_pct
             
             # Ajustar el PNL bruto por el coste de slippage
             pnl_gross_adjusted = pnl_gross_usdt - slippage_cost_usdt
-            # --- FIN DEL BLOQUE AÑADIDO ---
             
             # La fórmula correcta debe sumar el valor nominal de la entrada y la salida,
             # ya que la comisión se paga en ambas transacciones.
