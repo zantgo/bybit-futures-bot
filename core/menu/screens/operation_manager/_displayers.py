@@ -287,7 +287,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
-
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -299,9 +298,6 @@ def _display_operation_conditions(operacion: Operacion):
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Ahora mostramos tanto el estado como la razón.
-    # Usamos max_key_len para alinear los dos puntos.
     estado_data = {
         "Estado Actual": f"{color}{operacion.estado}{reset}",
         "Razón de Estado": f"\033[94m{operacion.estado_razon}\033[0m"
@@ -309,10 +305,8 @@ def _display_operation_conditions(operacion: Operacion):
     max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
     for key, value in estado_data.items():
-        # Usamos _truncate_text para asegurarnos de que el texto no desborde la caja
         content = f"{key:<{max_key_len}} : {value}"
         print(_create_box_line(_truncate_text(content, box_width - 4), box_width))
-    # --- FIN DE LA MODIFICACIÓN ---
 
     if operacion.estado != 'DETENIDA':
         # --- Condición de Entrada ---
@@ -330,11 +324,22 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        target_price = operacion.get_roi_sl_tp_price()
-        sl_tp_price_str = f"(Precio Obj: ~{target_price:.4f})" if target_price is not None else ""
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se construye la cadena para el SL/TP por ROI, considerando primero el modo dinámico.
+        sl_roi_str = "SL/TP por ROI: Desactivado"  # Valor por defecto
+
+        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
+            trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
+            sl_roi_str = f"SL/TP por ROI: DINÁMICO (ROI Realizado - {trail_pct}%)"
         
-        sl_roi_str = f"SL/TP por ROI: {operacion.sl_roi_pct}% {sl_tp_price_str}" if operacion.sl_roi_pct is not None else "SL/TP por ROI: Desactivado"
+        # Si no es dinámico, se comprueba el modo manual como antes.
+        elif operacion.sl_roi_pct is not None:
+            target_price = operacion.get_roi_sl_tp_price()
+            sl_tp_price_str = f"(Precio Obj: ~{target_price:.4f})" if target_price is not None else ""
+            sl_roi_str = f"SL/TP por ROI: {operacion.sl_roi_pct}% {sl_tp_price_str}"
+
         print(_create_box_line(f"  - {sl_roi_str}", box_width))
+        # --- FIN DE LA CORRECCIÓN ---
 
         tsl_roi_str = "TSL por ROI: Desactivado"
         if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
