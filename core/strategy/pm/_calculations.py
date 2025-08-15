@@ -1,5 +1,3 @@
-# Contenido completo y corregido para: core/strategy/pm/_calculations.py
-
 """
 Módulo con funciones de cálculo puras relacionadas con la gestión de posiciones.
 No mantiene estado, recibe toda la información necesaria como argumentos.
@@ -66,16 +64,11 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
     Calcula el precio de Stop Loss para una posición individual.
     Recibe el porcentaje de SL como argumento para permitir el ajuste dinámico.
     """
-    # --- INICIO DE LA CORRECCIÓN DEL BUG CRÍTICO EN SL ---
-    # Se añade esta validación explícita para sl_pct ANTES de cualquier comparación.
-    # Si sl_pct es None (porque el usuario lo desactivó) o no es un número finito,
-    # la función devuelve None inmediatamente, evitando el TypeError.
     if not isinstance(sl_pct, (int, float)) or not np.isfinite(sl_pct):
         return None # No hay Stop Loss si el valor no es un número válido.
 
     if sl_pct <= 0:
         return None # No hay Stop Loss si el porcentaje es cero o negativo.
-    # --- FIN DE LA CORRECCIÓN ---
 
     if not isinstance(entry_price, (int, float)) or not np.isfinite(entry_price) or entry_price <= 0:
         return None
@@ -130,13 +123,7 @@ def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_pr
     profit_cfg = config.SESSION_CONFIG["PROFIT"]
     commission_rate = profit_cfg["COMMISSION_RATE"]
     reinvest_fraction = profit_cfg["REINVEST_PROFIT_PCT"] / 100.0
-    
-    # --- INICIO DE LA CORRECCIÓN DEL BUG ---
-    # El valor en config.py ya es el decimal correcto (0.01 para 1%).
-    # Eliminar la división extra por 100.
-    # slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) / 100.0 # <-- LÍNEA INCORRECTA
-    slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) # <-- LÍNEA CORRECTA
-    # --- FIN DE LA CORRECCIÓN DEL BUG ---
+    slippage_pct = profit_cfg.get("SLIPPAGE_PCT", 0.0) 
 
     pnl_gross_usdt = 0.0
     slippage_cost_usdt = 0.0

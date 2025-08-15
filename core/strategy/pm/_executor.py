@@ -1,4 +1,3 @@
-# ./core/strategy/pm/_executor.py
 import datetime, uuid, traceback
 from typing import Optional, Dict, Any
 from dataclasses import asdict
@@ -6,13 +5,14 @@ from dataclasses import asdict
 try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
-    from core.strategy.entities import LogicalPosition
+    from core.strategy.entities import LogicalPosition, Operacion # Añadido Operacion para el type hint
 except ImportError as e:
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
         raise ImportError("Fallo crítico importando LogicalPosition. Verifica la estructura de archivos.")
     class AbstractExchange: pass
     class StandardOrder: pass
+    class Operacion: pass # Fallback
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
@@ -56,7 +56,6 @@ class PositionExecutor:
             result['message'] = f"Error: No se pudo obtener la operación para el lado '{side}'."
             return result
         
-        # <<-- CAMBIO: El apalancamiento se obtiene de la operación, no de la posición.
         leverage = operacion.apalancamiento
 
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
@@ -91,13 +90,12 @@ class PositionExecutor:
         stop_loss_price = self._calculations.calculate_stop_loss(side, entry_price, sl_pct)
         est_liq_price = self._calculations.calculate_liquidation_price(side, entry_price, leverage)
         
-        # <<-- CAMBIO: Se elimina 'leverage' de la creación del objeto LogicalPosition.
         new_position_obj = LogicalPosition(
             id=logical_position_id,
-            capital_asignado=margin_to_use, # El capital asignado es el margen que se intenta usar
+            capital_asignado=margin_to_use,
             entry_timestamp=timestamp, 
             entry_price=entry_price,
-            margin_usdt=margin_to_use, # Se actualizará con el valor real si es necesario
+            margin_usdt=margin_to_use,
             size_contracts=size_contracts_float,
             stop_loss_price=stop_loss_price,
             est_liq_price=est_liq_price, 
@@ -191,10 +189,25 @@ class PositionExecutor:
         if execution_success:
             removed_pos_dict = asdict(position_to_close)
 
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # La función de cálculo ahora solo calcula las porciones. La decisión se toma aquí.
             calc_res = self._calculations.calculate_pnl_commission_reinvestment(
                 side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
             )
+
+            # Obtenemos el objeto de operación para verificar si la reinversión está activada
+            operacion = self._state_manager._om_api.get_operation_by_side(side)
+            
+            # Si la reinversión NO está activada, movemos todo al monto transferible
+            if operacion and not operacion.auto_reinvest_enabled:
+                if calc_res.get('pnl_net_usdt', 0.0) > 0:
+                    # Sumamos la porción de reinversión a la de transferencia
+                    calc_res['amount_transferable_to_profit'] += calc_res['amount_reinvested_in_operational_margin']
+                    # Y ponemos a cero la de reinversión
+                    calc_res['amount_reinvested_in_operational_margin'] = 0.0
+
             result.update(calc_res)
+            # --- FIN DE LA MODIFICACIÓN ---
             
             if self._closed_position_logger and removed_pos_dict:
                 log_data = {**removed_pos_dict, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
