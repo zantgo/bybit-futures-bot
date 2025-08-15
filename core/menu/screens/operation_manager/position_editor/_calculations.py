@@ -151,8 +151,6 @@ def calculate_projected_risk_metrics(
     
     live_metrics = calculate_avg_entry_and_liquidation(open_positions, leverage, side)
 
-    # El punto de partida para la simulación es el precio de la última posición abierta,
-    # o el precio de mercado si no hay ninguna.
     if open_positions:
         last_real_entry_price = max(p.entry_price for p in open_positions) if side == 'short' else min(p.entry_price for p in open_positions)
     else:
@@ -163,26 +161,20 @@ def calculate_projected_risk_metrics(
     sim_total_value = sum(p.size_contracts * p.entry_price for p in open_positions if p.size_contracts and p.entry_price)
     sim_total_size = sum(p.size_contracts for p in open_positions if p.size_contracts)
     
-    # --- INICIO DE LA CORRECCIÓN ---
-    # La simulación debe continuar desde el precio de la última orden real, no desde el promedio.
     last_simulated_price = last_real_entry_price
 
     if distance_pct is not None and distance_pct > 0:
         for pos in pending_positions:
-            # Calcular el precio de la siguiente orden basándose en la última entrada, no en el promedio.
             next_entry_price = last_simulated_price * (1 - distance_pct / 100) if side == 'long' else last_simulated_price * (1 + distance_pct / 100)
             
             size = utils.safe_division(pos.capital_asignado * leverage, next_entry_price)
             if size <= 0: continue
             
-            # Acumular para el cálculo final del promedio
             sim_total_value += next_entry_price * size
             sim_total_size += size
             
-            # Actualizar el precio de la última entrada para la siguiente iteración
             last_simulated_price = next_entry_price
-    # --- FIN DE LA CORRECCIÓN ---
-
+    
     sim_avg_price = utils.safe_division(sim_total_value, sim_total_size)
 
     projected_liq_metrics = calculate_avg_entry_and_liquidation(
@@ -202,7 +194,11 @@ def calculate_projected_risk_metrics(
     if distance_pct is not None and distance_pct > 0:
         max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
 
-    roi_sl_tp_target_price = operacion.get_roi_sl_tp_price_simple()
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se revierte la llamada a la función que ahora es la correcta y única.
+    # roi_sl_tp_target_price = operacion.get_roi_sl_tp_price_simple() # <-- LÍNEA ANTERIOR ERRÓNEA
+    roi_sl_tp_target_price = operacion.get_roi_sl_tp_price()
+    # --- FIN DE LA CORRECCIÓN ---
 
     final_metrics = {
         'avg_entry_price': live_metrics['avg_entry_price'],
