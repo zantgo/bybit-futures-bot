@@ -40,12 +40,8 @@ class _PrivateLogic:
 
             required_distance_pct = operacion.averaging_distance_pct
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se añade esta comprobación para evitar el TypeError si la promediación está desactivada.
-            # Si la distancia no está configurada (None) o es 0, la condición de distancia se considera cumplida.
             if required_distance_pct is None or required_distance_pct <= 0:
                 return True
-            # --- FIN DE LA MODIFICACIÓN ---
 
             if side == 'long':
                 price_condition_met = current_price <= last_position_entry_price * (1 - required_distance_pct / 100)
@@ -202,21 +198,16 @@ class _PrivateLogic:
             self._om_api.actualizar_total_reinvertido(side, reinvest_amount)
             self._om_api.actualizar_comisiones_totales(side, result.get('commission_usdt', 0.0))
             
+            # --- INICIO DE LA MODIFICACIÓN (LÓGICA DE REINVERSIÓN CORREGIDA) ---
             op_after = self._om_api.get_operation_by_side(side)
+            # Si hay ganancias para reinvertir, las acumulamos en el "bote" del OperationManager.
+            if op_after.auto_reinvest_enabled and reinvest_amount > 0:
+                self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
+            # --- FIN DE LA MODIFICACIÓN ---
             
             pos_to_reset = next((p for p in op_after.posiciones if p.id == pos_to_close.id), None)
             if pos_to_reset:
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Si la reinversión automática está activada, aumentamos el capital de esta posición.
-                if op_after.auto_reinvest_enabled and reinvest_amount > 0:
-                    capital_anterior = pos_to_reset.capital_asignado
-                    pos_to_reset.capital_asignado += reinvest_amount
-                    self._memory_logger.log(
-                        f"REINVERSIÓN: Capital de Posición ID ...{str(pos_to_reset.id)[-6:]} aumentado en ${reinvest_amount:.4f}. "
-                        f"Nuevo capital: ${pos_to_reset.capital_asignado:.4f} (anterior: ${capital_anterior:.4f})",
-                        level="INFO"
-                    )
-                # --- FIN DE LA MODIFICACIÓN ---
+                # --- LÓGICA DE REINVERSIÓN DIRECTA ELIMINADA DE AQUÍ ---
                 pos_to_reset.estado = 'PENDIENTE'
                 pos_to_reset.entry_timestamp = None
                 pos_to_reset.entry_price = None
@@ -239,8 +230,17 @@ class _PrivateLogic:
             
             self._om_api.create_or_update_operation(side, params)
             
+            # --- INICIO DE LA MODIFICACIÓN (LLAMADA A DISTRIBUCIÓN) ---
+            # Después de que la posición se ha reseteado, llamamos a la distribución.
+            if op_after.auto_reinvest_enabled and reinvest_amount > 0:
+                self._om_api.distribuir_reinvestable_profits(side)
+            # --- FIN DE LA MODIFICACIÓN ---
+
             if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
-                self._position_state.sync_positions_from_operation(op_after)
+                # Volvemos a obtener la operación por si la distribución la modificó
+                op_final = self._om_api.get_operation_by_side(side)
+                if op_final: # Añadimos una comprobación por si acaso
+                    self._position_state.sync_positions_from_operation(op_final)
             
             if side == 'long':
                 self._total_realized_pnl_long += pnl

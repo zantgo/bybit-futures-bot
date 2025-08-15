@@ -105,3 +105,15 @@ def revisar_y_transicionar_a_detenida(side: str):
     """Delega la llamada para revisar si una operación pausada debe detenerse."""
     if _om_instance:
         _om_instance.revisar_y_transicionar_a_detenida(side)
+
+# --- INICIO DE LA MODIFICACIÓN (NUEVOS PROXIES) ---
+def actualizar_reinvestable_profit(side: str, amount: float):
+    """Delega la llamada para añadir ganancias al bote de reinversión."""
+    if _om_instance:
+        _om_instance.actualizar_reinvestable_profit(side, amount)
+
+def distribuir_reinvestable_profits(side: str):
+    """Delega la llamada para distribuir las ganancias acumuladas para reinversión."""
+    if _om_instance:
+        _om_instance.distribuir_reinvestable_profits(side)
+# --- FIN DE LA MODIFICACIÓN ---

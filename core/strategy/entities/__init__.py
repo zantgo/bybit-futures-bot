@@ -82,16 +82,15 @@ class Operacion:
         self.tsl_roi_activacion_pct: Optional[float] = None
         self.tsl_roi_distancia_pct: Optional[float] = None
         self.sl_roi_pct: Optional[float] = None
-        # --- INICIO DE LA MODIFICACIÓN ---
         self.dynamic_roi_sl_enabled: bool = False
         self.dynamic_roi_sl_trail_pct: Optional[float] = None
-        # --- FIN DE LA MODIFICACIÓN ---
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
         self.tipo_cond_salida: Optional[str] = None
         self.valor_cond_salida: Optional[float] = None
         self.accion_al_finalizar: str = 'PAUSAR'
         self.auto_reinvest_enabled: bool = False 
+        
         # --- Atributos de Estado Financiero y Contadores ---
         self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
@@ -99,6 +98,9 @@ class Operacion:
         self.comercios_cerrados_contador: int = 0
         self.comisiones_totales_usdt: float = 0.0
         self.profit_balance_acumulado: float = 0.0
+        # --- INICIO DE LA MODIFICACIÓN ---
+        self.reinvestable_profit_balance: float = 0.0 # Bote para reinversión
+        # --- FIN DE LA MODIFICACIÓN ---
         self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
         
         # --- Listas de Objetos ---
@@ -151,7 +153,6 @@ class Operacion:
         """Calcula el Equity Histórico (contable) de la operación."""
         return self.capital_inicial_usdt + self.pnl_realizado_usdt
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     @property
     def realized_twrr_roi(self) -> float:
         """
@@ -181,7 +182,6 @@ class Operacion:
         
         # 5. Calcular el ROI final.
         return (total_return_factor - 1) * 100
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
@@ -276,11 +276,10 @@ class Operacion:
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
         # --- INICIO DE LA MODIFICACIÓN ---
-        # No es estrictamente necesario resetear los parámetros de config,
-        # pero es buena práctica si la operación se reutiliza.
+        self.reinvestable_profit_balance = 0.0 # Resetear el nuevo atributo
+        # --- FIN DE LA MODIFICACIÓN ---
         self.dynamic_roi_sl_enabled = False
         self.dynamic_roi_sl_trail_pct = None
-        # --- FIN DE LA MODIFICACIÓN ---
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []
