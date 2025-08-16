@@ -62,18 +62,18 @@ SESSION_CONFIG = {
     # Parámetros de Análisis Técnico (TA)
     "TA": {
         "ENABLED": True, 
-        "EMA_WINDOW": 100,  
-        "WEIGHTED_INC_WINDOW": 50, 
-        "WEIGHTED_DEC_WINDOW": 50,  
+        "EMA_WINDOW": 50,  
+        "WEIGHTED_INC_WINDOW": 25, 
+        "WEIGHTED_DEC_WINDOW": 25,  
     },
 
     # Parámetros de Generación de Señales
     "SIGNAL": {
         "ENABLED": True, 
-        "PRICE_CHANGE_BUY_PERCENTAGE": -0.15,
-        "PRICE_CHANGE_SELL_PERCENTAGE": 0.15,
-        "WEIGHTED_DECREMENT_THRESHOLD": 0.45,
-        "WEIGHTED_INCREMENT_THRESHOLD": 0.45,
+        "PRICE_CHANGE_BUY_PERCENTAGE": -0.1,
+        "PRICE_CHANGE_SELL_PERCENTAGE": 0.1,
+        "WEIGHTED_DECREMENT_THRESHOLD": 0.4,
+        "WEIGHTED_INCREMENT_THRESHOLD": 0.4,
     },
 
     # Parámetros de Ganancias
@@ -81,7 +81,7 @@ SESSION_CONFIG = {
         "COMMISSION_RATE": 0.001,
         "REINVEST_PROFIT_PCT": 10.0,
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
-        "SLIPPAGE_PCT": 0.001, 
+        "SLIPPAGE_PCT": 0.0005, 
     },
 }
 
