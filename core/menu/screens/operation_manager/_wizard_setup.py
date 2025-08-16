@@ -72,9 +72,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     strategy_data = {
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
         "Distancia Promediación (%)": operacion.averaging_distance_pct if operacion.averaging_distance_pct is not None else "Desactivado",
-        # --- INICIO DE LA MODIFICACIÓN ---
         "Reinvertir Ganancias": "Activado" if getattr(operacion, 'auto_reinvest_enabled', False) else "Desactivado",
-        # --- FIN DE LA MODIFICACIÓN ---
     }
     max_key_len = max(len(k) for k in strategy_data.keys()) if strategy_data else 0
     for label, value in strategy_data.items():
@@ -172,9 +170,12 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             temp_op.tsl_activacion_pct = None
             temp_op.tsl_distancia_pct = None
         
+        # --- INICIO DEL CÓDIGO CORREGIDO ---
         dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
         temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
-        temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT") if temp_op.dynamic_roi_sl_enabled else None
+        # Se elimina la condición. El valor por defecto se carga siempre.
+        temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
+        # --- FIN DEL CÓDIGO CORREGIDO ---
         
         if temp_op.dynamic_roi_sl_enabled:
             temp_op.sl_roi_pct = None
@@ -188,9 +189,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             temp_op.tsl_roi_activacion_pct = None
             temp_op.tsl_roi_distancia_pct = None
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
-        # --- FIN DE LA MODIFICACIÓN ---
 
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
         temp_op.tiempo_maximo_min = defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None
@@ -252,7 +251,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.0, is_optional=True)
                 params_changed = True
 
-                # --- INICIO DE LA MODIFICACIÓN ---
                 reinvest_menu_title = "\n¿Activar Reinversión Automática de Ganancias?"
                 reinvest_choice = TerminalMenu(["[1] Sí, activar", "[2] No, desactivar"], title=reinvest_menu_title, **MENU_STYLE).show()
                 if reinvest_choice == 0:
@@ -260,7 +258,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 elif reinvest_choice == 1:
                     temp_op.auto_reinvest_enabled = False
                 params_changed = True
-                # --- FIN DE LA MODIFICACIÓN ---
 
             elif choice == 2:
                 print("\n--- Editando Riesgo por Posición Individual ---")
@@ -312,8 +309,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
     """Submenú para editar los parámetros de riesgo a nivel de operación."""
     print("\n--- Editando Gestión de Riesgo de Operación (Acción Forzosa: DETENER) ---")
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Preguntar al usuario qué tipo de SL/TP por ROI desea usar
     risk_mode_title = "\nSelecciona el modo para el Límite SL/TP por ROI:"
     risk_mode_menu = TerminalMenu(
         ["[1] Límite Manual (Fijo)", "[2] Límite Dinámico (Automático)", "[d] Desactivar por completo"],
@@ -330,7 +325,10 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
     elif choice == 1: # Modo Dinámico
         temp_op.dynamic_roi_sl_enabled = True
         temp_op.sl_roi_pct = None # Desactivamos el manual para evitar conflictos
-        default_trail = temp_op.dynamic_roi_sl_trail_pct or 10.0
+        # --- INICIO DEL CÓDIGO CORREGIDO ---
+        # Se elimina el 'or 10.0' para usar siempre el valor cargado de config o el ya existente.
+        default_trail = temp_op.dynamic_roi_sl_trail_pct
+        # --- FIN DEL CÓDIGO CORREGIDO ---
         temp_op.dynamic_roi_sl_trail_pct = get_input(
             "Distancia del Trailing Stop al ROI Realizado (%)", 
             float, 
@@ -342,7 +340,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         temp_op.dynamic_roi_sl_enabled = False
         temp_op.dynamic_roi_sl_trail_pct = None
         temp_op.sl_roi_pct = None
-    # --- FIN DE LA MODIFICACIÓN ---
 
     # La lógica para el TSL-ROI se mantiene igual
     tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_op.tsl_roi_activacion_pct, min_val=0.0, is_optional=True)
