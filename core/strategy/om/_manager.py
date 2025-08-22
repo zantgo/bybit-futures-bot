@@ -79,6 +79,7 @@ class OperationManager:
             
             return copy.deepcopy(original_op)
 
+    # --- INICIO DE LA MODIFICACIÓN ---
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -86,6 +87,7 @@ class OperationManager:
 
             estado_original = target_op.estado
             changes_log = []
+            changed_keys = set() # Usaremos un set para rastrear las claves que cambian
 
             nuevas_posiciones = params.get('posiciones')
             
@@ -114,6 +116,7 @@ class OperationManager:
                 flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
                 target_op.capital_flows.append(flow_event)
                 changes_log.append(f"Flujo de Capital Registrado: {diferencia_capital:+.2f}$ (TWRR)")
+                changed_keys.add('capital_flows')
 
             for key, value in params.items():
                 if key not in ['posiciones'] and hasattr(target_op, key) and not callable(getattr(target_op, key)):
@@ -121,22 +124,26 @@ class OperationManager:
                     if old_value != value:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
+                        changed_keys.add(key) # Registramos la clave que cambió
             
             if nuevas_posiciones is not None:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} objetos.")
+                changed_keys.add('posiciones')
 
             if estado_original == 'DETENIDA' and params:
                 target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 changes_log.append(f"'capital_inicial_usdt' (Base ROI) fijado en: {target_op.capital_inicial_usdt:.2f}$")
+                changed_keys.add('capital_inicial_usdt')
                 if target_op.tipo_cond_entrada == 'MARKET':
                     target_op.estado = 'ACTIVA'
-                    target_op.estado_razon = "Operación iniciada (condición de mercado)." # <-- MODIFICADO
+                    target_op.estado_razon = "Operación iniciada (condición de mercado)."
                     target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
                 else:
                     target_op.estado = 'EN_ESPERA'
-                    target_op.estado_razon = "Operación iniciada, en espera de condición de entrada." # <-- MODIFICADO
+                    target_op.estado_razon = "Operación iniciada, en espera de condición de entrada."
                 changes_log.append(f"'estado': DETENIDA -> {target_op.estado}")
+                changed_keys.add('estado')
 
             elif estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
                 summary = sm_api.get_session_summary() if sm_api else {}
@@ -148,30 +155,32 @@ class OperationManager:
                                               (cond_type == 'PRICE_BELOW' and current_price < cond_value)))
                 if not met:
                     target_op.estado = 'EN_ESPERA'
-                    target_op.estado_razon = "Condición de entrada ya no se cumple." # <-- MODIFICADO
+                    target_op.estado_razon = "Condición de entrada ya no se cumple."
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
+                    changed_keys.add('estado')
 
-        if changes_log:
-            symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-            new_leverage = target_op.apalancamiento
-            
-            if self._trading_api and symbol and new_leverage:
-                target_account_name = None
-                if side == 'long':
-                    target_account_name = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
-                elif side == 'short':
-                    target_account_name = self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
+            # La lógica de la API de apalancamiento ahora solo se ejecuta si la clave 'apalancamiento' cambió.
+            if 'apalancamiento' in changed_keys:
+                symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+                new_leverage = target_op.apalancamiento
+                
+                if self._trading_api and symbol and new_leverage:
+                    target_account_name = None
+                    if side == 'long':
+                        target_account_name = self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"]
+                    elif side == 'short':
+                        target_account_name = self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
 
-                if target_account_name:
-                    self._memory_logger.log(f"OM: Actualizando apalancamiento a {new_leverage}x para '{symbol}' en la cuenta '{target_account_name}'...", "INFO")
-                    self._trading_api.set_leverage(
-                        symbol=symbol, 
-                        buy_leverage=str(new_leverage), 
-                        sell_leverage=str(new_leverage),
-                        account_name=target_account_name
-                    )
-                else:
-                    self._memory_logger.log(f"OM WARN: No se encontró una cuenta para el lado '{side}' para establecer el apalancamiento.", "WARN")
+                    if target_account_name:
+                        self._memory_logger.log(f"OM: Actualizando apalancamiento a {new_leverage}x para '{symbol}' en la cuenta '{target_account_name}'...", "INFO")
+                        self._trading_api.set_leverage(
+                            symbol=symbol, 
+                            buy_leverage=str(new_leverage), 
+                            sell_leverage=str(new_leverage),
+                            account_name=target_account_name
+                        )
+                    else:
+                        self._memory_logger.log(f"OM WARN: No se encontró una cuenta para el lado '{side}' para establecer el apalancamiento.", "WARN")
 
         if not changes_log:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
@@ -179,6 +188,7 @@ class OperationManager:
         log_message = f"Operación {side.upper()} actualizada: " + ", ".join(changes_log)
         self._memory_logger.log(log_message, "WARN")
         return True, f"Operación {side.upper()} actualizada con éxito."
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
@@ -283,7 +293,6 @@ class OperationManager:
                 self._memory_logger.log(log_msg, "INFO")
                 target_op.reset()
 
-    # --- INICIO DE LA MODIFICACIÓN (NUEVOS MÉTODOS) ---
     def actualizar_reinvestable_profit(self, side: str, amount: float):
         """Añade fondos al bote de reinversión."""
         with self._lock:
@@ -321,4 +330,3 @@ class OperationManager:
                 f"entre {len(pending_positions)} posiciones pendientes (${amount_per_position:.4f} c/u).",
                 "INFO"
             )
-    # --- FIN DE LA MODIFICACIÓN ---
