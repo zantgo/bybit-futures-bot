@@ -92,7 +92,7 @@ SESSION_CONFIG = {
 OPERATION_DEFAULTS = {
     "CAPITAL": {
         "BASE_SIZE_USDT": 1.0,
-        "MAX_POSITIONS": 20,
+        "MAX_POSITIONS": 10,
         "LEVERAGE": 20.0,
     },
     "RISK": {
@@ -102,7 +102,7 @@ OPERATION_DEFAULTS = {
         },
         "INDIVIDUAL_TSL": {
             "ENABLED": True, 
-            "TSL_ACTIVATION_PCT": 0.4,
+            "TSL_ACTIVATION_PCT": 0.5,
             "TSL_DISTANCE_PCT": 0.05,
         },
         "AVERAGING": {
@@ -116,15 +116,14 @@ OPERATION_DEFAULTS = {
     "OPERATION_RISK": {
         "AFTER_STATE": 'DETENER', # PAUSAR O DETENER
         "ROI_SL_TP": {
-            "ENABLED": True, 
+            "ENABLED": False, 
             "PERCENTAGE": -25.0, 
         },
         "ROI_TSL": {
-            "ENABLED": True,
+            "ENABLED": False,
             "ACTIVATION_PCT": 25.0,
             "DISTANCE_PCT": 5.0,
         },
-        # NUEVOS PARÁMETROS PARA EL SL/TP DINÁMICO
         "DYNAMIC_ROI_SL": {
             "ENABLED": False, # Por defecto, está desactivado.
             "TRAIL_PCT": 50.0 # El valor a restar del ROI realizado. (ej. ROI 20% - 10% = SL/TP en +10%)
@@ -143,8 +142,9 @@ OPERATION_DEFAULTS = {
             "MINUTES": 1440 # 24 hrs
         },
     },
+
     "PROFIT_MANAGEMENT": {
-        "AUTO_REINVEST_ENABLED": False,
+        "AUTO_REINVEST_ENABLED": True,
         },
 }
 
