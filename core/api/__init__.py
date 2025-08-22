@@ -27,6 +27,7 @@ from ._account import (
     get_order_status,
     get_active_position_details_api,
     get_order_execution_history,
+    get_position_info_api,
 )
 
 # Se actualiza la importación para apuntar al nuevo sub-paquete 'trading'.
@@ -45,6 +46,7 @@ __all__ = [
     'get_order_status',
     'get_active_position_details_api',
     'get_order_execution_history',
+    'get_position_info_api',
     'set_leverage',
     'place_market_order',
     'cancel_order',

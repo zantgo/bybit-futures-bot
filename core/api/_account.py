@@ -299,3 +299,42 @@ def get_order_execution_history(category: str, symbol: str, order_id: str, limit
         memory_logger.log(f"ERROR Inesperado [Get Executions] para orden {order_id}: {e}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
+
+def get_position_info_api(symbol: str, account_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Obtiene la información de la posición, que incluye el apalancamiento (v5 API)."""
+    connection_manager = get_connection_manager_instance()
+    if not connection_manager or not config:
+        memory_logger.log("ERROR [Get Position Info]: Dependencias no disponibles.", level="ERROR")
+        return None
+        
+    session, account_used = connection_manager.get_session_for_operation(
+        purpose='general', specific_account=account_name
+    )
+    if not session:
+        memory_logger.log(f"ERROR [Get Position Info]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
+        return None
+        
+    params = {"category": config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"], "symbol": symbol}
+    
+    try:
+        response = session.get_positions(**params)
+        
+        if _handle_api_error_generic(response, f"Get Position Info for {symbol}"):
+            return None
+        else:
+            position_list = response.get('result', {}).get('list', [])
+            if position_list:
+                # Devuelve la información de la primera entrada, que contiene el apalancamiento
+                return position_list[0] 
+            else:
+                memory_logger.log(f"INFO [Get Position Info]: Lista de posiciones vacía para {symbol} en '{account_used}'.", level="INFO")
+                return None
+                
+    except (InvalidRequestError, FailedRequestError) as api_err:
+        status_code = getattr(api_err, 'status_code', 'N/A')
+        memory_logger.log(f"ERROR API [Get Position Info]: {api_err} (Status: {status_code})", level="ERROR")
+        return None
+    except Exception as e:
+        memory_logger.log(f"ERROR Inesperado [Get Position Info]: {e}", level="ERROR")
+        memory_logger.log(traceback.format_exc(), level="ERROR")
+        return None

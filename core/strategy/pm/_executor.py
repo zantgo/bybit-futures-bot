@@ -6,6 +6,10 @@ try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
     from core.strategy.entities import LogicalPosition, Operacion # Añadido Operacion para el type hint
+    # --- INICIO DEL CAMBIO 1: Importar la fachada de la API del core ---
+    # Esto nos da acceso a la nueva función get_position_info_api.
+    from core import api as core_api
+    # --- FIN DEL CAMBIO 1 ---
 except ImportError as e:
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
@@ -13,6 +17,9 @@ except ImportError as e:
     class AbstractExchange: pass
     class StandardOrder: pass
     class Operacion: pass # Fallback
+    # --- INICIO DEL CAMBIO 2: Añadir fallback para la nueva importación ---
+    core_api = None
+    # --- FIN DEL CAMBIO 2 ---
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
@@ -57,6 +64,42 @@ class PositionExecutor:
             return result
         
         leverage = operacion.apalancamiento
+
+        # --- INICIO DEL CAMBIO 3: Lógica de Comprobación y Corrección de Apalancamiento ---
+        # Este bloque se ejecuta antes de cualquier cálculo o log de apertura.
+        if not self._config.BOT_CONFIG["PAPER_TRADING_MODE"] and core_api:
+            # Determinar la cuenta correcta a comprobar
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            account_name_map = {
+                'longs': self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"],
+                'shorts': self._config.BOT_CONFIG["ACCOUNTS"]["SHORTS"]
+            }
+            account_name = account_name_map.get(account_purpose)
+
+            if account_name:
+                try:
+                    # Llamar a la nueva función de la API para leer la info de posición (que incluye el apalancamiento)
+                    position_info = core_api.get_position_info_api(symbol=self._symbol, account_name=account_name)
+                    if position_info:
+                        current_leverage = float(position_info.get('leverage', 0))
+                        # Comparamos el apalancamiento del exchange con el del bot
+                        if abs(current_leverage - leverage) > 1e-9:
+                            memory_logger.log(f"WARN [Executor]: Desincronización de apalancamiento detectada en '{account_name}'. "
+                                              f"Exchange: {current_leverage}x, Bot: {leverage}x. Corrigiendo...", level="WARN")
+                            
+                            # Si son diferentes, se envía una orden para corregirlo
+                            success = self._exchange.set_leverage(symbol=self._symbol, leverage=leverage, account_purpose=account_purpose)
+                            if not success:
+                                result['message'] = "Fallo al corregir el apalancamiento desincronizado. Se aborta la apertura."
+                                memory_logger.log(f"ERROR [Executor]: {result['message']}", level="ERROR")
+                                return result
+                    else:
+                        memory_logger.log(f"WARN [Executor]: No se pudo obtener información de posición para verificar apalancamiento en '{account_name}'. Se procederá con cautela.", level="WARN")
+
+                except Exception as e:
+                    memory_logger.log(f"ERROR [Executor]: Excepción al verificar apalancamiento: {e}", level="ERROR")
+                    # No abortamos la operación, pero el error queda registrado.
+        # --- FIN DEL CAMBIO 3 ---
 
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
 
@@ -189,25 +232,18 @@ class PositionExecutor:
         if execution_success:
             removed_pos_dict = asdict(position_to_close)
 
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # La función de cálculo ahora solo calcula las porciones. La decisión se toma aquí.
             calc_res = self._calculations.calculate_pnl_commission_reinvestment(
                 side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
             )
 
-            # Obtenemos el objeto de operación para verificar si la reinversión está activada
             operacion = self._state_manager._om_api.get_operation_by_side(side)
             
-            # Si la reinversión NO está activada, movemos todo al monto transferible
             if operacion and not operacion.auto_reinvest_enabled:
                 if calc_res.get('pnl_net_usdt', 0.0) > 0:
-                    # Sumamos la porción de reinversión a la de transferencia
                     calc_res['amount_transferable_to_profit'] += calc_res['amount_reinvested_in_operational_margin']
-                    # Y ponemos a cero la de reinversión
                     calc_res['amount_reinvested_in_operational_margin'] = 0.0
 
             result.update(calc_res)
-            # --- FIN DE LA MODIFICACIÓN ---
             
             if self._closed_position_logger and removed_pos_dict:
                 log_data = {**removed_pos_dict, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
