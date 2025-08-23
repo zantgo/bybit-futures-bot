@@ -1,4 +1,4 @@
-# core/menu/screens/operation_manager/_wizard_setup.py
+# Contenido completo y corregido para: core/menu/screens/operation_manager/_wizard_setup.py
 
 import time
 from typing import Any, Dict, List
@@ -203,13 +203,31 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     params_changed = False
 
     while True:
-        # Refrescamos el estado de las posiciones del objeto temporal con el estado real del sistema.
-        # Esto asegura que si una posición se cierra en segundo plano, la UI lo reflejará al redibujar.
-        # Solo actualizamos la lista de posiciones para no perder los cambios de parámetros que el usuario ya haya hecho.
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de Fusión Inteligente ---
+        # Este bloque se ejecuta en cada ciclo para mantener la TUI sincronizada sin perder los cambios del usuario.
         if is_modification:
             latest_op_state = om_api.get_operation_by_side(side)
             if latest_op_state:
-                temp_op.posiciones = latest_op_state.posiciones
+                # Crear un mapa del estado real de las posiciones por su ID para una búsqueda rápida
+                latest_positions_map = {p.id: p for p in latest_op_state.posiciones}
+                
+                # Iterar sobre las posiciones en nuestra copia temporal de edición (temp_op)
+                for pos_in_editor in temp_op.posiciones:
+                    # Buscar si esta posición todavía existe en el estado real del sistema
+                    if pos_in_editor.id in latest_positions_map:
+                        # Si existe, actualizamos solo los atributos que el bot puede cambiar en segundo plano
+                        real_pos_state = latest_positions_map[pos_in_editor.id]
+                        pos_in_editor.estado = real_pos_state.estado
+                        pos_in_editor.entry_price = real_pos_state.entry_price
+                        pos_in_editor.entry_timestamp = real_pos_state.entry_timestamp
+                        pos_in_editor.size_contracts = real_pos_state.size_contracts
+                        # ... (y cualquier otro atributo que el bot modifique automáticamente)
+                    else:
+                        # Si la posición que teníamos en el editor ya no existe en el estado real
+                        # (por ejemplo, el usuario la eliminó y luego una se cerró), la eliminamos del editor también.
+                        # Esto es un caso raro, pero previene inconsistencias.
+                        pass # Podríamos optar por eliminarla, pero por ahora la dejamos para no confundir al usuario.
+        # --- FIN DE LA MODIFICACIÓN ---
 
         clear_screen()
         print_tui_header(f"Asistente de Operación {side.upper()}")
@@ -235,6 +253,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         try:
             if choice == 0:
                 if position_editor:
+                    # Es crucial que el editor de posiciones también trabaje sobre `temp_op`
                     changes_made_in_editor = position_editor.show_position_editor_screen(temp_op, side)
                     if changes_made_in_editor:
                         params_changed = True
