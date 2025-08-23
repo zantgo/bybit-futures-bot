@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/menu/screens/operation_manager/_wizard_setup.py
+# core/menu/screens/operation_manager/_wizard_setup.py
 
 import time
 from typing import Any, Dict, List
@@ -25,7 +25,7 @@ from ..._helpers import (
 try:
     from core.strategy.entities import Operacion, LogicalPosition
     from core.strategy.pm import api as pm_api
-    from core.strategy.om import api as om_api # Se añade import de om_api para guardar
+    from core.strategy.om import api as om_api 
     from . import position_editor
 except ImportError:
     position_editor = None
@@ -170,12 +170,9 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             temp_op.tsl_activacion_pct = None
             temp_op.tsl_distancia_pct = None
         
-        # --- INICIO DEL CÓDIGO CORREGIDO ---
         dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
         temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
-        # Se elimina la condición. El valor por defecto se carga siempre.
         temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
-        # --- FIN DEL CÓDIGO CORREGIDO ---
         
         if temp_op.dynamic_roi_sl_enabled:
             temp_op.sl_roi_pct = None
@@ -206,6 +203,14 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     params_changed = False
 
     while True:
+        # Refrescamos el estado de las posiciones del objeto temporal con el estado real del sistema.
+        # Esto asegura que si una posición se cierra en segundo plano, la UI lo reflejará al redibujar.
+        # Solo actualizamos la lista de posiciones para no perder los cambios de parámetros que el usuario ya haya hecho.
+        if is_modification:
+            latest_op_state = om_api.get_operation_by_side(side)
+            if latest_op_state:
+                temp_op.posiciones = latest_op_state.posiciones
+
         clear_screen()
         print_tui_header(f"Asistente de Operación {side.upper()}")
         
@@ -324,11 +329,8 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
     
     elif choice == 1: # Modo Dinámico
         temp_op.dynamic_roi_sl_enabled = True
-        temp_op.sl_roi_pct = None # Desactivamos el manual para evitar conflictos
-        # --- INICIO DEL CÓDIGO CORREGIDO ---
-        # Se elimina el 'or 10.0' para usar siempre el valor cargado de config o el ya existente.
+        temp_op.sl_roi_pct = None
         default_trail = temp_op.dynamic_roi_sl_trail_pct
-        # --- FIN DEL CÓDIGO CORREGIDO ---
         temp_op.dynamic_roi_sl_trail_pct = get_input(
             "Distancia del Trailing Stop al ROI Realizado (%)", 
             float, 
