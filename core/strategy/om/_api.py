@@ -117,3 +117,16 @@ def distribuir_reinvestable_profits(side: str):
     if _om_instance:
         _om_instance.distribuir_reinvestable_profits(side)
 # --- FIN DE LA MODIFICACIÓN ---
+
+# ==============================================================================
+# --- INICIO DE LA NUEVA FUNCIONALIDAD: PROXY PARA MANEJADOR DE LIQUIDACIÓN ---
+# ==============================================================================
+
+def handle_liquidation_event(side: str, reason: str):
+    """Delega la llamada para manejar un evento de liquidación de forma controlada."""
+    if _om_instance:
+        _om_instance.handle_liquidation_event(side, reason)
+
+# ==============================================================================
+# --- FIN DE LA NUEVA FUNCIONALIDAD ---
+# ==============================================================================

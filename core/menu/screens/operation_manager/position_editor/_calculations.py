@@ -136,12 +136,22 @@ def simulate_max_positions(
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
 
 # --- Función Orquestadora Principal (Corregida) ---
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
+# --- Función Orquestadora Principal (Corregida Y AMPLIADA) ---
 
 def calculate_projected_risk_metrics(
     operacion: 'Operacion',
     current_market_price: float,
     side: str
 ) -> Dict[str, Optional[float]]:
+    # --- INICIO DE LA MODIFICACIÓN: Importación local de la nueva función ---
+    # Importamos el módulo completo para acceder a AMBAS calculadoras.
+    from core.strategy.pm import _calculations as pm_calculations
+    # --- FIN DE LA MODIFICACIÓN ---
+
     all_positions = operacion.posiciones
     leverage = operacion.apalancamiento
     distance_pct = operacion.averaging_distance_pct
@@ -194,11 +204,30 @@ def calculate_projected_risk_metrics(
     if distance_pct is not None and distance_pct > 0:
         max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Se revierte la llamada a la función que ahora es la correcta y única.
-    # roi_sl_tp_target_price = operacion.get_roi_sl_tp_price_simple() # <-- LÍNEA ANTERIOR ERRÓNEA
-    roi_sl_tp_target_price = operacion.get_roi_sl_tp_price()
-    # --- FIN DE LA CORRECCIÓN ---
+    # --- INICIO DE LA MODIFICACIÓN: Llamada a la nueva función de cálculo de ROI ---
+    # Se reemplaza la llamada a get_roi_sl_tp_price() por la nueva función de simulación.
+    projected_roi_target_price = None
+    
+    # Primero, determinamos el ROI objetivo. Consideramos el modo dinámico primero.
+    sl_roi_pct_target = operacion.sl_roi_pct
+    if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
+        sl_roi_pct_target = operacion.realized_twrr_roi - operacion.dynamic_roi_sl_trail_pct
+        
+    if sl_roi_pct_target is not None:
+        # Convertimos los objetos a diccionarios para la función de cálculo
+        all_positions_dicts = [p.__dict__ for p in all_positions]
+        
+        projected_roi_target_price = pm_calculations.calculate_projected_roi_target_price(
+            all_positions=all_positions_dicts,
+            capital_inicial_usdt=operacion.capital_inicial_usdt,
+            pnl_realizado_usdt=operacion.pnl_realizado_usdt,
+            sl_roi_pct_target=sl_roi_pct_target,
+            leverage=operacion.apalancamiento,
+            distance_pct=operacion.averaging_distance_pct,
+            side=side,
+            last_real_entry_price=last_real_entry_price
+        )
+    # --- FIN DE LA MODIFICACIÓN ---
 
     final_metrics = {
         'avg_entry_price': live_metrics['avg_entry_price'],
@@ -207,9 +236,15 @@ def calculate_projected_risk_metrics(
         'projected_avg_price': sim_avg_price,
         'projected_liquidation_price': projected_liq_price,
         'liquidation_distance_pct': liquidation_distance_pct,
-        'roi_sl_tp_target_price': roi_sl_tp_target_price,
+        # --- INICIO DE LA MODIFICACIÓN: Usar el nuevo valor calculado ---
+        'roi_sl_tp_target_price': projected_roi_target_price,
+        # --- FIN DE LA MODIFICACIÓN ---
     }
     final_metrics.update(coverage_metrics)
     final_metrics.update(max_sim_metrics)
     
     return final_metrics
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================

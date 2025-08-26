@@ -1,0 +1,40 @@
+================================================================================
+                     RESUMEN FINAL DE LA SESIÓN DE TRADING                      
+                     Finalizada el: 2025-08-26 00:48:06 UTC                     
+================================================================================
+
+--- Configuración del Bot ---
+  Exchange        : BYBIT
+  Símbolo Ticker  : BTCUSDT
+  Modo de Trading : Live Trading
+  Modo Testnet    : DESACTIVADO
+
+Duración Total de la Sesión: 0:06:43
+
+--- Estado Final de las Operaciones ---
+
+  Operación LONG:
+    - Estado Final          : ACTIVA
+    - Posiciones Abiertas   : 0
+    - Capital (Usado/Total) : $0.00 / $0.00
+    - Ganancias Netas       : $+0.0000
+    - PNL (Realizado+No R.) : +0.0000 USDT
+    - ROI                   : +0.00%
+
+  Operación SHORT:
+    - Estado Final          : DETENIDA
+    - Posiciones Abiertas   : 0
+    - Capital (Usado/Total) : $0.00 / $0.00
+    - Ganancias Netas       : $+0.0000
+    - PNL (Realizado+No R.) : +0.0000 USDT
+    - ROI                   : +0.00%
+
+================================================================================
+                         Parámetros Clave de la Sesión                          
+================================================================================
+  Intervalo Ticker (s)     : 1
+  Período EMA              : 100
+  Margen Compra (%)        : -0.2
+  Margen Venta (%)         : 0.2
+  Comisión (%)             : 0.100
+  Reinvertir Ganancias (%) : 10.0

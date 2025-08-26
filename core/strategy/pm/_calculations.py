@@ -205,3 +205,166 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
         'total_size_contracts': float(total_contracts),
         'total_margin_usdt': float(total_margin)
     }
+def calculate_aggregate_liquidation_price(
+    open_positions: List[Dict[str, Any]],
+    leverage: float,
+    side: str
+) -> Optional[float]:
+    """
+    Calcula el precio de liquidación estimado para una posición agregada
+    compuesta por múltiples posiciones lógicas abiertas.
+
+    Args:
+        open_positions (List[Dict[str, Any]]): Una lista de diccionarios o
+                                                objetos LogicalPosition abiertos.
+        leverage (float): El apalancamiento de la operación.
+        side (str): El lado de la operación ('long' o 'short').
+
+    Returns:
+        Optional[float]: El precio de liquidación estimado, o None si no
+                         se puede calcular.
+    """
+    if not open_positions:
+        return None
+
+    # Filtrar solo posiciones con datos válidos para el cálculo
+    valid_positions = [
+        p for p in open_positions
+        if isinstance(p.get('entry_price'), (int, float)) and np.isfinite(p.get('entry_price'))
+        and isinstance(p.get('size_contracts'), (int, float)) and np.isfinite(p.get('size_contracts'))
+        and p.get('size_contracts') > 1e-12
+    ]
+    
+    if not valid_positions:
+        return None
+
+    # 1. Calcular el precio de entrada promedio ponderado
+    total_value = sum(pos.get('entry_price', 0.0) * pos.get('size_contracts', 0.0) for pos in valid_positions)
+    total_size = sum(pos.get('size_contracts', 0.0) for pos in valid_positions)
+
+    # Utilizamos el safe_division de tu módulo utils para evitar errores
+    avg_entry_price = _utils.safe_division(total_value, total_size)
+
+    if not avg_entry_price or avg_entry_price <= 0:
+        return None
+
+    # 2. Reutilizar la lógica de cálculo de liquidación con el precio promedio
+    # Esta es una aproximación estándar para margen aislado.
+    # El 0.005 (0.5%) es una aproximación común para la tasa de margen de mantenimiento.
+    maintenance_margin_rate = 0.005
+
+    try:
+        if leverage <= 0:
+            return None
+        
+        leverage_inverse = 1.0 / leverage
+        
+        if side == 'long':
+            # Fórmula: PrecioEntrada * (1 - 1/Apalancamiento + TasaMargenMantenimiento)
+            liquidation_price = avg_entry_price * (1.0 - leverage_inverse + maintenance_margin_rate)
+        elif side == 'short':
+            # Fórmula: PrecioEntrada * (1 + 1/Apalancamiento - TasaMargenMantenimiento)
+            liquidation_price = avg_entry_price * (1.0 + leverage_inverse - maintenance_margin_rate)
+        else:
+            return None # Lado inválido
+
+        # El precio de liquidación no puede ser negativo.
+        return max(0.0, liquidation_price)
+
+    except (ZeroDivisionError, TypeError, ValueError):
+        # Captura cualquier error matemático durante el cálculo
+        return None
+    
+# ==============================================================================
+# --- INICIO DE LA NUEVA FUNCIONALIDAD: PRECIO OBJETIVO DE SL/TP POR ROI ---
+# ==============================================================================
+
+def calculate_projected_roi_target_price(
+    all_positions: List[Dict[str, Any]],
+    capital_inicial_usdt: float,
+    pnl_realizado_usdt: float,
+    sl_roi_pct_target: float,
+    leverage: float,
+    distance_pct: float,
+    side: str,
+    last_real_entry_price: float
+) -> Optional[float]:
+    """
+    Calcula el precio de mercado objetivo al que se alcanzaría un ROI específico,
+    simulando que todas las posiciones (abiertas y pendientes) están activas.
+
+    Args:
+        all_positions (List[Dict]): Lista completa de todas las posiciones
+                                    (abiertas y pendientes) de la operación.
+        capital_inicial_usdt (float): El capital base para el cálculo del ROI.
+        pnl_realizado_usdt (float): El PNL ya realizado en la operación.
+        sl_roi_pct_target (float): El porcentaje de ROI objetivo (ej. -25.0 o 50.0).
+        leverage (float): El apalancamiento de la operación.
+        distance_pct (float): El porcentaje de distancia para promediación.
+        side (str): El lado de la operación ('long' o 'short').
+        last_real_entry_price (float): El último precio de entrada real para
+                                       iniciar la simulación de las pendientes.
+
+    Returns:
+        Optional[float]: El precio de mercado estimado para alcanzar el ROI
+                         objetivo, o None si no se puede calcular.
+    """
+    if not all_positions or capital_inicial_usdt <= 0 or not np.isfinite(sl_roi_pct_target):
+        return None
+
+    open_positions = [p for p in all_positions if p.get('estado') == 'ABIERTA']
+    pending_positions = [p for p in all_positions if p.get('estado') == 'PENDIENTE']
+    
+    # 1. Simular la apertura de todas las posiciones para obtener agregados proyectados
+    sim_total_value = sum(p.get('entry_price', 0) * p.get('size_contracts', 0) for p in open_positions)
+    sim_total_size = sum(p.get('size_contracts', 0) for p in open_positions)
+    
+    last_simulated_price = last_real_entry_price
+
+    if distance_pct is not None and distance_pct > 0:
+        for pos in pending_positions:
+            # Simular el precio de entrada de la siguiente posición pendiente
+            if side == 'long':
+                next_entry_price = last_simulated_price * (1 - distance_pct / 100)
+            else: # 'short'
+                next_entry_price = last_simulated_price * (1 + distance_pct / 100)
+            
+            # Calcular el tamaño de esta posición simulada
+            capital_asignado = pos.get('capital_asignado', 0)
+            size = _utils.safe_division(capital_asignado * leverage, next_entry_price)
+            if size <= 0: continue
+            
+            # Acumular al total proyectado
+            sim_total_value += next_entry_price * size
+            sim_total_size += size
+            last_simulated_price = next_entry_price
+
+    projected_avg_price = _utils.safe_division(sim_total_value, sim_total_size)
+    projected_total_size = sim_total_size
+
+    if projected_total_size <= 1e-12:
+        return None
+
+    # 2. Calcular el PNL no realizado necesario para alcanzar el objetivo
+    pnl_target_usdt = (sl_roi_pct_target / 100.0) * capital_inicial_usdt
+    unrealized_pnl_needed = pnl_target_usdt - pnl_realizado_usdt
+
+    # 3. Calcular el precio de mercado objetivo (inversión de la fórmula de PNL)
+    try:
+        price_difference_per_contract = _utils.safe_division(unrealized_pnl_needed, projected_total_size)
+        
+        if side == 'long':
+            target_market_price = projected_avg_price + price_difference_per_contract
+        elif side == 'short':
+            target_market_price = projected_avg_price - price_difference_per_contract
+        else:
+            return None
+
+        return max(0.0, target_market_price)
+
+    except (TypeError, ValueError):
+        return None
+
+# ==============================================================================
+# --- FIN DE LA NUEVA FUNCIONALIDAD ---
+# ==============================================================================

@@ -124,6 +124,10 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -132,11 +136,46 @@ class EventProcessor:
         if not (self._om_api and self._om_api.is_initialized() and self._pm_api and self._pm_api.is_initialized()):
             return
 
+        from core.strategy.pm import _calculations as pm_calculations
+        
         try:
             for side in ['long', 'short']:
                 operacion: 'Operacion' = self._om_api.get_operation_by_side(side)
                 if not operacion:
                     continue
+
+                # --- INICIO DE LA NUEVA FUNCIONALIDAD: DETECCIÓN DE LIQUIDACIÓN ---
+                # Esta es la comprobación de mayor prioridad. Si se detecta una
+                # liquidación, se detiene todo para este lado y se continúa con el otro.
+                if operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
+                    
+                    # Convertimos los objetos LogicalPosition a diccionarios para la función de cálculo
+                    open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
+                    
+                    estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
+                        open_positions=open_positions_dicts,
+                        leverage=operacion.apalancamiento,
+                        side=side
+                    )
+
+                    if estimated_liq_price is not None:
+                        liquidation_triggered = False
+                        if side == 'long' and current_price <= estimated_liq_price:
+                            liquidation_triggered = True
+                        elif side == 'short' and current_price >= estimated_liq_price:
+                            liquidation_triggered = True
+                        
+                        if liquidation_triggered:
+                            reason = (
+                                f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral "
+                                f"agregado ({estimated_liq_price:.4f})"
+                            )
+                            self._memory_logger.log(reason, "ERROR")
+                            # Llamamos al nuevo manejador de eventos de liquidación en la API del OM
+                            self._om_api.handle_liquidation_event(side, reason)
+                            continue # Detener el procesamiento para este lado y pasar al siguiente
+                # --- FIN DE LA NUEVA FUNCIONALIDAD ---
+
 
                 # 1. Lógica de ENTRADA (solo aplica si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
@@ -153,14 +192,9 @@ class EventProcessor:
                 # 2. Lógica de SALIDA y GESTIÓN (aplica a todos los estados activos o pausados)
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
                     
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Si el SL/TP dinámico está activado, recalculamos el umbral en cada tick.
-                    # Esto sobreescribe el 'sl_roi_pct' de la operación solo para esta comprobación.
                     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
                         realized_roi = operacion.realized_twrr_roi
-                        # La fórmula: el nuevo SL/TP sigue al ROI realizado a una distancia fija.
                         operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
-                    # --- FIN DE LA MODIFICACIÓN ---
                     
                     live_performance = operacion.get_live_performance(current_price, self._utils)
                     roi = live_performance.get("roi_twrr_vivo", 0.0)
@@ -191,29 +225,29 @@ class EventProcessor:
                             
                             umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
                             if roi <= umbral_disparo: 
-                                risk_condition_met, risk_reason = True, f"RIESGO TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
+                                risk_condition_met = True
+                                risk_reason = f"RIESGO TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
 
                     sl_roi_pct = operacion.sl_roi_pct
                     if not risk_condition_met and sl_roi_pct is not None:
                         if sl_roi_pct < 0 and roi <= sl_roi_pct:
-                            risk_condition_met, risk_reason = True, f"RIESGO SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
+                            risk_condition_met = True
+                            risk_reason = f"RIESGO SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
                         elif sl_roi_pct > 0 and roi >= sl_roi_pct:
-                            risk_condition_met, risk_reason = True, f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
+                            risk_condition_met = True
+                            risk_reason = f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
 
                     if risk_condition_met:
-                        # --- INICIO DE LA MODIFICACIÓN ---
-                        # Leemos la acción a tomar desde la configuración para mayor claridad.
                         risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
                         
                         if risk_action == 'DETENER':
-                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason) # <-- MODIFICADO
-                        else: # Por defecto o si se configura 'PAUSAR'
-                            self._om_api.pausar_operacion(side, reason=risk_reason) # <-- MODIFICADO
+                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
+                        else:
+                            self._om_api.pausar_operacion(side, reason=risk_reason)
                         
                         continue # Pasar al siguiente lado
-                        # --- FIN DE LA MODIFICACIÓN ---
 
                     # 2.2 Chequear Límites y Condiciones de Salida (acción configurable)
                     exit_condition_met = False
@@ -236,14 +270,17 @@ class EventProcessor:
                             accion_final = operacion.accion_al_finalizar
                             log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}"
                             self._memory_logger.log(log_msg, "WARN")
-                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason) # <-- MODIFICADO
-                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason) # <-- MODIFICADO
-                            else: self._om_api.pausar_operacion(side, reason=exit_reason) # <-- MODIFICADO
+                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
+                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
+                            else: self._om_api.pausar_operacion(side, reason=exit_reason)
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y

@@ -330,3 +330,60 @@ class OperationManager:
                 f"entre {len(pending_positions)} posiciones pendientes (${amount_per_position:.4f} c/u).",
                 "INFO"
             )
+
+# ==============================================================================
+# --- INICIO DE LA NUEVA FUNCIONALIDAD: MANEJADOR DE EVENTO DE LIQUIDACIÓN ---
+# ==============================================================================
+
+    def handle_liquidation_event(self, side: str, reason: str):
+        """
+        Maneja un evento de liquidación para una operación.
+
+        Esta función realiza una transición de estado forzosa, asume la pérdida
+        total del capital de la operación y la resetea sin intentar enviar
+        órdenes de cierre, ya que se asume que las posiciones ya han sido
+        cerradas por el exchange.
+
+        Args:
+            side (str): El lado de la operación ('long' o 'short').
+            reason (str): La razón de la liquidación para registrar en el estado.
+        """
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            
+            # Si la operación no existe o ya está siendo detenida/detenida, no hacer nada.
+            if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
+                return
+
+            self._memory_logger.log(
+                f"OM: Procesando evento de liquidación para la operación {side.upper()}.", "ERROR"
+            )
+
+            # 1. Cambiar el estado inmediatamente para prevenir nuevas acciones.
+            target_op.estado = 'DETENIENDO'
+            target_op.estado_razon = reason
+
+            # 2. Calcular y registrar la pérdida total del capital operativo.
+            # Se asume que todo el capital en juego se ha perdido.
+            total_loss = target_op.capital_operativo_logico_actual
+            
+            # El P&L realizado se actualiza restando la pérdida total.
+            # Se suma al P&L que ya pudiera existir de trades anteriores en la misma operación.
+            target_op.pnl_realizado_usdt -= total_loss
+
+            self._memory_logger.log(
+                f"OM: Pérdida por liquidación de ${total_loss:.4f} registrada para {side.upper()}.", "WARN"
+            )
+            
+            # 3. Limpiar el estado de las posiciones lógicas internas.
+            # Se vacía la lista porque las posiciones ya no existen en el exchange.
+            target_op.posiciones.clear()
+            
+            # 4. Llamar al método de transición final.
+            # Como la lista de posiciones ahora está vacía, este método moverá
+            # el estado a 'DETENIDA' y reseteará la operación limpiamente.
+            self.revisar_y_transicionar_a_detenida(side)
+
+# ==============================================================================
+# --- FIN DE LA NUEVA FUNCIONALIDAD ---
+# ==============================================================================

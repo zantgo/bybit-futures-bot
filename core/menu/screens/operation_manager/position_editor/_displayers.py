@@ -110,6 +110,9 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
@@ -146,6 +149,12 @@ def display_risk_panel(
     max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
     max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
     
+    # --- INICIO DE LA MODIFICACIÓN: Formatear el nuevo dato ---
+    # Obtenemos y formateamos el precio objetivo de SL/TP por ROI desde el diccionario de métricas
+    roi_target_price = metrics.get('roi_sl_tp_target_price')
+    roi_target_price_str = f"{roi_target_price:.4f} USDT" if roi_target_price is not None else "N/A (ROI SL/TP desactivado)"
+    # --- FIN DE LA MODIFICACIÓN ---
+
     print("\n┌" + "─" * box_width + "┐")
     print(_create_box_line("Panel de Cobertura y Riesgo Estratégico", box_width + 2, 'center'))
     
@@ -160,6 +169,10 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liq. Proyectado      : {proj_liq_price_str}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
+    # --- INICIO DE LA MODIFICACIÓN: Añadir la nueva línea a la TUI ---
+    # Simplemente añadimos una nueva línea para mostrar el valor formateado
+    print(_create_box_line(f"  Precio Obj. SL/TP por ROI   : {roi_target_price_str}", box_width + 2))
+    # --- FIN DE LA MODIFICACIÓN ---
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -167,3 +180,7 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================

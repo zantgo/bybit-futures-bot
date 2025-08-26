@@ -151,6 +151,9 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     box_width = _get_unified_box_width()
@@ -169,6 +172,16 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         print("└" + "─" * (box_width - 2) + "┘")
         return
 
+    from core.strategy.pm import _calculations as pm_calculations
+    
+    open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
+    
+    aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
+        open_positions=open_positions_dicts,
+        leverage=operacion.apalancamiento,
+        side=side
+    )
+
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
     pnl_realizado = operacion.pnl_realizado_usdt
@@ -180,9 +193,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     equity_total_historico = operacion.equity_total_usdt
     comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
     total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
-    # --- INICIO DE LA MODIFICACIÓN ---
     total_transferido = getattr(operacion, 'profit_balance_acumulado', 0.0)
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def get_color(value): 
         return "\033[92m" if value >= 0 else "\033[91m"
@@ -194,17 +205,18 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Capital Operativo (Lógico)": f"${operacion.capital_operativo_logico_actual:.2f}",
         "Capital en Uso": f"${operacion.capital_en_uso:.2f}",
         "Capital Disponible": f"${operacion.capital_disponible:.2f}",
-        "--- RENDIMIENTO ---": "",
+        "--- RENDIMIENTO Y RIESGO ---": "",
         "Equity Total (Histórico)": f"${equity_total_historico:.2f}",
         "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
         "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
+        # --- MODIFICACIÓN: Texto más claro y color de riesgo ---
+        "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
+        # --- FIN DE LA MODIFICACIÓN ---
         "--- CONTADORES ---": "",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
-        # --- INICIO DE LA MODIFICACIÓN ---
         "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
-        # --- FIN DE LA MODIFICACIÓN ---
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
 
@@ -215,6 +227,10 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         else: 
             print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
     print("└" + "─" * (box_width - 2) + "┘")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     box_width = _get_unified_box_width()
@@ -287,6 +303,10 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -324,22 +344,40 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Se construye la cadena para el SL/TP por ROI, considerando primero el modo dinámico.
-        sl_roi_str = "SL/TP por ROI: Desactivado"  # Valor por defecto
-
-        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
-            trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
-            sl_roi_str = f"SL/TP por ROI: DINÁMICO (ROI Realizado - {trail_pct}%)"
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de visualización mejorada ---
         
-        # Si no es dinámico, se comprueba el modo manual como antes.
-        elif operacion.sl_roi_pct is not None:
+        # 1. Determinar si la funcionalidad está configurada por el usuario
+        is_sl_roi_configured = (
+            getattr(operacion, 'sl_roi_pct') is not None or
+            getattr(operacion, 'dynamic_roi_sl_enabled', False)
+        )
+        
+        sl_roi_str = "SL/TP por ROI: Desactivado"
+        
+        if is_sl_roi_configured:
+            # 2. Intentar calcular el precio objetivo
             target_price = operacion.get_roi_sl_tp_price()
-            sl_tp_price_str = f"(Precio Obj: ~{target_price:.4f})" if target_price is not None else ""
-            sl_roi_str = f"SL/TP por ROI: {operacion.sl_roi_pct}% {sl_tp_price_str}"
+            
+            if target_price is not None:
+                # Caso A: Configurado Y calculable (hay posiciones abiertas)
+                is_sl = operacion.sl_roi_pct is not None and operacion.sl_roi_pct < 0
+                label = "SL" if is_sl else "TP"
+                color_code = "\033[91m" if is_sl else "\033[92m"
+                
+                roi_pct_target = operacion.sl_roi_pct
+                if getattr(operacion, 'dynamic_roi_sl_enabled', False):
+                    roi_pct_target = getattr(operacion, 'realized_twrr_roi', 0) - (getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0)
+                    label += " DINÁMICO"
 
+                sl_roi_str = f"Precio Obj. {label} por ROI: {color_code}${target_price:.4f}{reset} ({roi_pct_target:.2f}%)"
+            else:
+                # Caso B: Configurado PERO NO calculable (sin posiciones abiertas)
+                sl_roi_str = "SL/TP por ROI: Pendiente (esperando 1ra posición)"
+        
+        # Si no está configurado, se mantiene el valor por defecto "Desactivado".
+        
         print(_create_box_line(f"  - {sl_roi_str}", box_width))
-        # --- FIN DE LA CORRECCIÓN ---
+        # --- FIN DE LA MODIFICACIÓN ---
 
         tsl_roi_str = "TSL por ROI: Desactivado"
         if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
@@ -368,3 +406,7 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
