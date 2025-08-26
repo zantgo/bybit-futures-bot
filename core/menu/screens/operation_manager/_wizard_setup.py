@@ -272,7 +272,10 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     params_changed = True
 
                 prompt_text = f"Nueva Distancia de Promediación para {side.upper()} (%)"
-                temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.0, is_optional=True)
+                
+                # LÍNEA CORREGIDA
+                temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.01, is_optional=False)
+
                 params_changed = True
 
                 reinvest_menu_title = "\n¿Activar Reinversión Automática de Ganancias?"
