@@ -183,13 +183,27 @@ class Operacion:
         # 5. Calcular el ROI final.
         return (total_return_factor - 1) * 100
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
-        Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado.
-        Devuelve None si no hay SL/TP por ROI configurado o si no se puede calcular.
+        Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado,
+        considerando tanto el modo manual como el dinámico.
         """
-        if self.sl_roi_pct is None:
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 1. Determinar el ROI objetivo actual, considerando el modo dinámico.
+        sl_roi_pct_target = self.sl_roi_pct
+        if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
+            # Calcula el objetivo dinámico basado en el ROI realizado
+            sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl_trail_pct
+
+        # Si después de comprobar ambos modos no hay un objetivo, no hay nada que calcular.
+        # if self.sl_roi_pct is None: # <-- LÍNEA ORIGINAL ELIMINADA
+        if sl_roi_pct_target is None: # <-- LÍNEA NUEVA
             return None
+        # --- FIN DE LA MODIFICACIÓN ---
 
         open_positions = self.posiciones_abiertas
         if not open_positions:
@@ -200,12 +214,15 @@ class Operacion:
         total_value = sum(pos.entry_price * pos.size_contracts for pos in open_positions if pos.entry_price is not None and pos.size_contracts is not None)
         avg_entry_price = safe_division(total_value, total_size)
 
-        if total_size == 0:
+        if total_size <= 1e-12: # Se cambia la comparación de '== 0' a '<= 1e-12' para seguridad con floats
             return None
 
         # Calcular el PNL no realizado necesario para alcanzar el ROI objetivo
         base_capital = self.capital_inicial_usdt # TWRR no se puede invertir fácilmente para el precio
-        pnl_target = (self.sl_roi_pct / 100) * base_capital
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # pnl_target = (self.sl_roi_pct / 100) * base_capital # <-- LÍNEA ORIGINAL ELIMINADA
+        pnl_target = (sl_roi_pct_target / 100) * base_capital # <-- LÍNEA NUEVA (Usa el objetivo dinámico/fijo)
+        # --- FIN DE LA MODIFICACIÓN ---
         unrealized_pnl_needed = pnl_target - self.pnl_realizado_usdt
 
         # Calcular el precio objetivo
@@ -218,6 +235,9 @@ class Operacion:
             
         return target_price if target_price > 0 else None
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
     def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
         """
         Calcula y devuelve las métricas de rendimiento "en vivo" que dependen

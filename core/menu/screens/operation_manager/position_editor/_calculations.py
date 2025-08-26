@@ -20,11 +20,20 @@ except ImportError:
 
 # --- Función de Cálculo Base ---
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def calculate_avg_entry_and_liquidation(
     positions: List[LogicalPosition], 
     leverage: float, 
     side: str
 ) -> Dict[str, Optional[float]]:
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Importamos la función de cálculo de bajo nivel que YA está corregida
+    from core.strategy.pm._calculations import calculate_liquidation_price
+    # --- FIN DE LA CORRECCIÓN ---
+    
     if not positions:
         return {'avg_entry_price': None, 'liquidation_price': None}
 
@@ -39,16 +48,19 @@ def calculate_avg_entry_and_liquidation(
     if not avg_entry_price or avg_entry_price <= 0:
         return {'avg_entry_price': avg_entry_price, 'liquidation_price': None}
     
-    maintenance_margin_rate = 0.005
-    if side == 'long':
-        liquidation_price = avg_entry_price * (1 - (1 / leverage) + maintenance_margin_rate)
-    else:
-        liquidation_price = avg_entry_price * (1 + (1 / leverage) - maintenance_margin_rate)
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Ahora llamamos a la función central y corregida para el cálculo final
+    liquidation_price = calculate_liquidation_price(side, avg_entry_price, leverage)
+    # --- FIN DE LA CORRECCIÓN ---
 
     return {
         'avg_entry_price': avg_entry_price,
-        'liquidation_price': max(0, liquidation_price)
+        'liquidation_price': liquidation_price
     }
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # --- Funciones de Simulación y Cobertura (Corregidas) ---
 
@@ -134,6 +146,7 @@ def simulate_max_positions(
     max_coverage_pct = abs(((start_price - final_price) / start_price) * 100)
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
+
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
@@ -153,6 +166,7 @@ def calculate_projected_risk_metrics(
     pending_positions = [p for p in all_positions if p.estado == 'PENDIENTE']
     
     # --- 1. Cálculo de Métricas ACTUALES (solo con posiciones abiertas) ---
+    # AHORA USA LA FUNCIÓN calculate_avg_entry_and_liquidation QUE A SU VEZ USA LA FÓRMULA CORREGIDA
     live_metrics = calculate_avg_entry_and_liquidation(open_positions, leverage, side)
 
     # --- 2. Determinación del Punto de Partida para la Simulación ---
@@ -185,6 +199,7 @@ def calculate_projected_risk_metrics(
     sim_avg_price = utils.safe_division(sim_total_value, sim_total_size)
     
     # --- 5. Cálculo de Métricas de Riesgo Proyectado ---
+    # AHORA USA LA FUNCIÓN calculate_avg_entry_and_liquidation QUE A SU VEZ USA LA FÓRMULA CORREGIDA
     projected_liq_metrics = calculate_avg_entry_and_liquidation(
         [LogicalPosition('proj', 0, entry_price=sim_avg_price, size_contracts=sim_total_size)], leverage, side)
     projected_liq_price = projected_liq_metrics.get('liquidation_price')
@@ -226,7 +241,6 @@ def calculate_projected_risk_metrics(
         'avg_entry_price_actual': live_metrics['avg_entry_price'],
         'liquidation_price_actual': live_metrics['liquidation_price'],
         'roi_sl_tp_target_price_actual': operacion.get_roi_sl_tp_price(),
-        
         'projected_liquidation_price': projected_liq_price,
         'projected_roi_target_price': projected_roi_target_price,
         'liquidation_distance_pct': liquidation_distance_pct,
