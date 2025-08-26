@@ -134,23 +134,18 @@ def simulate_max_positions(
     max_coverage_pct = abs(((start_price - final_price) / start_price) * 100)
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
-
-# --- Función Orquestadora Principal (Corregida) ---
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
-# --- Función Orquestadora Principal (Corregida Y AMPLIADA) ---
+# --- Función Orquestadora Principal (COMPLETA, CORREGIDA Y MEJORADA) ---
 
 def calculate_projected_risk_metrics(
     operacion: 'Operacion',
     current_market_price: float,
     side: str
 ) -> Dict[str, Optional[float]]:
-    # --- INICIO DE LA MODIFICACIÓN: Importación local de la nueva función ---
-    # Importamos el módulo completo para acceder a AMBAS calculadoras.
     from core.strategy.pm import _calculations as pm_calculations
-    # --- FIN DE LA MODIFICACIÓN ---
 
     all_positions = operacion.posiciones
     leverage = operacion.apalancamiento
@@ -159,34 +154,45 @@ def calculate_projected_risk_metrics(
     open_positions = [p for p in all_positions if p.estado == 'ABIERTA']
     pending_positions = [p for p in all_positions if p.estado == 'PENDIENTE']
     
+    # --- 1. Cálculo de Métricas ACTUALES (solo con posiciones abiertas) ---
     live_metrics = calculate_avg_entry_and_liquidation(open_positions, leverage, side)
 
+    # --- 2. Determinación del Punto de Partida para la Simulación ---
     if open_positions:
-        last_real_entry_price = max(p.entry_price for p in open_positions) if side == 'short' else min(p.entry_price for p in open_positions)
+        valid_prices = [p.entry_price for p in open_positions if p.entry_price is not None]
+        if valid_prices:
+            if side == 'long':
+                start_price_for_simulation = min(valid_prices)
+            else: # 'short'
+                start_price_for_simulation = max(valid_prices)
+        else:
+            start_price_for_simulation = current_market_price
     else:
-        last_real_entry_price = current_market_price
+        start_price_for_simulation = current_market_price
 
-    coverage_metrics = calculate_coverage_metrics(pending_positions, distance_pct, last_real_entry_price, side)
+    # --- 3. Cálculo de Métricas de Cobertura ---
+    coverage_metrics = calculate_coverage_metrics(
+        pending_positions, distance_pct, start_price_for_simulation, side
+    )
 
+    # --- 4. Simulación de Agregados Proyectados (abiertas + pendientes) ---
     sim_total_value = sum(p.size_contracts * p.entry_price for p in open_positions if p.size_contracts and p.entry_price)
     sim_total_size = sum(p.size_contracts for p in open_positions if p.size_contracts)
-    
-    last_simulated_price = last_real_entry_price
+    last_simulated_price = start_price_for_simulation
 
     if distance_pct is not None and distance_pct > 0:
         for pos in pending_positions:
             next_entry_price = last_simulated_price * (1 - distance_pct / 100) if side == 'long' else last_simulated_price * (1 + distance_pct / 100)
-            
             size = utils.safe_division(pos.capital_asignado * leverage, next_entry_price)
             if size <= 0: continue
             
             sim_total_value += next_entry_price * size
             sim_total_size += size
-            
             last_simulated_price = next_entry_price
     
     sim_avg_price = utils.safe_division(sim_total_value, sim_total_size)
-
+    
+    # --- 5. Cálculo de Métricas de Riesgo Proyectado ---
     projected_liq_metrics = calculate_avg_entry_and_liquidation(
         [LogicalPosition('proj', 0, entry_price=sim_avg_price, size_contracts=sim_total_size)], leverage, side)
     projected_liq_price = projected_liq_metrics.get('liquidation_price')
@@ -197,26 +203,15 @@ def calculate_projected_risk_metrics(
             liquidation_distance_pct = ((current_market_price - projected_liq_price) / current_market_price) * 100
         else:
             liquidation_distance_pct = ((projected_liq_price - current_market_price) / current_market_price) * 100
-    
-    avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
-    
-    max_sim_metrics = {}
-    if distance_pct is not None and distance_pct > 0:
-        max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
 
-    # --- INICIO DE LA MODIFICACIÓN: Llamada a la nueva función de cálculo de ROI ---
-    # Se reemplaza la llamada a get_roi_sl_tp_price() por la nueva función de simulación.
+    # --- 6. Cálculo del Precio Objetivo de ROI Proyectado ---
     projected_roi_target_price = None
-    
-    # Primero, determinamos el ROI objetivo. Consideramos el modo dinámico primero.
     sl_roi_pct_target = operacion.sl_roi_pct
     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
         sl_roi_pct_target = operacion.realized_twrr_roi - operacion.dynamic_roi_sl_trail_pct
         
     if sl_roi_pct_target is not None:
-        # Convertimos los objetos a diccionarios para la función de cálculo
         all_positions_dicts = [p.__dict__ for p in all_positions]
-        
         projected_roi_target_price = pm_calculations.calculate_projected_roi_target_price(
             all_positions=all_positions_dicts,
             capital_inicial_usdt=operacion.capital_inicial_usdt,
@@ -225,21 +220,33 @@ def calculate_projected_risk_metrics(
             leverage=operacion.apalancamiento,
             distance_pct=operacion.averaging_distance_pct,
             side=side,
-            last_real_entry_price=last_real_entry_price
+            last_real_entry_price=start_price_for_simulation
         )
-    # --- FIN DE LA MODIFICACIÓN ---
+    
+    # --- 7. Simulación de Cobertura Máxima Teórica ---
+    avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
+    max_sim_metrics = {}
+    if distance_pct is not None and distance_pct > 0:
+        max_sim_metrics = simulate_max_positions(leverage, current_market_price, avg_capital, distance_pct, side)
 
+    # --- 8. Ensamblaje del Diccionario Final de Métricas ---
     final_metrics = {
-        'avg_entry_price': live_metrics['avg_entry_price'],
-        'liquidation_price': live_metrics['liquidation_price'],
-        'total_capital_at_risk': sum(p.capital_asignado for p in all_positions),
+        # Métricas Actuales
+        'avg_entry_price_actual': live_metrics['avg_entry_price'],
+        'liquidation_price_actual': live_metrics['liquidation_price'],
+        'roi_sl_tp_target_price_actual': operacion.get_roi_sl_tp_price(),
+        
+        # Métricas Proyectadas
         'projected_avg_price': sim_avg_price,
         'projected_liquidation_price': projected_liq_price,
         'liquidation_distance_pct': liquidation_distance_pct,
-        # --- INICIO DE LA MODIFICACIÓN: Usar el nuevo valor calculado ---
-        'roi_sl_tp_target_price': projected_roi_target_price,
-        # --- FIN DE LA MODIFICACIÓN ---
+        'projected_roi_target_price': projected_roi_target_price,
+
+        # Métricas de Capital y Cobertura
+        'total_capital_at_risk': sum(p.capital_asignado for p in all_positions),
     }
+    
+    # Añadir las métricas de los otros cálculos
     final_metrics.update(coverage_metrics)
     final_metrics.update(max_sim_metrics)
     

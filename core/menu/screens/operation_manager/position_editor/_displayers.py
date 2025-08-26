@@ -110,90 +110,91 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-# =============================================================================
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
-    current_market_price: float,
-    side: str,
-    operacion: Operacion
+    operacion: Operacion,
+    side: str
 ):
     """
-    Muestra el panel unificado de cobertura y riesgo estratégico.
+    Muestra el panel unificado de cobertura y riesgo estratégico, distinguiendo
+    entre el estado actual y la proyección de la estrategia completa.
     """
     box_width = _get_terminal_width() - 4
     
-    avg_price_str = f"{metrics.get('avg_entry_price'):.4f} USDT" if metrics.get('avg_entry_price') else "N/A"
-    liq_price_str = f"{metrics.get('liquidation_price'):.4f} USDT" if metrics.get('liquidation_price') else "N/A"
-    total_capital_str = f"${metrics.get('total_capital_at_risk', 0.0):.2f} USDT"
-    
-    coverage_pct = metrics.get('coverage_pct', 0.0)
-    range_start = metrics.get('covered_price_range_start')
-    range_end = metrics.get('covered_price_range_end')
-    direction = "caída" if side == 'long' else "subida"
-    coverage_str = f"{coverage_pct:.2f}% de {direction}"
-    if range_start and range_end:
-        coverage_str += f" (de {range_start:,.2f} a {range_end:,.2f})"
+    # --- 1. Extracción y Formateo de Métricas ACTUALES ---
+    avg_price_actual_str = f"${metrics.get('avg_entry_price_actual'):.4f}" if metrics.get('avg_entry_price_actual') else "N/A"
+    liq_price_actual_str = f"${metrics.get('liquidation_price_actual'):.4f}" if metrics.get('liquidation_price_actual') else "N/A"
+    roi_price_actual = metrics.get('roi_sl_tp_target_price_actual')
+    roi_price_actual_str = f"${roi_price_actual:.4f}" if roi_price_actual else "N/A (Esperando 1ra pos.)"
 
-    proj_liq_price_str = f"{metrics.get('projected_liquidation_price'):.4f} USDT" if metrics.get('projected_liquidation_price') else "N/A"
+    # --- 2. Extracción y Formateo de Métricas PROYECTADAS ---
+    liq_price_proj_str = f"${metrics.get('projected_liquidation_price'):.4f}" if metrics.get('projected_liquidation_price') else "N/A"
+    roi_price_proj = metrics.get('projected_roi_target_price')
+    roi_price_proj_str = "N/A" # Default
     
-    liq_dist_pct = metrics.get('liquidation_distance_pct')
-    liq_dist_pct_str = "N/A"
-    if liq_dist_pct is not None:
-        color = "\033[91m"
-        if liq_dist_pct > 50: color = "\033[92m"
-        elif liq_dist_pct > 20: color = "\033[93m"
-        liq_dist_pct_str = f"{color}{liq_dist_pct:.2f}% de margen de {direction}\033[0m"
-
-    max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
-    max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
-    
-    # --- INICIO DE LA LÓGICA CORREGIDA ---
+    # Lógica de formato para el precio objetivo de ROI Proyectado
     is_sl_roi_configured = (
         getattr(operacion, 'sl_roi_pct') is not None or
         getattr(operacion, 'dynamic_roi_sl_enabled', False)
     )
-
-    roi_target_price_str = "N/A (ROI SL/TP desactivado)"
-
     if is_sl_roi_configured:
-        roi_target_price = metrics.get('roi_sl_tp_target_price')
+        if roi_price_proj is not None:
+             roi_price_proj_str = f"${roi_price_proj:.4f}"
+        else:
+            # Si está configurado pero no se puede calcular (caso raro, ej. capital 0)
+             roi_price_proj_str = "Error de cálculo"
+    else:
+        roi_price_proj_str = "N/A (ROI SL/TP desactivado)"
         
-        # Determinar si es SL o TP para el color
-        sl_roi_pct_target = operacion.sl_roi_pct
-        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
-            sl_roi_pct_target = (getattr(operacion, 'realized_twrr_roi', 0) - 
-                                 (getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0))
+    # --- 3. Formateo de Otras Métricas (Cobertura, Simulación, etc.) ---
+    total_capital_str = f"${metrics.get('total_capital_at_risk', 0.0):.2f} USDT"
+    direction = "caída" if side == 'long' else "subida"
+    
+    coverage_pct = metrics.get('coverage_pct', 0.0)
+    range_start = metrics.get('covered_price_range_start')
+    range_end = metrics.get('covered_price_range_end')
+    coverage_str = f"{coverage_pct:.2f}% de {direction}"
+    if range_start and range_end:
+        coverage_str += f" (de {range_start:,.2f} a {range_end:,.2f})"
 
-        color_code = "\033[91m" if (sl_roi_pct_target or 0) < 0 else "\033[92m"
-        reset_code = "\033[0m"
-        
-        roi_target_price_str = (f"{color_code}${roi_target_price:.4f} USDT{reset_code}" 
-                                if roi_target_price is not None else "Pendiente (esperando 1ra posición)")
-    # --- FIN DE LA LÓGICA CORREGIDA ---
+    liq_dist_pct = metrics.get('liquidation_distance_pct')
+    liq_dist_pct_str = "N/A"
+    if liq_dist_pct is not None:
+        color_dist = "\033[91m"
+        if liq_dist_pct > 50: color_dist = "\033[92m"
+        elif liq_dist_pct > 20: color_dist = "\033[93m"
+        liq_dist_pct_str = f"{color_dist}{liq_dist_pct:.2f}% de margen de {direction}\033[0m"
 
+    max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
+    max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
+    
+    # --- 4. Coloreado para etiquetas de riesgo ---
+    is_sl = (operacion.sl_roi_pct or 0) < 0
+    label = "SL" if is_sl else "TP"
+    color_code = "\033[91m" if is_sl else "\033[92m"
+    reset_code = "\033[0m"
+
+    # --- 5. Renderizado del Panel ---
     print("\n┌" + "─" * box_width + "┐")
-    print(_create_box_line("Panel de Cobertura y Riesgo Estratégico", box_width + 2, 'center'))
+    print(_create_box_line("Panel de Riesgo: Realidad vs. Proyección", box_width + 2, 'center'))
     
     print("├" + "─" * box_width + "┤")
-    print(_create_box_line(f"\033[96m--- ESTADO ACTUAL (con posiciones abiertas) ---\033[0m", box_width + 2))
-    print(_create_box_line(f"  Precio Promedio Actual      : {avg_price_str}", box_width + 2))
-    print(_create_box_line(f"  Precio Liquidación Actual   : {liq_price_str}", box_width + 2))
+    print(_create_box_line(f"\033[96m--- RIESGO ACTUAL (Solo Posiciones Abiertas) ---\033[0m", box_width + 2))
+    print(_create_box_line(f"  Precio Promedio             : {avg_price_actual_str}", box_width + 2))
+    print(_create_box_line(f"  Precio Liquidación          : {color_code}{liq_price_actual_str}{reset_code}", box_width + 2))
+    print(_create_box_line(f"  Precio Obj. {label} por ROI : {color_code}{roi_price_actual_str}{reset_code}", box_width + 2))
 
     print("├" + "─" * box_width + "┤")
-    print(_create_box_line(f"\033[96m--- PROYECCIÓN (con todas las posiciones) ---\033[0m", box_width + 2))
+    print(_create_box_line(f"\033[96m--- RIESGO PROYECTADO (Todas las Posiciones) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Capital Total en Juego      : {total_capital_str}", box_width + 2))
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
-    print(_create_box_line(f"  Precio Liq. Proyectado      : {proj_liq_price_str}", box_width + 2))
+    print(_create_box_line(f"  Precio Liq. Proyectado      : {color_code}{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
-    print(_create_box_line(f"  Precio Obj. SL/TP por ROI   : {roi_target_price_str}", box_width + 2))
+    print(_create_box_line(f"  Precio Obj. {label} por ROI Proyectado: {color_code}{roi_price_proj_str}{reset_code}", box_width + 2))
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -202,9 +203,6 @@ def display_risk_panel(
 
     print("└" + "─" * box_width + "┘")
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
