@@ -89,12 +89,6 @@ def display_positions_table(operacion: Operacion, current_market_price: float, s
 
     print("└" + "─" * box_width + "┘")
 
-
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
-# ==============================================================================
-
 def display_strategy_parameters(operacion: Operacion):
     """
     Muestra un cuadro con los parámetros estratégicos clave.
@@ -122,12 +116,12 @@ def display_strategy_parameters(operacion: Operacion):
     print("└" + "─" * box_width + "┘")
 
 # ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
-    current_market_price: float, # <-- Se vuelve a añadir para corregir la firma
+    current_market_price: float,
     side: str,
     operacion: Operacion
 ):
@@ -179,8 +173,11 @@ def display_risk_panel(
         elif liq_dist_pct > 20: color_dist = "\033[93m"
         liq_dist_pct_str = f"{color_dist}{liq_dist_pct:.2f}% de margen de {direction}\033[0m"
 
+    # --- INICIO DE LA PARTE RESTAURADA ---
+    # Estas líneas se habían omitido en la versión anterior.
     max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
     max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
+    # --- FIN DE LA PARTE RESTAURADA ---
     
     # --- 4. Coloreado para etiquetas de riesgo ---
     is_sl = (operacion.sl_roi_pct or 0) < 0
@@ -206,10 +203,13 @@ def display_risk_panel(
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
     print(_create_box_line(f"  Precio Obj. {label} por ROI Proyectado: {color_code}{roi_price_proj_str}{reset_code}", box_width + 2))
     
+    # --- INICIO DE LA PARTE RESTAURADA ---
+    # Estas líneas se habían omitido en la versión anterior.
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
     print(_create_box_line(f"  Posiciones Máximas Seguras  : {max_pos_str}", box_width + 2))
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
+    # --- FIN DE LA PARTE RESTAURADA ---
 
     print("└" + "─" * box_width + "┘")
 

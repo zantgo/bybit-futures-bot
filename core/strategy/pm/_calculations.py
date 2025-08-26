@@ -87,33 +87,47 @@ def calculate_stop_loss(side: str, entry_price: float, sl_pct: float) -> Optiona
         memory_logger.log(f"ERROR [Calc SL]: Excepción calculando SL: {e}", level="ERROR")
         return None
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def calculate_liquidation_price(side: str, avg_entry_price: float, leverage: float) -> Optional[float]:
     """
-    Estima el precio de liquidación (aproximación simple margen aislado).
+    Estima el precio de liquidación usando la fórmula de Bybit para margen aislado.
     """
     if not isinstance(avg_entry_price, (int, float)) or not np.isfinite(avg_entry_price) or avg_entry_price <= 0:
         return None
     if not isinstance(leverage, (int, float)) or not np.isfinite(leverage) or leverage <= 0:
         return None
     
-    # El margen de mantenimiento mínimo varía por exchange, usamos una aproximación
-    mmr_approx = 0.005 
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se lee la tasa de margen de mantenimiento desde la configuración para mayor precisión.
+    # Si no se encuentra, se usa un fallback seguro.
+    mmr = config.PRECISION_FALLBACKS.get("MAINTENANCE_MARGIN_RATE", 0.005) 
+    
     try:
-        if leverage == 0:
-            return None
-        leverage_inv = 1.0 / leverage
+        initial_margin_rate = 1.0 / leverage
+        
         if side == 'long':
-            factor = 1.0 - leverage_inv + mmr_approx
+            # Fórmula Oficial Bybit (simplificada): PrecioEntrada * (1 - TasaMargenInicial + TasaMargenMantenimiento)
+            factor = 1 - initial_margin_rate + mmr
             liq_price = avg_entry_price * factor
-            return max(0.0, liq_price)
         elif side == 'short':
-            factor = 1.0 + leverage_inv - mmr_approx
+            # Fórmula Oficial Bybit (simplificada): PrecioEntrada * (1 + TasaMargenInicial - TasaMargenMantenimiento)
+            factor = 1 + initial_margin_rate - mmr
             liq_price = avg_entry_price * factor
-            return liq_price
         else:
             return None
+            
+        return max(0.0, liq_price)
+        
     except (ZeroDivisionError, TypeError, ValueError):
         return None
+    # --- FIN DE LA CORRECCIÓN ---
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 def calculate_pnl_commission_reinvestment(side: str, entry_price: float, exit_price: float, size_contracts: float) -> Dict[str, float]:
     """
@@ -206,14 +220,6 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
         'total_margin_usdt': float(total_margin)
     }
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
 def calculate_aggregate_liquidation_price(
     open_positions: List[Any], # Acepta objetos LogicalPosition
     leverage: float,
@@ -251,14 +257,6 @@ def calculate_aggregate_liquidation_price(
         return None
 
     return calculate_liquidation_price(side, avg_entry_price, leverage)
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
 def calculate_projected_roi_target_price(
     all_positions: List[Dict[str, Any]],
