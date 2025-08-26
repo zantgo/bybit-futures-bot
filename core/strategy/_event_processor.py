@@ -1,3 +1,7 @@
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Archivo Completo) ---
+# ==============================================================================
+
 """
 Orquestador Principal del Procesamiento de Eventos.
 """
@@ -43,6 +47,7 @@ class EventProcessor:
         """
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
+        self._exchange_adapter = dependencies.get('exchange_adapter') # <--- MODIFICACIÓN: Añadir adaptador
         self._memory_logger = dependencies.get('memory_logger_module')
         self._signal_logger = dependencies.get('signal_logger_module')
         self._pm_api = dependencies.get('position_manager_api_module')
@@ -104,14 +109,42 @@ class EventProcessor:
             self._memory_logger.log(f"Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}", level="WARN")
             return
 
+        # --- INICIO DE LA MODIFICACIÓN: Integración del Heartbeat de Sincronización ---
+
+        # # --- CÓDIGO ORIGINAL COMENTADO ---
+        # try:
+        #     # 1. Comprobar Triggers de la Operación (lógica de activación/desactivación automática)
+        #     self._check_operation_triggers(current_price)
+        #
+        #     # 2. Procesar datos y generar señal de bajo nivel
+        #     signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
+        #     
+        #     # 3. Interacción con el Position Manager
+        #     if self._pm_instance:
+        #         self._pm_instance.check_and_close_positions(current_price, current_timestamp)
+        #         self._pm_instance.handle_low_level_signal(
+        #             signal=signal_data.get("signal", "HOLD"),
+        #             entry_price=current_price,
+        #             timestamp=current_timestamp
+        #         )
+        #
+        # except Exception as e:
+        #     self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
+        #     self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+
+        # --- CÓDIGO NUEVO Y CORREGIDO ---
         try:
-            # 1. Comprobar Triggers de la Operación (lógica de activación/desactivación automática)
+            # 1. Comprobar la existencia física de las posiciones ANTES de cualquier otra lógica.
+            self._check_physical_position_existence()
+
+            # 2. Comprobar Triggers de la Operación (lógica predictiva de liquidación, SL/TP, etc.)
             self._check_operation_triggers(current_price)
 
-            # 2. Procesar datos y generar señal de bajo nivel
+            # 3. Procesar datos y generar señal de bajo nivel
             signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
             
-            # 3. Interacción con el Position Manager
+            # 4. Interacción con el Position Manager
             if self._pm_instance:
                 self._pm_instance.check_and_close_positions(current_price, current_timestamp)
                 self._pm_instance.handle_low_level_signal(
@@ -123,10 +156,8 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
+        # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def _check_operation_triggers(self, current_price: float):
         """
@@ -144,20 +175,14 @@ class EventProcessor:
                 if not operacion:
                     continue
 
-                # --- INICIO DE LA NUEVA FUNCIONALIDAD: DETECCIÓN DE LIQUIDACIÓN ---
-                # Esta es la comprobación de mayor prioridad. Si se detecta una
-                # liquidación, se detiene todo para este lado y se continúa con el otro.
+                # --- Lógica predictiva de liquidación ---
                 if operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
-                    
-                    # Convertimos los objetos LogicalPosition a diccionarios para la función de cálculo
                     open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
-                    
                     estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
                         open_positions=open_positions_dicts,
                         leverage=operacion.apalancamiento,
                         side=side
                     )
-
                     if estimated_liq_price is not None:
                         liquidation_triggered = False
                         if side == 'long' and current_price <= estimated_liq_price:
@@ -171,13 +196,10 @@ class EventProcessor:
                                 f"agregado ({estimated_liq_price:.4f})"
                             )
                             self._memory_logger.log(reason, "ERROR")
-                            # Llamamos al nuevo manejador de eventos de liquidación en la API del OM
                             self._om_api.handle_liquidation_event(side, reason)
-                            continue # Detener el procesamiento para este lado y pasar al siguiente
-                # --- FIN DE LA NUEVA FUNCIONALIDAD ---
+                            continue
 
-
-                # 1. Lógica de ENTRADA (solo aplica si está EN_ESPERA)
+                # --- Lógica de ENTRADA ---
                 if operacion.estado == 'EN_ESPERA':
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
@@ -189,9 +211,8 @@ class EventProcessor:
                         elif cond_type == 'PRICE_BELOW' and current_price < cond_value: entry_condition_met = True
                     if entry_condition_met: self._om_api.activar_por_condicion(side)
 
-                # 2. Lógica de SALIDA y GESTIÓN (aplica a todos los estados activos o pausados)
+                # --- Lógica de SALIDA y GESTIÓN ---
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
-                    
                     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
                         realized_roi = operacion.realized_twrr_roi
                         operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
@@ -202,7 +223,6 @@ class EventProcessor:
                     risk_condition_met = False
                     risk_reason = ""
 
-                    # 2.1 Chequear condiciones de RIESGO
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
                     
@@ -247,9 +267,8 @@ class EventProcessor:
                         else:
                             self._om_api.pausar_operacion(side, reason=risk_reason)
                         
-                        continue # Pasar al siguiente lado
+                        continue
 
-                    # 2.2 Chequear Límites y Condiciones de Salida (acción configurable)
                     exit_condition_met = False
                     exit_reason = ""
                     if not risk_condition_met:
@@ -278,9 +297,6 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y
@@ -309,3 +325,48 @@ class EventProcessor:
         
         self._previous_raw_event_price = price
         return signal_data
+
+    # --- INICIO DE LA NUEVA FUNCIONALIDAD: Heartbeat de Sincronización ---
+    def _check_physical_position_existence(self):
+        """
+        Comprueba si las posiciones que el bot cree que están abiertas realmente
+        existen en el exchange. Si no, asume una liquidación o cierre externo.
+        """
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            return # No hacer nada en modo de simulación
+
+        # --- MODIFICACIÓN: Asegurar que el adaptador de exchange esté disponible ---
+        if not self._exchange_adapter:
+            self._memory_logger.log("WARN [Sync Check]: Adaptador de exchange no disponible, no se puede sincronizar.", "WARN")
+            return
+        # --- FIN DE LA MODIFICACIÓN ---
+
+        for side in ['long', 'short']:
+            operacion = self._om_api.get_operation_by_side(side)
+            
+            # Solo actuar si el bot cree que hay posiciones abiertas en una operación activa
+            if operacion and operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
+                
+                # Hacemos la llamada a la API a través del adaptador
+                account_purpose = 'longs' if side == 'long' else 'shorts'
+                physical_positions = self._exchange_adapter.get_positions(
+                    symbol=self._config.BOT_CONFIG["TICKER"]["SYMBOL"],
+                    account_purpose=account_purpose
+                )
+
+                # Si la llamada a la API falla o devuelve una lista vacía, significa que no hay posición
+                if not physical_positions:
+                    reason = (
+                        f"CIERRE INESPERADO DETECTADO ({side.upper()}): "
+                        f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
+                        f"pero no se encontró ninguna en el exchange. Posible liquidación."
+                    )
+                    self._memory_logger.log(reason, "ERROR")
+                    
+                    # Llamamos al manejador de liquidación para resetear el estado
+                    self._om_api.handle_liquidation_event(side, reason)
+    # --- FIN DE LA NUEVA FUNCIONALIDAD ---
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
