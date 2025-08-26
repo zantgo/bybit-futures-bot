@@ -300,9 +300,8 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
-
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def _display_operation_conditions(operacion: Operacion):
@@ -342,40 +341,35 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de visualización mejorada ---
+        # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
+        sl_roi_str = ""
+        # 1. Comprobar si el modo es Dinámico
+        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
+            trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
+            # En modo dinámico, el precio objetivo cambia constantemente, por lo que no lo mostramos.
+            # Mostramos la regla que se está aplicando.
+            sl_roi_str = f"SL/TP por ROI (DINÁMICO): Se activa si ROI cae {trail_pct}% desde ROI Realizado"
         
-        # 1. Determinar si la funcionalidad está configurada por el usuario
-        is_sl_roi_configured = (
-            getattr(operacion, 'sl_roi_pct') is not None or
-            getattr(operacion, 'dynamic_roi_sl_enabled', False)
-        )
-        
-        sl_roi_str = "SL/TP por ROI: Desactivado"
-        
-        if is_sl_roi_configured:
-            # 2. Intentar calcular el precio objetivo
+        # 2. Comprobar si el modo es Manual
+        elif operacion.sl_roi_pct is not None:
             target_price = operacion.get_roi_sl_tp_price()
+            is_sl = operacion.sl_roi_pct < 0
+            label = "SL" if is_sl else "TP"
+            color_code = "\033[91m" if is_sl else "\033[92m"
             
+            # Comprobar si se puede calcular el precio
             if target_price is not None:
-                # Caso A: Configurado Y calculable (hay posiciones abiertas)
-                is_sl = operacion.sl_roi_pct is not None and operacion.sl_roi_pct < 0
-                label = "SL" if is_sl else "TP"
-                color_code = "\033[91m" if is_sl else "\033[92m"
-                
-                roi_pct_target = operacion.sl_roi_pct
-                if getattr(operacion, 'dynamic_roi_sl_enabled', False):
-                    roi_pct_target = getattr(operacion, 'realized_twrr_roi', 0) - (getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0)
-                    label += " DINÁMICO"
-
-                sl_roi_str = f"Precio Obj. {label} por ROI: {color_code}${target_price:.4f}{reset} ({roi_pct_target:.2f}%)"
+                sl_roi_str = (f"Precio Obj. {label} por ROI (MANUAL): "
+                              f"{color_code}${target_price:.4f}{reset} ({operacion.sl_roi_pct}%)")
             else:
-                # Caso B: Configurado PERO NO calculable (sin posiciones abiertas)
-                sl_roi_str = "SL/TP por ROI: Pendiente (esperando 1ra posición)"
+                sl_roi_str = f"SL/TP por ROI (MANUAL): {operacion.sl_roi_pct}% (Esperando 1ra pos.)"
         
-        # Si no está configurado, se mantiene el valor por defecto "Desactivado".
+        # 3. Si no es ni dinámico ni manual, está desactivado.
+        else:
+            sl_roi_str = "SL/TP por ROI: Desactivado"
         
         print(_create_box_line(f"  - {sl_roi_str}", box_width))
-        # --- FIN DE LA MODIFICACIÓN ---
+        # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
         tsl_roi_str = "TSL por ROI: Desactivado"
         if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
