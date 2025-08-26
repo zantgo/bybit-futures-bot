@@ -210,8 +210,12 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def calculate_aggregate_liquidation_price(
-    open_positions: List[Any], # Acepta tanto objetos como diccionarios
+    open_positions: List[Any], # Acepta objetos LogicalPosition
     leverage: float,
     side: str
 ) -> Optional[float]:
@@ -222,30 +226,35 @@ def calculate_aggregate_liquidation_price(
     if not open_positions:
         return None
 
-    valid_positions_data = []
-    for p in open_positions:
-        # Extraer datos de forma segura, ya sea de un objeto o un diccionario
-        entry_price = getattr(p, 'entry_price', p.get('entry_price'))
-        size_contracts = getattr(p, 'size_contracts', p.get('size_contracts'))
-
-        if (isinstance(entry_price, (int, float)) and np.isfinite(entry_price) and
-            isinstance(size_contracts, (int, float)) and np.isfinite(size_contracts) and
-            size_contracts > 1e-12):
-            valid_positions_data.append({'entry_price': entry_price, 'size_contracts': size_contracts})
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Se trabaja directamente con los atributos del objeto LogicalPosition.
+    valid_positions = [
+        p for p in open_positions
+        if (hasattr(p, 'entry_price') and isinstance(p.entry_price, (int, float)) and np.isfinite(p.entry_price) and
+            hasattr(p, 'size_contracts') and isinstance(p.size_contracts, (int, float)) and np.isfinite(p.size_contracts) and
+            p.size_contracts > 1e-12)
+    ]
+    # --- FIN DE LA CORRECCIÓN ---
     
-    if not valid_positions_data:
+    if not valid_positions:
         return None
 
-    total_value = sum(pos['entry_price'] * pos['size_contracts'] for pos in valid_positions_data)
-    total_size = sum(pos['size_contracts'] for pos in valid_positions_data)
+    # --- INICIO DE LA CORRECCIÓN ---
+    # Calcular directamente desde los atributos del objeto.
+    total_value = sum(pos.entry_price * pos.size_contracts for pos in valid_positions)
+    total_size = sum(pos.size_contracts for pos in valid_positions)
+    # --- FIN DE LA CORRECCIÓN ---
 
     avg_entry_price = _utils.safe_division(total_value, total_size)
 
     if not avg_entry_price or avg_entry_price <= 0:
         return None
 
-    # Llamamos a la función de cálculo de liquidación individual que ya es robusta
     return calculate_liquidation_price(side, avg_entry_price, leverage)
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
