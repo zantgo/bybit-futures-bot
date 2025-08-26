@@ -32,6 +32,8 @@ except ImportError:
     disp = None
     class Operacion: pass
     class LogicalPosition: pass
+
+
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
@@ -58,7 +60,12 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
     
     while True:
         clear_screen()
-        print_t_ui_header(f"Editor de Posiciones y Riesgo - {side.upper()}")
+        
+        # --- INICIO DE LA CORRECCIÓN: Corregir el nombre de la función ---
+        # Original: print_t_ui_header(...)
+        # Corregido:
+        print_tui_header(f"Editor de Posiciones y Riesgo - {side.upper()}")
+        # --- FIN DE LA CORRECCIÓN ---
         
         current_price = pm_api.get_current_market_price() or 0.0
 
@@ -71,9 +78,7 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
         disp.display_positions_table(operacion, current_price, side)
         disp.display_strategy_parameters(operacion)
         
-        # --- INICIO DE LA MODIFICACIÓN: Pasar el objeto 'operacion' al displayer ---
         disp.display_risk_panel(risk_metrics, current_price, side, operacion=operacion)
-        # --- FIN DE LA MODIFICACIÓN ---
         
         has_pending = operacion.posiciones_pendientes_count > 0
         has_open = operacion.posiciones_abiertas_count > 0
