@@ -188,16 +188,23 @@ class Operacion:
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función en la clase Operacion) ---
 # ==============================================================================
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única en Operacion) ---
+# ==============================================================================
+
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
         Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado,
         considerando tanto el modo manual como el dinámico, y usando el capital en uso
         como base para el cálculo.
         """
+        # 1. Determinar el ROI objetivo actual, considerando el modo dinámico.
         sl_roi_pct_target = self.sl_roi_pct
         if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
+            # Calcula el objetivo dinámico basado en el ROI realizado
             sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl_trail_pct
 
+        # Si después de comprobar ambos modos no hay un objetivo, no hay nada que calcular.
         if sl_roi_pct_target is None:
             return None
 
@@ -212,19 +219,18 @@ class Operacion:
         total_value = sum(pos.entry_price * pos.size_contracts for pos in open_positions if pos.entry_price is not None and pos.size_contracts is not None)
         avg_entry_price = safe_division(total_value, total_size)
 
-        # --- INICIO DE LA CORRECCIÓN CLAVE ---
-        # La base del ROI para el riesgo actual es el capital de las posiciones abiertas.
+        # --- INICIO DE LA CORRECCIÓN CLAVE: Usar la base de capital correcta ---
+        # La base del ROI para el riesgo actual es el capital de las posiciones abiertas (capital en uso).
         base_capital = self.capital_en_uso
-        if base_capital <= 0: # Prevenir división por cero si no hay capital en uso
+        if base_capital <= 0:
             return None
         # --- FIN DE LA CORRECCIÓN CLAVE ---
             
         pnl_target = (sl_roi_pct_target / 100) * base_capital
         
-        # --- INICIO DE LA CORRECCIÓN CLAVE ---
-        # Para el cálculo del PNL necesario, no consideramos el PNL realizado de
-        # trades anteriores, ya que la base es el capital actual. El objetivo es
-        # una pérdida/ganancia sobre el capital que está AHORA en el mercado.
+        # --- INICIO DE LA CORRECCIÓN CLAVE: Usar solo el PNL objetivo ---
+        # Para el riesgo actual, el PNL realizado de trades pasados es irrelevante.
+        # El objetivo es una ganancia/pérdida sobre el capital que está AHORA en el mercado.
         unrealized_pnl_needed = pnl_target
         # --- FIN DE LA CORRECCIÓN CLAVE ---
 
@@ -236,6 +242,11 @@ class Operacion:
             return None
             
         return target_price if target_price > 0 else None
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
