@@ -183,28 +183,19 @@ class Operacion:
         # 5. Calcular el ROI final.
         return (total_return_factor - 1) * 100
 
-
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función en la clase Operacion) ---
-# ==============================================================================
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única en Operacion) ---
 # ==============================================================================
 
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
         Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado,
-        considerando tanto el modo manual como el dinámico, y usando el capital en uso
-        como base para el cálculo.
+        recalculando el tamaño de la posición basado en el apalancamiento actual.
         """
-        # 1. Determinar el ROI objetivo actual, considerando el modo dinámico.
         sl_roi_pct_target = self.sl_roi_pct
         if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
-            # Calcula el objetivo dinámico basado en el ROI realizado
             sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl_trail_pct
 
-        # Si después de comprobar ambos modos no hay un objetivo, no hay nada que calcular.
         if sl_roi_pct_target is None:
             return None
 
@@ -212,27 +203,29 @@ class Operacion:
         if not open_positions:
             return None
 
-        total_size = sum(pos.size_contracts for pos in open_positions if pos.size_contracts is not None)
+        # --- INICIO DE LA CORRECCIÓN: Recalcular tamaño y promedio ---
+        total_value = 0.0
+        total_size = 0.0
+        for pos in open_positions:
+            if pos.entry_price is None or pos.entry_price <= 0: continue
+            # Recalcula el tamaño usando el apalancamiento actual de la operación
+            size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
+            if size > 0:
+                total_value += pos.entry_price * size
+                total_size += size
+        # --- FIN DE LA CORRECCIÓN ---
+        
         if total_size <= 1e-12:
             return None
             
-        total_value = sum(pos.entry_price * pos.size_contracts for pos in open_positions if pos.entry_price is not None and pos.size_contracts is not None)
         avg_entry_price = safe_division(total_value, total_size)
 
-        # --- INICIO DE LA CORRECCIÓN CLAVE: Usar la base de capital correcta ---
-        # La base del ROI para el riesgo actual es el capital de las posiciones abiertas (capital en uso).
         base_capital = self.capital_en_uso
         if base_capital <= 0:
             return None
-        # --- FIN DE LA CORRECCIÓN CLAVE ---
             
         pnl_target = (sl_roi_pct_target / 100) * base_capital
-        
-        # --- INICIO DE LA CORRECCIÓN CLAVE: Usar solo el PNL objetivo ---
-        # Para el riesgo actual, el PNL realizado de trades pasados es irrelevante.
-        # El objetivo es una ganancia/pérdida sobre el capital que está AHORA en el mercado.
         unrealized_pnl_needed = pnl_target
-        # --- FIN DE LA CORRECCIÓN CLAVE ---
 
         if self.tendencia == 'LONG_ONLY':
             target_price = avg_entry_price + safe_division(unrealized_pnl_needed, total_size)
@@ -246,8 +239,6 @@ class Operacion:
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
-
-
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
