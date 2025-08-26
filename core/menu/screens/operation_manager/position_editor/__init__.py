@@ -32,6 +32,9 @@ except ImportError:
     disp = None
     class Operacion: pass
     class LogicalPosition: pass
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
 
 def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
     """
@@ -55,7 +58,7 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
     
     while True:
         clear_screen()
-        print_tui_header(f"Editor de Posiciones y Riesgo - {side.upper()}")
+        print_t_ui_header(f"Editor de Posiciones y Riesgo - {side.upper()}")
         
         current_price = pm_api.get_current_market_price() or 0.0
 
@@ -65,12 +68,12 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
             side
         )
 
-        # Se pasa el precio actual a la tabla para calcular PNL y ROI.
         disp.display_positions_table(operacion, current_price, side)
-        # Se llama a la función para mostrar el cuadro de parámetros.
         disp.display_strategy_parameters(operacion)
         
-        disp.display_risk_panel(risk_metrics, current_price, side)
+        # --- INICIO DE LA MODIFICACIÓN: Pasar el objeto 'operacion' al displayer ---
+        disp.display_risk_panel(risk_metrics, current_price, side, operacion=operacion)
+        # --- FIN DE LA MODIFICACIÓN ---
         
         has_pending = operacion.posiciones_pendientes_count > 0
         has_open = operacion.posiciones_abiertas_count > 0
@@ -140,16 +143,15 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
                     success, msg = pm_api.manual_close_logical_position_by_index(side, idx_to_close)
                     print(f"\nResultado: {msg}"); time.sleep(2.5)
                     if success:
-                        # Refrescamos el objeto operacion para reflejar el cierre
                         temp_op_refreshed = om_api.get_operation_by_side(side)
                         if temp_op_refreshed:
                             operacion.posiciones = temp_op_refreshed.posiciones
                         params_changed = True
 
-            elif choice == 6: # Guardar Cambios y Volver
+            elif choice == 6:
                 return params_changed
 
-            elif choice == 7 or choice is None: # Cancelar y Volver
+            elif choice == 7 or choice is None:
                 operacion.posiciones = original_positions_state
                 print("\nCambios descartados.")
                 time.sleep(1.5)
@@ -157,3 +159,7 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================

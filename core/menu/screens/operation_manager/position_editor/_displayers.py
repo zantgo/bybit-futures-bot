@@ -110,14 +110,20 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+# =============================================================================
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
-    side: str
+    side: str,
+    operacion: Operacion
 ):
     """
     Muestra el panel unificado de cobertura y riesgo estratégico.
@@ -149,11 +155,29 @@ def display_risk_panel(
     max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
     max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
     
-    # --- INICIO DE LA MODIFICACIÓN: Formatear el nuevo dato ---
-    # Obtenemos y formateamos el precio objetivo de SL/TP por ROI desde el diccionario de métricas
-    roi_target_price = metrics.get('roi_sl_tp_target_price')
-    roi_target_price_str = f"{roi_target_price:.4f} USDT" if roi_target_price is not None else "N/A (ROI SL/TP desactivado)"
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- INICIO DE LA LÓGICA CORREGIDA ---
+    is_sl_roi_configured = (
+        getattr(operacion, 'sl_roi_pct') is not None or
+        getattr(operacion, 'dynamic_roi_sl_enabled', False)
+    )
+
+    roi_target_price_str = "N/A (ROI SL/TP desactivado)"
+
+    if is_sl_roi_configured:
+        roi_target_price = metrics.get('roi_sl_tp_target_price')
+        
+        # Determinar si es SL o TP para el color
+        sl_roi_pct_target = operacion.sl_roi_pct
+        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
+            sl_roi_pct_target = (getattr(operacion, 'realized_twrr_roi', 0) - 
+                                 (getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0))
+
+        color_code = "\033[91m" if (sl_roi_pct_target or 0) < 0 else "\033[92m"
+        reset_code = "\033[0m"
+        
+        roi_target_price_str = (f"{color_code}${roi_target_price:.4f} USDT{reset_code}" 
+                                if roi_target_price is not None else "Pendiente (esperando 1ra posición)")
+    # --- FIN DE LA LÓGICA CORREGIDA ---
 
     print("\n┌" + "─" * box_width + "┐")
     print(_create_box_line("Panel de Cobertura y Riesgo Estratégico", box_width + 2, 'center'))
@@ -164,15 +188,12 @@ def display_risk_panel(
     print(_create_box_line(f"  Precio Liquidación Actual   : {liq_price_str}", box_width + 2))
 
     print("├" + "─" * box_width + "┤")
-    print(_create_box_line(f"\033[96m--- PROYECCIÓN (con todas las posiciones pendientes) ---\033[0m", box_width + 2))
+    print(_create_box_line(f"\033[96m--- PROYECCIÓN (con todas las posiciones) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Capital Total en Juego      : {total_capital_str}", box_width + 2))
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liq. Proyectado      : {proj_liq_price_str}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
-    # --- INICIO DE LA MODIFICACIÓN: Añadir la nueva línea a la TUI ---
-    # Simplemente añadimos una nueva línea para mostrar el valor formateado
     print(_create_box_line(f"  Precio Obj. SL/TP por ROI   : {roi_target_price_str}", box_width + 2))
-    # --- FIN DE LA MODIFICACIÓN ---
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -181,6 +202,9 @@ def display_risk_panel(
 
     print("└" + "─" * box_width + "┘")
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
