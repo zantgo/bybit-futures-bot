@@ -257,8 +257,9 @@ def calculate_aggregate_liquidation_price(
         return None
 
     return calculate_liquidation_price(side, avg_entry_price, leverage)
+
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función en pm/_calculations.py) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def calculate_projected_roi_target_price(
@@ -271,19 +272,12 @@ def calculate_projected_roi_target_price(
 ) -> Optional[float]:
     """
     Calcula el precio de mercado objetivo al que se alcanzaría un ROI específico,
-    simulando que todas las posiciones están activas y usando el capital total
-    proyectado como base.
+    simulando que todas las posiciones están activas.
     """
     if not all_positions or not np.isfinite(sl_roi_pct_target):
         return None
 
-    # --- INICIO DE LA CORRECCIÓN CLAVE ---
-    # La base del ROI para la proyección es el capital total de TODAS las posiciones.
-    base_capital = sum(p.get('capital_asignado', 0) for p in all_positions)
-    if base_capital <= 0:
-        return None
-    # --- FIN DE LA CORRECCIÓN CLAVE ---
-    
+    # --- LÓGICA DE SIMULACIÓN (sin cambios, ya es correcta) ---
     open_positions = [p for p in all_positions if p.get('estado') == 'ABIERTA']
     pending_positions = [p for p in all_positions if p.get('estado') == 'PENDIENTE']
     
@@ -308,27 +302,29 @@ def calculate_projected_roi_target_price(
     if projected_total_size <= 1e-12:
         return None
 
-    # --- INICIO DE LA CORRECCIÓN CLAVE ---
-    # Se calcula el PNL objetivo basado en el capital total proyectado.
-    # No se considera el PNL realizado para esta simulación "desde cero".
-    pnl_target_usdt = (sl_roi_pct_target / 100.0) * base_capital
-    unrealized_pnl_needed = pnl_target_usdt
-    # --- FIN DE LA CORRECCIÓN CLAVE ---
-    
-    try:
-        price_difference_per_contract = _utils.safe_division(unrealized_pnl_needed, projected_total_size)
-        
-        if side == 'long':
-            target_market_price = projected_avg_price + price_difference_per_contract
-        elif side == 'short':
-            target_market_price = projected_avg_price - price_difference_per_contract
-        else:
-            return None
-
-        return max(0.0, target_market_price)
-
-    except (TypeError, ValueError):
+    # --- INICIO DE LA CORRECCIÓN MATEMÁTICA DEFINITIVA ---
+    # 1. Calcular el capital total que estaría en juego (el margen total).
+    total_margin = sum(p.get('capital_asignado', 0) for p in all_positions)
+    if total_margin <= 0:
         return None
+
+    # 2. Calcular el PNL objetivo en USDT basado en el ROI y el margen total.
+    pnl_target_usdt = (sl_roi_pct_target / 100.0) * total_margin
+
+    # 3. Calcular la diferencia de precio por contrato necesaria para alcanzar ese PNL.
+    #    Esta es la cantidad que el precio debe moverse desde el promedio de entrada.
+    price_change_needed = _utils.safe_division(pnl_target_usdt, projected_total_size)
+
+    # 4. Aplicar esa diferencia de precio al precio promedio proyectado.
+    if side == 'long':
+        target_market_price = projected_avg_price + price_change_needed
+    elif side == 'short':
+        target_market_price = projected_avg_price - price_change_needed
+    else:
+        return None
+
+    return max(0.0, target_market_price)
+    # --- FIN DE LA CORRECCIÓN MATEMÁTICA DEFINITIVA ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
