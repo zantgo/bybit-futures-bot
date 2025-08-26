@@ -334,9 +334,11 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
 
 def _display_operation_conditions(operacion: Operacion):
-    # --- COMIENZO DE LA FUNCIÓN A REEMPLAZAR ---
     box_width = _get_unified_box_width()
 
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -373,47 +375,35 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        # # --- CÓDIGO ORIGINAL COMENTADO ---
-        # # is_sl_roi_configured = (
-        # #     getattr(operacion, 'sl_roi_pct') is not None or
-        # #     getattr(operacion, 'dynamic_roi_sl_enabled', False)
-        # # )
-        # # sl_roi_str = "SL/TP por ROI: Desactivado"
-        # # if is_sl_roi_configured:
-        # #     target_price = operacion.get_roi_sl_tp_price()
-        # #     if target_price is not None:
-        # #         is_sl = operacion.sl_roi_pct is not None and operacion.sl_roi_pct < 0
-        # #         label = "SL" if is_sl else "TP"
-        # #         color_code = "\033[91m" if is_sl else "\033[92m"
-        # #         roi_pct_target = operacion.sl_roi_pct
-        # #         if getattr(operacion, 'dynamic_roi_sl_enabled', False):
-        # #             roi_pct_target = getattr(operacion, 'realized_twrr_roi', 0) - (getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0)
-        # #             label += " DINÁMICO"
-        # #         sl_roi_str = f"Precio Obj. {label} por ROI: {color_code}${target_price:.4f}{reset} ({roi_pct_target:.2f}%)"
-        # #     else:
-        # #         sl_roi_str = "SL/TP por ROI: Pendiente (esperando 1ra posición)"
-        # # print(_create_box_line(f"  - {sl_roi_str}", box_width))
-        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-        # --- CÓDIGO NUEVO Y CORREGIDO ---
+        # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
         sl_roi_str = ""
+        # 1. Comprobar si el modo es Dinámico
         if getattr(operacion, 'dynamic_roi_sl_enabled', False):
             trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
+            # En modo dinámico, el precio objetivo cambia constantemente, por lo que mostramos la regla.
             sl_roi_str = f"SL/TP por ROI (DINÁMICO): Límite móvil @ ROI Realizado - {trail_pct}%"
+        
+        # 2. Comprobar si el modo es Manual
         elif operacion.sl_roi_pct is not None:
+            # Llamamos a la función central y ya corregida de la entidad Operacion
             target_price = operacion.get_roi_sl_tp_price()
             is_sl = operacion.sl_roi_pct < 0
             label = "SL" if is_sl else "TP"
             color_code = "\033[91m" if is_sl else "\033[92m"
+            
+            # Comprobar si se puede calcular el precio (si hay posiciones abiertas)
             if target_price is not None:
                 sl_roi_str = (f"Precio Obj. {label} por ROI (MANUAL): "
                               f"{color_code}${target_price:.4f}{reset} ({operacion.sl_roi_pct}%)")
             else:
                 sl_roi_str = f"SL/TP por ROI (MANUAL): {operacion.sl_roi_pct}% (Esperando 1ra pos.)"
+        
+        # 3. Si no es ni dinámico ni manual, está desactivado.
         else:
             sl_roi_str = "SL/TP por ROI: Desactivado"
+        
         print(_create_box_line(f"  - {sl_roi_str}", box_width))
-        # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+        # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
         tsl_roi_str = "TSL por ROI: Desactivado"
         if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
@@ -442,7 +432,6 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-    # --- FIN DE LA FUNCIÓN A REEMPLAZAR ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
