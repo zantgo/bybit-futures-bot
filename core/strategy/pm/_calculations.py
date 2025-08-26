@@ -274,15 +274,22 @@ def calculate_projected_roi_target_price(
     Calcula el precio de mercado objetivo al que se alcanzaría un ROI específico,
     simulando que todas las posiciones están activas.
     """
-    if not all_positions or not np.isfinite(sl_roi_pct_target):
+    if not all_positions or not np.isfinite(sl_roi_pct_target) or leverage <= 0:
         return None
 
     # --- LÓGICA DE SIMULACIÓN (sin cambios, ya es correcta) ---
     open_positions = [p for p in all_positions if p.get('estado') == 'ABIERTA']
     pending_positions = [p for p in all_positions if p.get('estado') == 'PENDIENTE']
     
-    sim_total_value = sum(p.get('entry_price', 0) * p.get('size_contracts', 0) for p in open_positions if p.get('entry_price') and p.get('size_contracts'))
-    sim_total_size = sum(p.get('size_contracts', 0) for p in open_positions if p.get('size_contracts'))
+    # Recalcular el tamaño de las posiciones abiertas con el apalancamiento actual
+    sim_total_value = 0.0
+    sim_total_size = 0.0
+    for pos in open_positions:
+        if pos.get('entry_price') and pos.get('capital_asignado'):
+            size = _utils.safe_division(pos['capital_asignado'] * leverage, pos['entry_price'])
+            if size > 0:
+                sim_total_value += pos['entry_price'] * size
+                sim_total_size += size
     
     last_simulated_price = last_real_entry_price
     if distance_pct is not None and distance_pct > 0:
@@ -297,29 +304,26 @@ def calculate_projected_roi_target_price(
             last_simulated_price = next_entry_price
 
     projected_avg_price = _utils.safe_division(sim_total_value, sim_total_size)
-    projected_total_size = sim_total_size
-
-    if projected_total_size <= 1e-12:
+    
+    if projected_avg_price <= 0:
         return None
 
     # --- INICIO DE LA CORRECCIÓN MATEMÁTICA DEFINITIVA ---
-    # 1. Calcular el capital total que estaría en juego (el margen total).
-    total_margin = sum(p.get('capital_asignado', 0) for p in all_positions)
-    if total_margin <= 0:
-        return None
+    # 1. Convertir el ROI del MARGEN a un porcentaje de movimiento de PRECIO.
+    #    La fórmula es: % Movimiento Precio = % ROI / Apalancamiento
+    price_move_pct = sl_roi_pct_target / leverage
 
-    # 2. Calcular el PNL objetivo en USDT basado en el ROI y el margen total.
-    pnl_target_usdt = (sl_roi_pct_target / 100.0) * total_margin
-
-    # 3. Calcular la diferencia de precio por contrato necesaria para alcanzar ese PNL.
-    #    Esta es la cantidad que el precio debe moverse desde el promedio de entrada.
-    price_change_needed = _utils.safe_division(pnl_target_usdt, projected_total_size)
-
-    # 4. Aplicar esa diferencia de precio al precio promedio proyectado.
+    # 2. Aplicar ese porcentaje de movimiento al precio de entrada promedio proyectado.
     if side == 'long':
-        target_market_price = projected_avg_price + price_change_needed
+        # Para LONG, un SL (ROI negativo) significa que el precio baja.
+        # Un TP (ROI positivo) significa que el precio sube.
+        factor = 1 + (price_move_pct / 100.0)
+        target_market_price = projected_avg_price * factor
     elif side == 'short':
-        target_market_price = projected_avg_price - price_change_needed
+        # Para SHORT, un SL (ROI negativo) significa que el precio sube.
+        # Un TP (ROI positivo) significa que el precio baja.
+        factor = 1 - (price_move_pct / 100.0)
+        target_market_price = projected_avg_price * factor
     else:
         return None
 
