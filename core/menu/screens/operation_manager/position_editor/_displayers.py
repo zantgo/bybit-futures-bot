@@ -90,8 +90,9 @@ def display_positions_table(operacion: Operacion, current_market_price: float, s
     print("└" + "─" * box_width + "┘")
 
 
+
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
 # ==============================================================================
 
 def display_strategy_parameters(operacion: Operacion):
@@ -103,11 +104,7 @@ def display_strategy_parameters(operacion: Operacion):
     print(_create_box_line("Parámetros Estratégicos", box_width + 2, 'center'))
     print("├" + "─" * box_width + "┤")
     
-    # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
-    # Se añade una comprobación para manejar el caso en que averaging_distance_pct sea None.
-    
     distancia_promediacion_str = "Desactivado"
-    # Comprobamos si el valor es un número antes de intentar formatearlo.
     if isinstance(operacion.averaging_distance_pct, (int, float)):
         distancia_promediacion_str = f"{operacion.averaging_distance_pct:.2f}%"
 
@@ -115,7 +112,6 @@ def display_strategy_parameters(operacion: Operacion):
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
         "Distancia de Promediación (%)": distancia_promediacion_str
     }
-    # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
     
     max_key_len = max(len(k) for k in params.keys()) if params else 0
     

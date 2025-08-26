@@ -130,8 +130,9 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
 
+
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
 # ==============================================================================
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
@@ -157,13 +158,18 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.tendencia = "LONG_ONLY" if side == 'long' else "SHORT_ONLY"
         temp_op.apalancamiento = apalancamiento
         
+        # --- MODIFICACIÓN: Asegurar que la promediación tenga un valor si está habilitada por defecto ---
         if defaults["RISK"]["AVERAGING"]["ENABLED"]:
             if side == 'long':
                 temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"]
             else:
                 temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_SHORT"]
         else:
-            temp_op.averaging_distance_pct = None
+            # Si está desactivada por defecto, la inicializamos a un valor numérico seguro,
+            # pero el usuario podrá cambiarlo. O la dejamos como None y la visualización lo manejará.
+            # Por consistencia con el requisito, le damos un valor por defecto.
+            temp_op.averaging_distance_pct = 0.5 # Valor por defecto seguro
+        # --- FIN DE LA MODIFICACIÓN ---
 
         temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL"]["PERCENTAGE"] if defaults["RISK"]["INDIVIDUAL_SL"]["ENABLED"] else None
         
@@ -264,7 +270,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 prompt_text = f"Nueva Distancia de Promediación para {side.upper()} (%)"
                 # Se cambia 'is_optional' a False. Esto hará que get_input no acepte
                 # una entrada vacía (Enter) y que siga pidiendo un float.
-                # Se establece un min_val para asegurar que la promediación tenga sentido.
                 nuevo_valor_distancia = get_input(
                     prompt_text, 
                     float, 
@@ -330,7 +335,11 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
-            
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
