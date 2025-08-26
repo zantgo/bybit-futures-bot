@@ -326,46 +326,50 @@ class EventProcessor:
         self._previous_raw_event_price = price
         return signal_data
 
-    # --- INICIO DE LA NUEVA FUNCIONALIDAD: Heartbeat de Sincronización ---
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
     def _check_physical_position_existence(self):
         """
         Comprueba si las posiciones que el bot cree que están abiertas realmente
         existen en el exchange. Si no, asume una liquidación o cierre externo.
         """
         if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
-            return # No hacer nada en modo de simulación
+            return
 
-        # --- MODIFICACIÓN: Asegurar que el adaptador de exchange esté disponible ---
         if not self._exchange_adapter:
             self._memory_logger.log("WARN [Sync Check]: Adaptador de exchange no disponible, no se puede sincronizar.", "WARN")
             return
-        # --- FIN DE LA MODIFICACIÓN ---
 
         for side in ['long', 'short']:
             operacion = self._om_api.get_operation_by_side(side)
             
-            # Solo actuar si el bot cree que hay posiciones abiertas en una operación activa
             if operacion and operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
                 
-                # Hacemos la llamada a la API a través del adaptador
                 account_purpose = 'longs' if side == 'long' else 'shorts'
                 physical_positions = self._exchange_adapter.get_positions(
                     symbol=self._config.BOT_CONFIG["TICKER"]["SYMBOL"],
                     account_purpose=account_purpose
                 )
 
-                # Si la llamada a la API falla o devuelve una lista vacía, significa que no hay posición
                 if not physical_positions:
-                    reason = (
-                        f"CIERRE INESPERADO DETECTADO ({side.upper()}): "
-                        f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
-                        f"pero no se encontró ninguna en el exchange. Posible liquidación."
-                    )
-                    self._memory_logger.log(reason, "ERROR")
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # 1. Se crea una razón más corta y concisa.
+                    reason = f"Liquidación o Cierre Externo ({side.upper()})"
                     
-                    # Llamamos al manejador de liquidación para resetear el estado
+                    # 2. Se crea un mensaje de log más detallado para el registro interno.
+                    log_details = (
+                        f"CIERRE INESPERADO ({side.upper()}): "
+                        f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
+                        f"pero no se encontró ninguna en el exchange."
+                    )
+                    
+                    # 3. El nivel de log se cambia de ERROR a WARN.
+                    self._memory_logger.log(log_details, "WARN")
+                    # --- FIN DE LA MODIFICACIÓN ---
+                    
                     self._om_api.handle_liquidation_event(side, reason)
-    # --- FIN DE LA NUEVA FUNCIONALIDAD ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---

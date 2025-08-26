@@ -64,40 +64,63 @@ def show_session_config_editor_screen(config_module: Any) -> Dict[str, Any]:
         return {}
 
     temp_session_config = copy.deepcopy(config_module.SESSION_CONFIG)
+    
+    # --- INICIO DE LA MODIFICACIÓN: Asegurar que la clave de riesgo exista en la copia temporal ---
+    if 'RISK' not in temp_session_config:
+        temp_session_config['RISK'] = {
+            "MAINTENANCE_MARGIN_RATE": config_module.PRECISION_FALLBACKS.get("MAINTENANCE_MARGIN_RATE", 0.005)
+        }
+    # --- FIN DE LA MODIFICACIÓN ---
+
     changes_made, changed_keys = _show_main_config_menu(temp_session_config)
 
     if changes_made:
-        # Aplicamos los cambios tanto a SESSION_CONFIG como a OPERATION_DEFAULTS para mantener la consistencia
+        # Aplicamos los cambios a SESSION_CONFIG para la sesión actual
         _apply_changes_to_real_config(temp_session_config, config_module.SESSION_CONFIG, logger)
+        
+        # --- INICIO DE LA MODIFICACIÓN: Aplicar el cambio de MMR también al diccionario global ---
+        # Esto es crucial para que los cálculos de liquidación en todo el bot usen el valor actualizado.
+        if 'RISK' in temp_session_config and 'MAINTENANCE_MARGIN_RATE' in temp_session_config['RISK']:
+             new_mmr = temp_session_config['RISK']['MAINTENANCE_MARGIN_RATE']
+             if new_mmr != config_module.PRECISION_FALLBACKS['MAINTENANCE_MARGIN_RATE']:
+                 if logger:
+                    logger.log(f"  -> Global PRECISION_FALLBACKS.MAINTENANCE_MARGIN_RATE: '{config_module.PRECISION_FALLBACKS['MAINTENANCE_MARGIN_RATE']}' -> '{new_mmr}'", "WARN")
+                 config_module.PRECISION_FALLBACKS['MAINTENANCE_MARGIN_RATE'] = new_mmr
+        # --- FIN DE LA MODIFICACIÓN ---
+
         return changed_keys
     
     return {}
 
 def _apply_changes_to_real_config(temp_cfg: Dict, real_cfg: Dict, logger: Any):
     if not logger: return
-    # Se mantiene la lógica de logging del código original, que es más completa.
     logger.log("Aplicando cambios de configuración...", "WARN")
     
     for category, params in temp_cfg.items():
         if category not in real_cfg:
-            real_cfg[category] = {} # Asegurarse de que la categoría exista
+            real_cfg[category] = {} 
         if isinstance(params, dict):
+            # Asegurarse de que la categoría es un diccionario en la configuración real
+            if not isinstance(real_cfg.get(category), dict):
+                real_cfg[category] = {}
+
             for key, new_value in params.items():
-                if key in real_cfg.get(category, {}) and new_value != real_cfg[category][key]:
-                    logger.log(f"  -> {category}.{key}: '{real_cfg[category][key]}' -> '{new_value}'", "WARN")
+                if new_value != real_cfg[category].get(key):
+                    logger.log(f"  -> {category}.{key}: '{real_cfg[category].get(key)}' -> '{new_value}'", "WARN")
                     real_cfg[category][key] = new_value
         else:
             new_value = params 
-            if new_value != real_cfg.get(category): # Usamos .get() para más seguridad como en el código nuevo
+            if new_value != real_cfg.get(category):
                 logger.log(f"  -> {category}: '{real_cfg.get(category)}' -> '{new_value}'", "WARN")
                 real_cfg[category] = new_value
 
-# --- INICIO DE LA MODIFICACIÓN VISUAL ---
+
 def _display_config_box(temp_cfg: Dict, box_width: int):
     """Muestra la caja de configuración con formato y alineación adaptativos."""
     print("\nValores Actuales:")
     print("┌" + "─" * (box_width - 2) + "┐")
 
+    # --- INICIO DE LA MODIFICACIÓN: Añadir sección de Riesgo a la visualización ---
     sections = {
         "Ticker": {
             "Ticker Intervalo (s)": temp_cfg['TICKER_INTERVAL_SECONDS'],
@@ -118,8 +141,12 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
             "Porcentaje Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
             "Monto Mín. Transferencia": f"${temp_cfg['PROFIT']['MIN_TRANSFER_AMOUNT_USDT']:.4f}",
             "Slippage Estimado (%)": f"{temp_cfg['PROFIT']['SLIPPAGE_PCT'] * 100:.2f}",
+        },
+        "Gestión de Riesgo": {
+            "Tasa Margen Mantenimiento (%)": f"{temp_cfg.get('RISK', {}).get('MAINTENANCE_MARGIN_RATE', 0.0) * 100:.3f}",
         }
     }
+    # --- FIN DE LA MODIFICACIÓN ---
     
     all_labels = []
     for section_params in sections.values():
@@ -131,10 +158,8 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
         if not first_section:
             print("├" + "─" * (box_width - 2) + "┤")
         
-        # Imprimir el título de la sección, centrado y en color
         print(_create_config_box_line(title, box_width, is_header=True))
         
-        # Imprimir cada parámetro de la sección
         for label, value in params.items():
             content = f"{label:<{max_key_len}} : {value}"
             print(_create_config_box_line(content, box_width))
@@ -142,7 +167,6 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
         first_section = False
 
     print("└" + "─" * (box_width - 2) + "┘")
-# --- FIN DE LA MODIFICACIÓN VISUAL ---
 
 
 def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
@@ -156,15 +180,18 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
         box_width = min(_get_terminal_width() - 2, 90)
         _display_config_box(temp_cfg, box_width)
 
+        # --- INICIO DE LA MODIFICACIÓN: Añadir opción de menú y ajustar índices ---
         menu_items = [
             "[1] Editar Parámetros de Ticker",
             "[2] Editar Parámetros de Análisis Técnico (TA)",
             "[3] Editar Parámetros de Señal",
-            "[4] Editar Parámetros de Profit", 
+            "[4] Editar Parámetros de Profit",
+            "[5] Editar Parámetros de Riesgo", # <-- NUEVA OPCIÓN
             None,
             "[s] Guardar Cambios y Volver",
             "[c] Cancelar (Descartar Cambios)"
         ]
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -187,7 +214,14 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
             elif choice == 3: 
                 _edit_profit_submenu(temp_cfg['PROFIT'], changed_keys)
             
-            elif choice == 5: 
+            # --- INICIO DE LA MODIFICACIÓN: Manejar la nueva opción ---
+            elif choice == 4:
+                # Asegurarse de que el diccionario 'RISK' exista antes de pasarlo
+                if 'RISK' not in temp_cfg: temp_cfg['RISK'] = {}
+                _edit_risk_submenu(temp_cfg['RISK'], changed_keys)
+            # --- FIN DE LA MODIFICACIÓN ---
+            
+            elif choice == 6: # Corregido de 5 a 6
                 if changed_keys:
                     print("\nCambios guardados."); time.sleep(2)
                     return True, changed_keys
@@ -195,7 +229,7 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     return False, {}
             
-            elif choice == 6 or choice is None: 
+            elif choice == 7 or choice is None: # Corregido de 6 a 7
                 if changed_keys:
                     if TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show() == 0:
                         print("\nCambios descartados."); time.sleep(1.5)
@@ -293,3 +327,28 @@ def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
             if new_val / 100 != original: changed_keys['SLIPPAGE_PCT'] = profit_cfg['SLIPPAGE_PCT'] = new_val / 100
         else:
             break
+
+# --- INICIO DE LA MODIFICACIÓN: Nueva función de submenú para Riesgo ---
+def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
+    """Submenú específico para editar los parámetros de riesgo de la sesión."""
+    while True:
+        current_mmr_pct = risk_cfg.get('MAINTENANCE_MARGIN_RATE', 0.0) * 100
+        menu_items = [
+            f"[1] Tasa Margen Mantenimiento (%) ({current_mmr_pct:.3f})",
+            None,
+            "[b] Volver"
+        ]
+        submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Riesgo:", **MENU_STYLE).show()
+        
+        if submenu == 0:
+            original_pct = current_mmr_pct
+            new_val_pct = get_input("Nueva Tasa de Margen de Mantenimiento (%)", float, original_pct, min_val=0.1)
+            
+            # Convertimos el porcentaje a decimal para guardarlo
+            new_val_decimal = new_val_pct / 100.0
+            
+            if new_val_decimal != risk_cfg.get('MAINTENANCE_MARGIN_RATE'):
+                changed_keys['MAINTENANCE_MARGIN_RATE'] = risk_cfg['MAINTENANCE_MARGIN_RATE'] = new_val_decimal
+        else:
+            break
+# --- FIN DE LA MODIFICACIÓN ---
