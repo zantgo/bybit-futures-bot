@@ -152,7 +152,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
     print("└" + "─" * (box_width - 2) + "┘")
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
@@ -174,13 +174,14 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
 
     from core.strategy.pm import _calculations as pm_calculations
     
-    open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
-    
+    # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
+    # Se pasa la lista de OBJETOS directamente, que es más seguro y limpio.
     aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
-        open_positions=open_positions_dicts,
+        open_positions=operacion.posiciones_abiertas, # Usar la lista de objetos
         leverage=operacion.apalancamiento,
         side=side
     )
+    # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
@@ -210,9 +211,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
         "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
-        # --- MODIFICACIÓN: Texto más claro y color de riesgo ---
         "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
-        # --- FIN DE LA MODIFICACIÓN ---
         "--- CONTADORES ---": "",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
@@ -229,9 +228,8 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     print("└" + "─" * (box_width - 2) + "┘")
 
 # ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
-
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     box_width = _get_unified_box_width()
 

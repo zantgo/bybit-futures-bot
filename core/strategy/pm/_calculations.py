@@ -205,78 +205,50 @@ def calculate_physical_aggregates(open_positions: List[Dict[str, Any]]) -> Dict[
         'total_size_contracts': float(total_contracts),
         'total_margin_usdt': float(total_margin)
     }
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def calculate_aggregate_liquidation_price(
-    open_positions: List[Dict[str, Any]],
+    open_positions: List[Any], # Acepta tanto objetos como diccionarios
     leverage: float,
     side: str
 ) -> Optional[float]:
     """
     Calcula el precio de liquidación estimado para una posición agregada
     compuesta por múltiples posiciones lógicas abiertas.
-
-    Args:
-        open_positions (List[Dict[str, Any]]): Una lista de diccionarios o
-                                                objetos LogicalPosition abiertos.
-        leverage (float): El apalancamiento de la operación.
-        side (str): El lado de la operación ('long' o 'short').
-
-    Returns:
-        Optional[float]: El precio de liquidación estimado, o None si no
-                         se puede calcular.
     """
     if not open_positions:
         return None
 
-    # Filtrar solo posiciones con datos válidos para el cálculo
-    valid_positions = [
-        p for p in open_positions
-        if isinstance(p.get('entry_price'), (int, float)) and np.isfinite(p.get('entry_price'))
-        and isinstance(p.get('size_contracts'), (int, float)) and np.isfinite(p.get('size_contracts'))
-        and p.get('size_contracts') > 1e-12
-    ]
+    valid_positions_data = []
+    for p in open_positions:
+        # Extraer datos de forma segura, ya sea de un objeto o un diccionario
+        entry_price = getattr(p, 'entry_price', p.get('entry_price'))
+        size_contracts = getattr(p, 'size_contracts', p.get('size_contracts'))
+
+        if (isinstance(entry_price, (int, float)) and np.isfinite(entry_price) and
+            isinstance(size_contracts, (int, float)) and np.isfinite(size_contracts) and
+            size_contracts > 1e-12):
+            valid_positions_data.append({'entry_price': entry_price, 'size_contracts': size_contracts})
     
-    if not valid_positions:
+    if not valid_positions_data:
         return None
 
-    # 1. Calcular el precio de entrada promedio ponderado
-    total_value = sum(pos.get('entry_price', 0.0) * pos.get('size_contracts', 0.0) for pos in valid_positions)
-    total_size = sum(pos.get('size_contracts', 0.0) for pos in valid_positions)
+    total_value = sum(pos['entry_price'] * pos['size_contracts'] for pos in valid_positions_data)
+    total_size = sum(pos['size_contracts'] for pos in valid_positions_data)
 
-    # Utilizamos el safe_division de tu módulo utils para evitar errores
     avg_entry_price = _utils.safe_division(total_value, total_size)
 
     if not avg_entry_price or avg_entry_price <= 0:
         return None
 
-    # 2. Reutilizar la lógica de cálculo de liquidación con el precio promedio
-    # Esta es una aproximación estándar para margen aislado.
-    # El 0.005 (0.5%) es una aproximación común para la tasa de margen de mantenimiento.
-    maintenance_margin_rate = 0.005
+    # Llamamos a la función de cálculo de liquidación individual que ya es robusta
+    return calculate_liquidation_price(side, avg_entry_price, leverage)
 
-    try:
-        if leverage <= 0:
-            return None
-        
-        leverage_inverse = 1.0 / leverage
-        
-        if side == 'long':
-            # Fórmula: PrecioEntrada * (1 - 1/Apalancamiento + TasaMargenMantenimiento)
-            liquidation_price = avg_entry_price * (1.0 - leverage_inverse + maintenance_margin_rate)
-        elif side == 'short':
-            # Fórmula: PrecioEntrada * (1 + 1/Apalancamiento - TasaMargenMantenimiento)
-            liquidation_price = avg_entry_price * (1.0 + leverage_inverse - maintenance_margin_rate)
-        else:
-            return None # Lado inválido
-
-        # El precio de liquidación no puede ser negativo.
-        return max(0.0, liquidation_price)
-
-    except (ZeroDivisionError, TypeError, ValueError):
-        # Captura cualquier error matemático durante el cálculo
-        return None
-    
 # ==============================================================================
-# --- INICIO DE LA NUEVA FUNCIONALIDAD: PRECIO OBJETIVO DE SL/TP POR ROI ---
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
 
 def calculate_projected_roi_target_price(
