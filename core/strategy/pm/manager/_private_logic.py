@@ -119,7 +119,7 @@ class _PrivateLogic:
 
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         try:
-            self._memory_logger.log(f"[DEBUG TSL] Iniciando check para {side.upper()} pos_idx={index} @ price={current_price}", "DEBUG")
+            #self._memory_logger.log(f"[DEBUG TSL] Iniciando check para {side.upper()} pos_idx={index} @ price={current_price}", "DEBUG")
 
             operacion = self._om_api.get_operation_by_side(side)
             if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
@@ -136,7 +136,7 @@ class _PrivateLogic:
             is_ts_active = position_to_update.ts_is_active
             entry_price = position_to_update.entry_price
 
-            self._memory_logger.log(f"[DEBUG TSL ID:{pos_id_short}] Valores: act_pct={activation_pct}, dist_pct={distance_pct}, entry={entry_price}", "DEBUG")
+            #self._memory_logger.log(f"[DEBUG TSL ID:{pos_id_short}] Valores: act_pct={activation_pct}, dist_pct={distance_pct}, entry={entry_price}", "DEBUG")
 
             if not (activation_pct is not None and activation_pct > 0 and distance_pct is not None and distance_pct > 0 and entry_price is not None):
                 return
@@ -144,7 +144,7 @@ class _PrivateLogic:
             if not is_ts_active:
                 activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
                 
-                self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", "DEBUG")
+                #self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", "DEBUG")
 
                 if (side == 'long' and current_price >= activation_price) or \
                    (side == 'short' and current_price <= activation_price):
@@ -159,7 +159,7 @@ class _PrivateLogic:
                 if (side == 'long' and current_price > current_peak) or \
                    (side == 'short' and current_price < current_peak):
                     
-                    self._memory_logger.log(f"TSL Peak Update [ID:{pos_id_short}]: Nuevo pico {current_price:.4f} (anterior: {current_peak:.4f})", level="DEBUG")
+                    #self._memory_logger.log(f"TSL Peak Update [ID:{pos_id_short}]: Nuevo pico {current_price:.4f} (anterior: {current_peak:.4f})", level="DEBUG")
                     position_to_update.ts_peak_price = current_price
                 
                 new_peak_price = position_to_update.ts_peak_price
