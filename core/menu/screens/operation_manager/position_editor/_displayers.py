@@ -110,14 +110,16 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+    
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
-    operacion: Operacion,
-    side: str
+    current_market_price: float, # <-- Se vuelve a añadir para corregir la firma
+    side: str,
+    operacion: Operacion
 ):
     """
     Muestra el panel unificado de cobertura y riesgo estratégico, distinguiendo
@@ -136,7 +138,6 @@ def display_risk_panel(
     roi_price_proj = metrics.get('projected_roi_target_price')
     roi_price_proj_str = "N/A" # Default
     
-    # Lógica de formato para el precio objetivo de ROI Proyectado
     is_sl_roi_configured = (
         getattr(operacion, 'sl_roi_pct') is not None or
         getattr(operacion, 'dynamic_roi_sl_enabled', False)
@@ -145,7 +146,6 @@ def display_risk_panel(
         if roi_price_proj is not None:
              roi_price_proj_str = f"${roi_price_proj:.4f}"
         else:
-            # Si está configurado pero no se puede calcular (caso raro, ej. capital 0)
              roi_price_proj_str = "Error de cálculo"
     else:
         roi_price_proj_str = "N/A (ROI SL/TP desactivado)"
