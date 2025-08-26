@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/strategy/om/_manager.py
+# core/strategy/om/_manager.py
 
 import datetime
 import uuid
@@ -79,7 +79,6 @@ class OperationManager:
             
             return copy.deepcopy(original_op)
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -87,7 +86,7 @@ class OperationManager:
 
             estado_original = target_op.estado
             changes_log = []
-            changed_keys = set() # Usaremos un set para rastrear las claves que cambian
+            changed_keys = set()
 
             nuevas_posiciones = params.get('posiciones')
             
@@ -124,17 +123,26 @@ class OperationManager:
                     if old_value != value:
                         setattr(target_op, key, value)
                         changes_log.append(f"'{key}': {old_value} -> {value}")
-                        changed_keys.add(key) # Registramos la clave que cambió
+                        changed_keys.add(key)
             
             if nuevas_posiciones is not None:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} objetos.")
                 changed_keys.add('posiciones')
 
+            # Si la operación estaba detenida, ahora la reiniciamos por completo antes de activarla.
             if estado_original == 'DETENIDA' and params:
+                # 1. Limpiar todos los contadores del ciclo anterior
+                target_op.pnl_realizado_usdt = 0.0
+                target_op.comisiones_totales_usdt = 0.0
+                target_op.reinvestable_profit_balance = 0.0
+                
+                # 2. Establecer el nuevo capital inicial
                 target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 changes_log.append(f"'capital_inicial_usdt' (Base ROI) fijado en: {target_op.capital_inicial_usdt:.2f}$")
                 changed_keys.add('capital_inicial_usdt')
+                
+                # 3. Transicionar al nuevo estado con la razón apropiada
                 if target_op.tipo_cond_entrada == 'MARKET':
                     target_op.estado = 'ACTIVA'
                     target_op.estado_razon = "Operación iniciada (condición de mercado)."
@@ -159,7 +167,6 @@ class OperationManager:
                     changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
                     changed_keys.add('estado')
 
-            # La lógica de la API de apalancamiento ahora solo se ejecuta si la clave 'apalancamiento' cambió.
             if 'apalancamiento' in changed_keys:
                 symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
                 new_leverage = target_op.apalancamiento
@@ -186,9 +193,8 @@ class OperationManager:
             return True, f"No se realizaron cambios en la operación {side.upper()}."
 
         log_message = f"Operación {side.upper()} actualizada: " + ", ".join(changes_log)
-        self._memory_logger.log(log_message, "WARN")
+        self._memory_logger.log(log_message, "DEBUG")
         return True, f"Operación {side.upper()} actualizada con éxito."
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
@@ -286,12 +292,24 @@ class OperationManager:
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
+            # Solo actuar si la operación está en un estado que puede ser detenido
             if not target_op or target_op.estado not in ['PAUSADA', 'DETENIENDO']:
                 return
+            
+            # La condición para finalizar es que no queden posiciones abiertas.
             if not target_op.posiciones_abiertas:
-                log_msg = f"OPERACIÓN {side.upper()}: Última posición cerrada. Transicionando a DETENIDA y reseteando estado."
+                # --- INICIO DE LA CORRECCIÓN CLAVE ---
+                # En lugar de resetear, simplemente cambiamos el estado.
+                # La 'estado_razon' que se estableció previamente (ej. por liquidación) se conserva.
+                
+                log_msg = (
+                    f"OPERACIÓN {side.upper()}: Finalizada. Última posición cerrada. "
+                    f"Estado final: DETENIDA. Razón: '{target_op.estado_razon}'"
+                )
                 self._memory_logger.log(log_msg, "INFO")
-                target_op.reset()
+                
+                # Solo cambiamos el estado. El resto de los datos (PNL, razón) permanecen.
+                target_op.estado = 'DETENIDA'
 
     def actualizar_reinvestable_profit(self, side: str, amount: float):
         """Añade fondos al bote de reinversión."""
@@ -331,59 +349,27 @@ class OperationManager:
                 "INFO"
             )
 
-# ==============================================================================
-# --- INICIO DE LA NUEVA FUNCIONALIDAD: MANEJADOR DE EVENTO DE LIQUIDACIÓN ---
-# ==============================================================================
-
     def handle_liquidation_event(self, side: str, reason: str):
-        """
-        Maneja un evento de liquidación para una operación.
-
-        Esta función realiza una transición de estado forzosa, asume la pérdida
-        total del capital de la operación y la resetea sin intentar enviar
-        órdenes de cierre, ya que se asume que las posiciones ya han sido
-        cerradas por el exchange.
-
-        Args:
-            side (str): El lado de la operación ('long' o 'short').
-            reason (str): La razón de la liquidación para registrar en el estado.
-        """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             
-            # Si la operación no existe o ya está siendo detenida/detenida, no hacer nada.
             if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
                 return
 
             self._memory_logger.log(
-                f"OM: Procesando evento de liquidación para la operación {side.upper()}.", "ERROR"
+                f"OM: Procesando evento de liquidación para la operación {side.upper()}.", "WARN"
             )
 
-            # 1. Cambiar el estado inmediatamente para prevenir nuevas acciones.
             target_op.estado = 'DETENIENDO'
             target_op.estado_razon = reason
 
-            # 2. Calcular y registrar la pérdida total del capital operativo.
-            # Se asume que todo el capital en juego se ha perdido.
             total_loss = target_op.capital_operativo_logico_actual
-            
-            # El P&L realizado se actualiza restando la pérdida total.
-            # Se suma al P&L que ya pudiera existir de trades anteriores en la misma operación.
             target_op.pnl_realizado_usdt -= total_loss
 
             self._memory_logger.log(
                 f"OM: Pérdida por liquidación de ${total_loss:.4f} registrada para {side.upper()}.", "WARN"
             )
             
-            # 3. Limpiar el estado de las posiciones lógicas internas.
-            # Se vacía la lista porque las posiciones ya no existen en el exchange.
             target_op.posiciones.clear()
             
-            # 4. Llamar al método de transición final.
-            # Como la lista de posiciones ahora está vacía, este método moverá
-            # el estado a 'DETENIDA' y reseteará la operación limpiamente.
             self.revisar_y_transicionar_a_detenida(side)
-
-# ==============================================================================
-# --- FIN DE LA NUEVA FUNCIONALIDAD ---
-# ==============================================================================

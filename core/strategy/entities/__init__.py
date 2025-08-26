@@ -286,24 +286,36 @@ class Operacion:
             "roi_twrr_vivo": roi_twrr_vivo
         }
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única en Operacion) ---
+# ==============================================================================
+
     def reset(self):
-        self.estado = 'DETENIDA'
-        self.estado_razon = 'Operación finalizada y reseteada' # <-- ATRIBUTO ACTUALIZADO
+        """
+        Limpia la operación para una nueva configuración, PERO CONSERVA los
+        resultados financieros y la razón del último ciclo.
+        """
+        # NO se resetean: estado, estado_razon, pnl_realizado_usdt, comisiones, etc.
+        # Estos se mantienen para visualización hasta que se inicie una nueva operación.
+        
         self.capital_inicial_usdt = 0.0
-        self.pnl_realizado_usdt = 0.0
         self.total_reinvertido_usdt = 0.0
         self.comercios_cerrados_contador = 0
         self.tiempo_inicio_ejecucion = None
-        self.comisiones_totales_usdt = 0.0
         self.profit_balance_acumulado = 0.0
         self.auto_reinvest_enabled = False
         self.tsl_roi_activo = False
         self.tsl_roi_peak_pct = 0.0
-        # --- INICIO DE LA MODIFICACIÓN ---
-        self.reinvestable_profit_balance = 0.0 # Resetear el nuevo atributo
-        # --- FIN DE LA MODIFICACIÓN ---
+        self.reinvestable_profit_balance = 0.0
         self.dynamic_roi_sl_enabled = False
         self.dynamic_roi_sl_trail_pct = None
+        
+        # Lo más importante: se limpian las posiciones y los flujos de capital
+        # para la nueva configuración.
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
