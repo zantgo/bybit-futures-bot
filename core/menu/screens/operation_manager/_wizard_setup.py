@@ -130,6 +130,10 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     config_module = _deps.get("config_module")
     if not config_module:
@@ -203,32 +207,18 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     params_changed = False
 
     while True:
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de Fusión Inteligente ---
-        # Este bloque se ejecuta en cada ciclo para mantener la TUI sincronizada sin perder los cambios del usuario.
         if is_modification:
             latest_op_state = om_api.get_operation_by_side(side)
             if latest_op_state:
-                # Crear un mapa del estado real de las posiciones por su ID para una búsqueda rápida
                 latest_positions_map = {p.id: p for p in latest_op_state.posiciones}
-                
-                # Iterar sobre las posiciones en nuestra copia temporal de edición (temp_op)
                 for pos_in_editor in temp_op.posiciones:
-                    # Buscar si esta posición todavía existe en el estado real del sistema
                     if pos_in_editor.id in latest_positions_map:
-                        # Si existe, actualizamos solo los atributos que el bot puede cambiar en segundo plano
                         real_pos_state = latest_positions_map[pos_in_editor.id]
                         pos_in_editor.estado = real_pos_state.estado
                         pos_in_editor.entry_price = real_pos_state.entry_price
                         pos_in_editor.entry_timestamp = real_pos_state.entry_timestamp
                         pos_in_editor.size_contracts = real_pos_state.size_contracts
-                        # ... (y cualquier otro atributo que el bot modifique automáticamente)
-                    else:
-                        # Si la posición que teníamos en el editor ya no existe en el estado real
-                        # (por ejemplo, el usuario la eliminó y luego una se cerró), la eliminamos del editor también.
-                        # Esto es un caso raro, pero previene inconsistencias.
-                        pass # Podríamos optar por eliminarla, pero por ahora la dejamos para no confundir al usuario.
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        
         clear_screen()
         print_tui_header(f"Asistente de Operación {side.upper()}")
         
@@ -253,7 +243,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         try:
             if choice == 0:
                 if position_editor:
-                    # Es crucial que el editor de posiciones también trabaje sobre `temp_op`
                     changes_made_in_editor = position_editor.show_position_editor_screen(temp_op, side)
                     if changes_made_in_editor:
                         params_changed = True
@@ -271,9 +260,22 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                         pos.valor_nominal = pos.capital_asignado * nuevo_apalancamiento
                     params_changed = True
 
+                # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
                 prompt_text = f"Nueva Distancia de Promediación para {side.upper()} (%)"
-                temp_op.averaging_distance_pct = get_input(prompt_text, float, temp_op.averaging_distance_pct, min_val=0.0, is_optional=True)
-                params_changed = True
+                # Se cambia 'is_optional' a False. Esto hará que get_input no acepte
+                # una entrada vacía (Enter) y que siga pidiendo un float.
+                # Se establece un min_val para asegurar que la promediación tenga sentido.
+                nuevo_valor_distancia = get_input(
+                    prompt_text, 
+                    float, 
+                    temp_op.averaging_distance_pct, 
+                    min_val=0.01, 
+                    is_optional=False # ¡EL CAMBIO CLAVE ESTÁ AQUÍ!
+                )
+                if nuevo_valor_distancia != temp_op.averaging_distance_pct:
+                    temp_op.averaging_distance_pct = nuevo_valor_distancia
+                    params_changed = True
+                # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
                 reinvest_menu_title = "\n¿Activar Reinversión Automática de Ganancias?"
                 reinvest_choice = TerminalMenu(["[1] Sí, activar", "[2] No, desactivar"], title=reinvest_menu_title, **MENU_STYLE).show()
@@ -328,6 +330,10 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
+            
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 def _edit_operation_risk_submenu(temp_op: Operacion):
     """Submenú para editar los parámetros de riesgo a nivel de operación."""
