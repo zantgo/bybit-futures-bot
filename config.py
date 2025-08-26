@@ -173,7 +173,7 @@ PRECISION_FALLBACKS = {
     "MIN_ORDER_QTY": 0.001,
     "PRICE_PRECISION": 4,
     "PNL_PRECISION": 4,
-    "MAINTENANCE_MARGIN_RATE": 0.01 # Tasa de Margen de Mantenimiento (ej. 1% = 0.01). Ajusta este valor si es necesario.
+    "MAINTENANCE_MARGIN_RATE": 0.02 # Tasa de Margen de Mantenimiento (ej. 1% = 0.01). Ajusta este valor si es necesario.
 }
 
 # Rutas de Archivos de Log y Resultados
