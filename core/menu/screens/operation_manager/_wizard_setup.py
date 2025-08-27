@@ -84,13 +84,31 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
 
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
+
 def _edit_entry_conditions_submenu(temp_op: Operacion):
     """
     Submenú dedicado a editar únicamente las Condiciones de Entrada de la operación.
     """
     print("\n--- Editando Condiciones de Entrada ---")
     
-    # Se añade la opción "[c] Cancelar y Volver" al menú.
+    # --- INICIO DE LA MODIFICACIÓN: Mostrar valor actual en el título ---
+    entry_cond_str = "No definida"
+    if temp_op.tipo_cond_entrada == 'MARKET': 
+        entry_cond_str = "Inmediata (Market)"
+    elif temp_op.tipo_cond_entrada == 'PRICE_ABOVE' and temp_op.valor_cond_entrada is not None: 
+        entry_cond_str = f"Precio > {temp_op.valor_cond_entrada:.4f}"
+    elif temp_op.tipo_cond_entrada == 'PRICE_BELOW' and temp_op.valor_cond_entrada is not None: 
+        entry_cond_str = f"Precio < {temp_op.valor_cond_entrada:.4f}"
+    elif temp_op.tipo_cond_entrada == 'TIME_DELAY' and temp_op.tiempo_espera_minutos is not None:
+        entry_cond_str = f"Activar después de {temp_op.tiempo_espera_minutos} min"
+    
+    menu_title = f"\nCondición de Entrada Actual: {entry_cond_str}\nSelecciona una nueva condición:"
+    # --- FIN DE LA MODIFICACIÓN ---
+
     entry_menu_items = [
         "[1] Inmediata (Market)", 
         "[2] Precio SUPERIOR a", 
@@ -100,14 +118,12 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         "[c] Cancelar y Volver"
     ]
     
-    # Se clona el estilo de menú para asegurar consistencia.
     menu_options = MENU_STYLE.copy()
     
-    entry_menu = TerminalMenu(entry_menu_items, title="\nSelecciona la Condición de Entrada:", **menu_options).show()
+    entry_menu = TerminalMenu(entry_menu_items, title=menu_title, **menu_options).show()
     
-    # Se añade la lógica para el caso de Cancelar (choice es 5 o None)
     if entry_menu is None or entry_menu == 5:
-        return # Simplemente sale de la función sin hacer cambios
+        return
 
     try:
         if entry_menu == 0:
@@ -130,6 +146,15 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         print("\nEdición de campo cancelada.")
         time.sleep(1)
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
+
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
+# ==============================================================================
 
 def _edit_exit_conditions_submenu(temp_op: Operacion):
     """
@@ -137,24 +162,29 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
     """
     print("\n--- Editando Límites y Condiciones de Salida ---")
 
-    # Bucle para permitir editar múltiples parámetros de salida sin volver al menú principal.
     while True:
-        # Se crean los items del menú dinámicamente para mostrar los valores actuales.
+        # --- INICIO DE LA MODIFICACIÓN: Crear etiquetas dinámicas para el menú ---
+        exit_price_str = "Desactivado"
+        if temp_op.tipo_cond_salida:
+            op = ">" if temp_op.tipo_cond_salida == 'PRICE_ABOVE' else "<"
+            exit_price_str = f"Precio {op} {temp_op.valor_cond_salida:.4f}"
+        
         exit_menu_items = [
-            f"[1] Condición de Salida por Precio ({temp_op.tipo_cond_salida or 'N/A'})",
+            f"[1] Condición de Salida por Precio ({exit_price_str})", # Etiqueta dinámica
             f"[2] Límite de Duración (min) ({temp_op.tiempo_maximo_min or 'Ilimitado'})",
             f"[3] Límite de Trades ({temp_op.max_comercios or 'Ilimitado'})",
             f"[4] Acción al Cumplir Límite ({temp_op.accion_al_finalizar})",
             None,
             "[b] Volver al menú anterior"
         ]
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         
         exit_main_menu = TerminalMenu(exit_menu_items, title="\nSelecciona un parámetro de salida para editar:", **menu_options).show()
 
         if exit_main_menu is None or exit_main_menu == 5:
-            break # Salir del bucle y de la función
+            break
         
         try:
             if exit_main_menu == 0:
@@ -183,6 +213,9 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
             print("\nEdición de campo cancelada.")
             time.sleep(1)
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     config_module = _deps.get("config_module")
@@ -382,6 +415,11 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     """
     Muestra la caja con la configuración actual de la operación.
@@ -445,7 +483,9 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     for label, value in op_risk_data.items():
         _print_line(label, value, max_key_len)
     
-    # --- CÓDIGO NUEVO Y CORREGIDO ---
+    # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
+    # Se refactoriza la visualización de condiciones para ser más clara y robusta.
+    
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condición de Entrada")
     
@@ -459,7 +499,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     elif operacion.tipo_cond_entrada == 'TIME_DELAY' and operacion.tiempo_espera_minutos is not None:
         entry_cond_str = f"Activar después de {operacion.tiempo_espera_minutos} minutos"
     
-    _print_line("Condición de Activación", entry_cond_str, 25) # Se usa un ancho fijo para una sola línea
+    _print_line("Condición de Activación", entry_cond_str, 25)
 
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Límites de Salida")
@@ -479,9 +519,13 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     max_key_len = max(len(k) for k in exit_limits_data.keys()) if exit_limits_data else 0
     for label, value in exit_limits_data.items():
         _print_line(label, value, max_key_len)
+    # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
     print("└" + "─" * (box_width - 2) + "┘")
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
