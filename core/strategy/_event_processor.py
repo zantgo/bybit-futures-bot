@@ -154,9 +154,6 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -192,51 +189,29 @@ class EventProcessor:
                                 f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral "
                                 f"agregado ({estimated_liq_price:.4f})"
                             )
-                            # Se cambia de ERROR a WARN para que no sea tan alarmante
                             self._memory_logger.log(reason, "WARN") 
                             self._om_api.handle_liquidation_event(side, reason)
                             continue
 
-                # --- INICIO DE LA MODIFICACIÓN: Lógica de estados refactorizada ---
-
-                # # --- CÓDIGO ORIGINAL COMENTADO ---
-                # # La lógica anterior separaba EN_ESPERA de ACTIVA/PAUSADA.
-                # if operacion.estado == 'EN_ESPERA':
-                #     # ... (lógica de entrada original) ...
-                # if operacion.estado in ['ACTIVA', 'PAUSADA']:
-                #     # ... (lógica de salida original) ...
-                # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-                # --- CÓDIGO NUEVO Y CORREGIDO ---
-                # 1. Lógica de ENTRADA (ahora se ejecuta para EN_ESPERA y PAUSADA)
-                if operacion.estado in ['EN_ESPERA', 'PAUSADA']:
+                if operacion.estado == 'EN_ESPERA':
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
                     entry_condition_met = False
                     
-                    if cond_type == 'MARKET':
-                        entry_condition_met = True
-                    elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value:
-                        entry_condition_met = True
-                    elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value:
-                        entry_condition_met = True
-                    elif (cond_type == 'TIME_DELAY' and 
-                          operacion.tiempo_inicio_espera is not None and 
-                          operacion.tiempo_espera_minutos is not None):
-                        elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds()
-                        elapsed_minutes = elapsed_seconds / 60.0
+                    if cond_type == 'MARKET': entry_condition_met = True
+                    elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value: entry_condition_met = True
+                    elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value: entry_condition_met = True
+                    elif (cond_type == 'TIME_DELAY' and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos):
+                        elapsed_minutes = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds() / 60.0
                         if elapsed_minutes >= operacion.tiempo_espera_minutos:
                             entry_condition_met = True
                     
                     if entry_condition_met:
                         self._om_api.activar_por_condicion(side)
-                        # Volvemos a obtener la operación, ya que su estado ha cambiado a ACTIVA
-                        operacion = self._om_api.get_operation_by_side(side)
-                        if not operacion: continue
+                        # No necesitamos `continue`, la lógica de abajo ya no se ejecutará para EN_ESPERA
 
-                # 2. Lógica de SALIDA y GESTIÓN (ahora se ejecuta solo si está ACTIVA)
-                # La lógica de riesgo de posiciones abiertas solo aplica si la operación está realmente activa.
-                if operacion.estado == 'ACTIVA':
+                # 2. Lógica de RIESGO y SALIDA (Se ejecuta si está ACTIVA o PAUSADA)
+                if operacion.estado in ['ACTIVA', 'PAUSADA']:
                     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
                         realized_roi = operacion.realized_twrr_roi
                         operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
@@ -247,9 +222,9 @@ class EventProcessor:
                     risk_condition_met = False
                     risk_reason = ""
 
+                    # 2.1 Comprobar RIESGOS DE OPERACIÓN (SL/TP/TSL por ROI). Esto se vigila incluso en PAUSA.
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
-                    
                     if tsl_act_pct is not None and tsl_dist_pct is not None:
                         tsl_state_changed = False
                         if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
@@ -258,7 +233,7 @@ class EventProcessor:
                         if tsl_state_changed: operacion = self._om_api.get_operation_by_side(side)
                         if not operacion: continue
                         if operacion.tsl_roi_activo:
-                            if roi > operacion.tsl_roi_peak_pct: 
+                            if roi > operacion.tsl_roi_peak_pct:
                                 self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
                                 operacion = self._om_api.get_operation_by_side(side)
                                 if not operacion: continue
@@ -280,26 +255,20 @@ class EventProcessor:
                         risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        if risk_action == 'DETENER':
-                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
-                        else:
-                            self._om_api.pausar_operacion(side, reason=risk_reason)
+                        if risk_action == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
+                        else: self._om_api.pausar_operacion(side, reason=risk_reason)
                         continue
 
+                    # 2.2 Comprobar LÍMITES DE SALIDA (Duración, Trades). Esto SOLO se vigila en estado ACTIVA.
                     exit_condition_met = False
                     exit_reason = ""
-                    if not risk_condition_met:
+                    if operacion.estado == 'ACTIVA' and not risk_condition_met:
                         if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                             exit_condition_met, exit_reason = True, f"Límite de {operacion.max_comercios} trades"
                         
-                        start_time = operacion.tiempo_inicio_ejecucion
-                        if not exit_condition_met and operacion.tiempo_maximo_min is not None and start_time:
-                            # Aquí se usa el nuevo temporizador que solo cuenta el tiempo activo
-                            elapsed_seconds = operacion.tiempo_acumulado_activo_seg
-                            if operacion.tiempo_ultimo_inicio_activo:
-                                elapsed_seconds += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-                            elapsed_min = elapsed_seconds / 60.0
-                            if elapsed_min >= operacion.tiempo_maximo_min:
+                        if not exit_condition_met and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
+                            elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                            if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
                                 exit_condition_met, exit_reason = True, f"Límite de tiempo activo ({operacion.tiempo_maximo_min} min)"
 
                         exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
@@ -309,7 +278,7 @@ class EventProcessor:
 
                         if exit_condition_met:
                             accion_final = operacion.accion_al_finalizar
-                            log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}"
+                            log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                             self._memory_logger.log(log_msg, "WARN")
                             if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
                             elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
@@ -320,9 +289,6 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y
