@@ -217,6 +217,10 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     config_module = _deps.get("config_module")
     if not config_module:
@@ -307,17 +311,36 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         
         _display_setup_box(temp_op, _get_terminal_width(), is_modification)
         
+        # --- INICIO DE LA MODIFICACIÓN: Actualizar el menú principal ---
+        # # --- CÓDIGO ORIGINAL COMENTADO ---
+        # menu_items = [
+        #     "[1] Gestionar Lista de Posiciones y Simular Riesgo",
+        #     "[2] Editar Estrategia Global (Apalancamiento, Promediación, Reinversión)",
+        #     "[3] Editar Riesgo por Posición Individual (SL/TSL)",
+        #     "[4] Editar Gestión de Riesgo de Operación (SL/TP por ROI)",
+        #     "[5] Editar Condiciones de Entrada y Salida",
+        #     None,
+        #     "[s] Guardar Cambios",
+        #     "[c] Cancelar y Volver"
+        # ]
+        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+        
+        # --- CÓDIGO NUEVO Y CORREGIDO ---
         menu_items = [
             "[1] Gestionar Lista de Posiciones y Simular Riesgo",
             "[2] Editar Estrategia Global (Apalancamiento, Promediación, Reinversión)",
             "[3] Editar Riesgo por Posición Individual (SL/TSL)",
             "[4] Editar Gestión de Riesgo de Operación (SL/TP por ROI)",
-            "[5] Editar Condiciones de Entrada", # <-- Cambio de etiqueta
-            "[6] Editar Condiciones de Salida", # <-- Nueva opción
+            "[5] Editar Condiciones de Entrada",
+            "[6] Editar Condiciones y Límites de Salida",
             None,
             "[s] Guardar Cambios",
             "[c] Cancelar y Volver"
         ]
+        
+        # Lógica para deshabilitar la edición de condiciones de entrada si la operación está activa.
+        if is_modification and temp_op.estado == 'ACTIVA':
+            menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
         # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
         
         menu_options = MENU_STYLE.copy()
@@ -376,8 +399,19 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 _edit_operation_risk_submenu(temp_op)
                 params_changed = True
             
+            # --- INICIO DE LA MODIFICACIÓN: Actualizar las llamadas a los submenús ---
+            # # --- CÓDIGO ORIGINAL COMENTADO ---
+            # elif choice == 4:
+            #     _edit_exit_limits_submenu(temp_op)
+            #     params_changed = True
+            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+
             # --- CÓDIGO NUEVO Y CORREGIDO ---
             elif choice == 4:
+                if is_modification and temp_op.estado == 'ACTIVA':
+                    print("\nNo se pueden editar las condiciones de entrada mientras la operación está ACTIVA.")
+                    time.sleep(2.5)
+                    continue
                 _edit_entry_conditions_submenu(temp_op)
                 params_changed = True
 
@@ -386,7 +420,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 params_changed = True
             # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
 
-            elif choice == 7: # El índice de Guardar ahora es 7
+            elif choice == 7:
                 if not params_changed and is_modification:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     break
@@ -401,7 +435,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     print(f"\n{msg}"); time.sleep(2.5)
                     break
             
-            elif choice == 8 or choice is None: # El índice de Cancelar ahora es 8
+            elif choice == 8 or choice is None:
                 if params_changed:
                     cancel_confirm = TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?").show()
                     if cancel_confirm == 0:
@@ -410,10 +444,13 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 else:
                     print("\nAsistente cancelado."); time.sleep(1.5)
                     break
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 
 # ==============================================================================

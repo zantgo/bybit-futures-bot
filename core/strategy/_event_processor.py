@@ -41,13 +41,19 @@ class EventProcessor:
     operación y posición. Ahora es una clase para una gestión de estado limpia.
     """
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 3) ---
+# ==============================================================================
+
     def __init__(self, dependencies: Dict[str, Any]):
         """
         Inicializa el EventProcessor inyectando todas sus dependencias.
         """
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
-        self._exchange_adapter = dependencies.get('exchange_adapter') # <--- MODIFICACIÓN: Añadir adaptador
+        # --- INICIO DE LA MODIFICACIÓN: Inyectar el adaptador de exchange ---
+        self._exchange_adapter = dependencies.get('exchange_adapter')
+        # --- FIN DE LA MODIFICACIÓN ---
         self._memory_logger = dependencies.get('memory_logger_module')
         self._signal_logger = dependencies.get('signal_logger_module')
         self._pm_api = dependencies.get('position_manager_api_module')
@@ -61,6 +67,10 @@ class EventProcessor:
         self._pm_instance: Optional['PositionManager'] = None
         self._previous_raw_event_price: float = np.nan
         self._is_first_event: bool = True
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
     def initialize(
         self,
@@ -90,6 +100,9 @@ class EventProcessor:
     def get_latest_signal_data(self) -> Dict[str, Any]:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 3) ---
+# ==============================================================================
 
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
@@ -109,10 +122,18 @@ class EventProcessor:
             self._memory_logger.log(f"Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}", level="WARN")
             return
 
-       
         try:
-            # 1. Comprobar la existencia física de las posiciones ANTES de cualquier otra lógica.
-            self._check_physical_position_existence()
+            # --- INICIO DE LA MODIFICACIÓN: Llamar a la nueva API del PM ---
+            # # --- CÓDIGO ORIGINAL COMENTADO ---
+            # # 1. Comprobar la existencia física de las posiciones ANTES de cualquier otra lógica.
+            # self._check_physical_position_existence()
+            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+            
+            # --- CÓDIGO NUEVO Y CORREGIDO ---
+            # 1. Llamar al heartbeat de sincronización a través de la API del PM
+            for side in ['long', 'short']:
+                self._pm_api.sync_physical_positions(side)
+            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
 
             # 2. Comprobar Triggers de la Operación (lógica predictiva de liquidación, SL/TP, etc.)
             self._check_operation_triggers(current_price)
@@ -132,14 +153,10 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-        # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
-        # --- FIN DE LA MODIFICACIÓN ---
-
 
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
-
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -175,12 +192,24 @@ class EventProcessor:
                                 f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral "
                                 f"agregado ({estimated_liq_price:.4f})"
                             )
-                            self._memory_logger.log(reason, "ERROR")
+                            # Se cambia de ERROR a WARN para que no sea tan alarmante
+                            self._memory_logger.log(reason, "WARN") 
                             self._om_api.handle_liquidation_event(side, reason)
                             continue
 
-                # --- Lógica de ENTRADA ---
-                if operacion.estado == 'EN_ESPERA':
+                # --- INICIO DE LA MODIFICACIÓN: Lógica de estados refactorizada ---
+
+                # # --- CÓDIGO ORIGINAL COMENTADO ---
+                # # La lógica anterior separaba EN_ESPERA de ACTIVA/PAUSADA.
+                # if operacion.estado == 'EN_ESPERA':
+                #     # ... (lógica de entrada original) ...
+                # if operacion.estado in ['ACTIVA', 'PAUSADA']:
+                #     # ... (lógica de salida original) ...
+                # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+
+                # --- CÓDIGO NUEVO Y CORREGIDO ---
+                # 1. Lógica de ENTRADA (ahora se ejecuta para EN_ESPERA y PAUSADA)
+                if operacion.estado in ['EN_ESPERA', 'PAUSADA']:
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
                     entry_condition_met = False
@@ -191,26 +220,23 @@ class EventProcessor:
                         entry_condition_met = True
                     elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value:
                         entry_condition_met = True
-                    
-                    # --- INICIO DE LA MODIFICACIÓN: Comprobar la condición de tiempo ---
                     elif (cond_type == 'TIME_DELAY' and 
                           operacion.tiempo_inicio_espera is not None and 
                           operacion.tiempo_espera_minutos is not None):
-                        
-                        # Calcular el tiempo transcurrido en minutos
                         elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds()
                         elapsed_minutes = elapsed_seconds / 60.0
-                        
-                        # Comprobar si se ha cumplido el tiempo de espera
                         if elapsed_minutes >= operacion.tiempo_espera_minutos:
                             entry_condition_met = True
-                    # --- FIN DE LA MODIFICACIÓN ---
-
+                    
                     if entry_condition_met:
                         self._om_api.activar_por_condicion(side)
+                        # Volvemos a obtener la operación, ya que su estado ha cambiado a ACTIVA
+                        operacion = self._om_api.get_operation_by_side(side)
+                        if not operacion: continue
 
-                # --- Lógica de SALIDA y GESTIÓN ---
-                if operacion.estado in ['ACTIVA', 'PAUSADA']:
+                # 2. Lógica de SALIDA y GESTIÓN (ahora se ejecuta solo si está ACTIVA)
+                # La lógica de riesgo de posiciones abiertas solo aplica si la operación está realmente activa.
+                if operacion.estado == 'ACTIVA':
                     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
                         realized_roi = operacion.realized_twrr_roi
                         operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
@@ -228,19 +254,14 @@ class EventProcessor:
                         tsl_state_changed = False
                         if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
                             self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
-                            self._memory_logger.log(f"RIESGO TSL-ROI para {side.upper()} ACTIVADO. ROI: {roi:.2f}%, Pico: {roi:.2f}%", "INFO")
                             tsl_state_changed = True
-                        
-                        if tsl_state_changed:
-                            operacion = self._om_api.get_operation_by_side(side)
-                            if not operacion: continue
-
+                        if tsl_state_changed: operacion = self._om_api.get_operation_by_side(side)
+                        if not operacion: continue
                         if operacion.tsl_roi_activo:
                             if roi > operacion.tsl_roi_peak_pct: 
                                 self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
                                 operacion = self._om_api.get_operation_by_side(side)
                                 if not operacion: continue
-                            
                             umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
                             if roi <= umbral_disparo: 
                                 risk_condition_met = True
@@ -259,12 +280,10 @@ class EventProcessor:
                         risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        
                         if risk_action == 'DETENER':
                             self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
                         else:
                             self._om_api.pausar_operacion(side, reason=risk_reason)
-                        
                         continue
 
                     exit_condition_met = False
@@ -275,8 +294,13 @@ class EventProcessor:
                         
                         start_time = operacion.tiempo_inicio_ejecucion
                         if not exit_condition_met and operacion.tiempo_maximo_min is not None and start_time:
-                            elapsed_min = (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() / 60.0
-                            if elapsed_min >= operacion.tiempo_maximo_min: exit_condition_met, exit_reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min)"
+                            # Aquí se usa el nuevo temporizador que solo cuenta el tiempo activo
+                            elapsed_seconds = operacion.tiempo_acumulado_activo_seg
+                            if operacion.tiempo_ultimo_inicio_activo:
+                                elapsed_seconds += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                            elapsed_min = elapsed_seconds / 60.0
+                            if elapsed_min >= operacion.tiempo_maximo_min:
+                                exit_condition_met, exit_reason = True, f"Límite de tiempo activo ({operacion.tiempo_maximo_min} min)"
 
                         exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
                         if not exit_condition_met and exit_type and exit_value is not None:
@@ -290,6 +314,7 @@ class EventProcessor:
                             if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
                             elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
                             else: self._om_api.pausar_operacion(side, reason=exit_reason)
+                # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
@@ -298,7 +323,6 @@ class EventProcessor:
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
-
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y
@@ -328,51 +352,3 @@ class EventProcessor:
         self._previous_raw_event_price = price
         return signal_data
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
-    def _check_physical_position_existence(self):
-        """
-        Comprueba si las posiciones que el bot cree que están abiertas realmente
-        existen en el exchange. Si no, asume una liquidación o cierre externo.
-        """
-        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
-            return
-
-        if not self._exchange_adapter:
-            self._memory_logger.log("WARN [Sync Check]: Adaptador de exchange no disponible, no se puede sincronizar.", "WARN")
-            return
-
-        for side in ['long', 'short']:
-            operacion = self._om_api.get_operation_by_side(side)
-            
-            if operacion and operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
-                
-                account_purpose = 'longs' if side == 'long' else 'shorts'
-                physical_positions = self._exchange_adapter.get_positions(
-                    symbol=self._config.BOT_CONFIG["TICKER"]["SYMBOL"],
-                    account_purpose=account_purpose
-                )
-
-                if not physical_positions:
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # 1. Se crea una razón más corta y concisa.
-                    reason = f"Liquidación o Cierre Externo ({side.upper()})"
-                    
-                    # 2. Se crea un mensaje de log más detallado para el registro interno.
-                    log_details = (
-                        f"CIERRE INESPERADO ({side.upper()}): "
-                        f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
-                        f"pero no se encontró ninguna en el exchange."
-                    )
-                    
-                    # 3. El nivel de log se cambia de ERROR a WARN.
-                    self._memory_logger.log(log_details, "WARN")
-                    # --- FIN DE LA MODIFICACIÓN ---
-                    
-                    self._om_api.handle_liquidation_event(side, reason)
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================

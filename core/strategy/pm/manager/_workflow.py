@@ -20,29 +20,53 @@ class _Workflow:
         if operacion and operacion.estado == 'ACTIVA' and self._can_open_new_position(side_to_open):
             self._open_logical_position(side_to_open, entry_price, timestamp)
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
+
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
-        Refactorizado para separar la fase de actualización de estado de la fase de decisión.
+        Ahora integra la sincronización física antes de actuar en estado DETENIENDO.
         """
         if not self._initialized or not self._executor:
             return
-            
-        # --- AÑADIDO: Log de depuración ---
-        #self._memory_logger.log(f"[DEBUG] check_and_close_positions llamado. price={current_price} ts={timestamp}", "DEBUG")
 
         for side in ['long', 'short']:
             operacion = self._om_api.get_operation_by_side(side)
             if not operacion:
                 continue
 
-            # --- GESTIÓN DE DETENCIÓN FORZOSA ---
+            # --- INICIO DE LA MODIFICACIÓN: Lógica de Detención Robusta ---
+            # # --- CÓDIGO ORIGINAL COMENTADO ---
+            # # --- GESTIÓN DE DETENCIÓN FORZOSA ---
+            # if operacion.estado == 'DETENIENDO':
+            #     if operacion.posiciones_abiertas_count > 0:
+            #         self._memory_logger.log(f"PM Workflow: Detectado estado DETENIENDO para {side.upper()}. "
+            #                                 f"Iniciando cierre de {operacion.posiciones_abiertas_count} posiciones.", "WARN")
+            #         self.close_all_logical_positions(side, reason="FORCE_STOP")
+            #     continue
+            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+
+            # --- CÓDIGO NUEVO Y CORREGIDO ---
             if operacion.estado == 'DETENIENDO':
-                if operacion.posiciones_abiertas_count > 0:
-                    self._memory_logger.log(f"PM Workflow: Detectado estado DETENIENDO para {side.upper()}. "
-                                            f"Iniciando cierre de {operacion.posiciones_abiertas_count} posiciones.", "WARN")
+                # 1. Primero, sincronizar para saber la verdad del exchange.
+                self.sync_physical_positions(side)
+                
+                # 2. Volver a obtener el estado, que podría haber sido limpiado por la sincronización.
+                operacion_actualizada = self._om_api.get_operation_by_side(side)
+                if not operacion_actualizada: continue
+
+                # 3. Solo si AÚN quedan posiciones abiertas, intentar cerrarlas.
+                if operacion_actualizada.posiciones_abiertas_count > 0:
+                    self._memory_logger.log(f"PM Workflow: Estado DETENIENDO confirmado para {side.upper()}. "
+                                            f"Intentando cierre forzoso de {operacion_actualizada.posiciones_abiertas_count} posiciones.", "WARN")
                     self.close_all_logical_positions(side, reason="FORCE_STOP")
+                
+                # En cualquier caso, se detiene el procesamiento normal para este lado.
                 continue
+            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+            # --- FIN DE LA MODIFICACIÓN ---
 
             if operacion.estado not in ['ACTIVA', 'PAUSADA']:
                 continue
@@ -52,11 +76,9 @@ class _Workflow:
             if not initial_open_indices:
                 continue
 
-            # --- FASE 1: ACTUALIZAR EL ESTADO DE TODOS LOS TRAILING STOPS ---
             for index in initial_open_indices:
                 self._update_trailing_stop(side, index, current_price)
 
-            # --- FASE 2: TOMAR DECISIONES DE CIERRE BASADO EN EL ESTADO FINAL ---
             operacion_actualizada = self._om_api.get_operation_by_side(side)
             if not operacion_actualizada:
                 continue
@@ -68,24 +90,19 @@ class _Workflow:
                 
                 pos = operacion_actualizada.posiciones[index]
                 
-                # Comprobación de Stop Loss (SL)
                 sl_price = pos.stop_loss_price
                 if sl_price and ((side == 'long' and current_price <= sl_price) or \
                                  (side == 'short' and current_price >= sl_price)):
                     positions_to_close.append({'index': index, 'reason': 'SL'})
                     continue
 
-                # Comprobación de Trailing Stop Loss (TSL)
                 ts_stop_price = pos.ts_stop_price
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or \
                                       (side == 'short' and current_price >= ts_stop_price)):
                     positions_to_close.append({'index': index, 'reason': 'TS'})
 
-            # --- FASE 3: EJECUTAR CIERRES ---
             if positions_to_close:
                 for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
-                    # --- AÑADIDO: Log de depuración ---
-                    self._memory_logger.log(f"[DEBUG] Planificando cierre side={side} index={close_info['index']} reason={close_info.get('reason')}", "DEBUG")
                     self._close_logical_position(
                         side, 
                         close_info['index'], 
@@ -93,3 +110,58 @@ class _Workflow:
                         timestamp, 
                         reason=close_info.get('reason', "UNKNOWN")
                     )
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A AÑADIR (Nueva Función) ---
+# ==============================================================================
+
+    def sync_physical_positions(self, side: str):
+        """
+        Comprueba la existencia real de una posición en el exchange y sincroniza
+        el estado interno del bot si hay una discrepancia.
+        """
+        # No ejecutar en modo de simulación
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            return
+
+        operacion = self._om_api.get_operation_by_side(side)
+        
+        # Solo actuar si el bot cree que hay posiciones abiertas
+        if not (operacion and operacion.posiciones_abiertas_count > 0):
+            return
+            
+        # El estado ACTIVA o DETENIENDO son los únicos relevantes para esta comprobación
+        if operacion.estado not in ['ACTIVA', 'DETENIENDO']:
+            return
+
+        try:
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            
+            # Llamada a la API para obtener la posición física real
+            physical_positions = self._exchange.get_positions(
+                symbol=symbol,
+                account_purpose=account_purpose
+            )
+
+            # Si la lista está vacía, significa que no hay posición en el exchange
+            if not physical_positions:
+                reason = (
+                    f"CIERRE INESPERADO DETECTADO ({side.upper()}): "
+                    f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
+                    f"pero no se encontró ninguna en el exchange. Posible liquidación."
+                )
+                self._memory_logger.log(reason, "WARN")
+                
+                # Llamar al manejador de liquidación para resetear el estado
+                self._om_api.handle_liquidation_event(side, reason)
+        except Exception as e:
+            self._memory_logger.log(f"PM ERROR: Excepción durante la sincronización física de posiciones ({side}): {e}", "ERROR")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A AÑADIR ---
+# ==============================================================================

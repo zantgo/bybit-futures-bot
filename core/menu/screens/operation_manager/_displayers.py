@@ -111,6 +111,11 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -118,8 +123,19 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     print("├" + "─" * (box_width - 2) + "┤")
 
     if not operacion or operacion.estado == 'DETENIDA':
-        print(_create_box_line(f"La operación {side.upper()} está DETENIDA", box_width, 'center'))
-        print("└" + "─" * (box_width - 2) + "┘")
+        # --- CÓDIGO ORIGINAL COMENTADO ---
+        # print(_create_box_line(f"La operación {side.upper()} está DETENIDA", box_width, 'center'))
+        # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+        
+        # --- CÓDIGO NUEVO Y CORREGIDO ---
+        # Muestra el PNL final si la operación está detenida pero tiene historial
+        if operacion.pnl_realizado_usdt != 0:
+            pnl_final_str = f"{operacion.pnl_realizado_usdt:+.4f} USDT"
+            print(_create_box_line(f"Operación DETENIDA (Último PNL Realizado: {pnl_final_str})", box_width, 'center'))
+        else:
+            print(_create_box_line(f"La operación {side.upper()} está DETENIDA", box_width, 'center'))
+        # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+        print("└" * (box_width - 2) + "┘")
         return
 
     tendencia = operacion.tendencia
@@ -129,24 +145,65 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     pos_abiertas = operacion.posiciones_abiertas_count
     pos_total = len(operacion.posiciones)
 
-    fecha_activacion_str = "N/A"
-    tiempo_ejecucion_str = "N/A"
-    if operacion.tiempo_inicio_ejecucion:
-        fecha_activacion_str = operacion.tiempo_inicio_ejecucion.strftime('%H:%M:%S %d-%m-%Y (UTC)')
-        if operacion.estado == 'ACTIVA':
-            duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
-            total_seconds = int(duration.total_seconds())
-            hours, remainder = divmod(total_seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+    # --- INICIO DE LA MODIFICACIÓN: Lógica de visualización de tiempo ---
+    # Se reemplaza la lógica anterior por una más completa que maneja todos los estados.
 
+    # # --- CÓDIGO ORIGINAL COMENTADO ---
+    # fecha_activacion_str = "N/A"
+    # tiempo_ejecucion_str = "N/A"
+    # if operacion.tiempo_inicio_ejecucion:
+    #     fecha_activacion_str = operacion.tiempo_inicio_ejecucion.strftime('%H:%M:%S %d-%m-%Y (UTC)')
+    #     if operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']:
+    #         duration = datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_ejecucion
+    #         total_seconds = int(duration.total_seconds())
+    #         hours, remainder = divmod(total_seconds, 3600)
+    #         minutes, seconds = divmod(remainder, 60)
+    #         tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+    # data = {
+    #     "Tendencia": f"{color}{tendencia}{reset}",
+    #     "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
+    #     "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
+    #     "Fecha Activacion": fecha_activacion_str,
+    #     "Tiempo Activa": tiempo_ejecucion_str
+    # }
+    # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
+
+    # --- CÓDIGO NUEVO Y CORREGIDO ---
     data = {
         "Tendencia": f"{color}{tendencia}{reset}",
         "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
-        "Fecha Activacion": fecha_activacion_str,
-        "Tiempo Activa": tiempo_ejecucion_str
     }
+    
+    # Lógica para el TEMPORIZADOR DE ENTRADA
+    if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tipo_cond_entrada == 'TIME_DELAY':
+        if operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos:
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
+            time_left = end_time - now_utc
+            if time_left.total_seconds() > 0:
+                # Formatear el tiempo restante
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    # Lógica para el CRONÓMETRO DE DURACIÓN
+    if operacion.tiempo_maximo_min is not None:
+        total_seconds_active = operacion.tiempo_acumulado_activo_seg
+        if operacion.estado == 'ACTIVA' and operacion.tiempo_ultimo_inicio_activo:
+            total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+        
+        hours, remainder = divmod(int(total_seconds_active), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+        
+        label = "Tiempo Activo"
+        if operacion.estado == 'PAUSADA':
+            label += " (Pausado)"
+            
+        data[label] = f"{tiempo_ejecucion_str} / {operacion.tiempo_maximo_min} min"
+    # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+    # --- FIN DE LA MODIFICACIÓN ---
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
     for key, value in data.items():
@@ -154,6 +211,10 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):

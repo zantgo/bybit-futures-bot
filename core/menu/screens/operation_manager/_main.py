@@ -105,6 +105,10 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             press_enter_to_continue()
             break
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
@@ -151,10 +155,8 @@ def _show_single_operation_view(side: str):
             _displayers._display_positions_tables(summary, operacion, current_price, side) 
             _displayers._display_operation_conditions(operacion)
             
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de construcción de menú y acciones simplificada y corregida ---
-            
             menu_items = []
-            actions = []  # Lista paralela a menu_items que contendrá las claves de acción
+            actions = []
             current_state = operacion.estado
 
             if current_state == 'DETENIDA':
@@ -195,7 +197,6 @@ def _show_single_operation_view(side: str):
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
                 actions.append("panic_close")
 
-            # Añadir las acciones comunes al final
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
             actions.extend([None, "refresh", "help", "back"])
             
@@ -203,7 +204,6 @@ def _show_single_operation_view(side: str):
             menu_options['clear_screen'] = False
             
             main_menu = TerminalMenu(
-                # Filtramos los None para que el menú no los muestre como seleccionables
                 [item for item in menu_items if item is not None],
                 title="\nAcciones:", 
                 **menu_options
@@ -212,28 +212,27 @@ def _show_single_operation_view(side: str):
             
             action = None
             if choice_index is not None:
-                # Usamos el índice para encontrar la acción en nuestra lista paralela
-                # Primero, creamos una lista de acciones sin los None
                 selectable_actions = [act for act in actions if act is not None]
                 if choice_index < len(selectable_actions):
                     action = selectable_actions[choice_index]
             
-            # --- FIN DE LA MODIFICACIÓN ---
-            
+            # --- INICIO DE LA MODIFICACIÓN: Añadir pausas para sincronización ---
             if action == "start_new": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "pause":
                 om_api.pausar_operacion(side)
-                time.sleep(0.5)
+                time.sleep(0.2) # Pausa para permitir que el estado se actualice
             elif action == "resume":
                 om_api.reanudar_operacion(side)
-                time.sleep(0.5)
+                time.sleep(0.2) # Pausa para permitir que el estado se actualice
             elif action == "force_start":
                 confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show()
                 if confirm_menu == 0:
                     om_api.forzar_activacion_manual(side)
+                    time.sleep(0.2) # Pausa para permitir que el estado se actualice
+            # --- FIN DE LA MODIFICACIÓN ---
             
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
@@ -269,3 +268,7 @@ def _show_single_operation_view(side: str):
             traceback.print_exc()
             press_enter_to_continue()
             break
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
