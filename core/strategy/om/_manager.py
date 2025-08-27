@@ -197,24 +197,59 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'PAUSADA':
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
+
+            # --- INICIO DE LA CORRECCIÓN CLAVE ---
+            # Comprobamos la condición de entrada actual antes de decidir el nuevo estado.
+            summary = sm_api.get_session_summary() if sm_api else {}
+            current_price = summary.get('current_market_price', 0.0)
             
-            target_op.estado = 'ACTIVA'
-            target_op.estado_razon = "Reanudada manualmente por el usuario." # <-- MODIFICADO
+            cond_type = target_op.tipo_cond_entrada
+            cond_value = target_op.valor_cond_entrada
+            
+            condition_met = False
+            if cond_type == 'MARKET':
+                condition_met = True
+            elif cond_type == 'TIME_DELAY':
+                # Al reanudar, si la condición es de tiempo, asumimos que debe volver a esperar.
+                # Se podría añadir lógica para ver si el tiempo ya pasó, pero esto es más seguro.
+                target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+                condition_met = False # Debe volver a EN_ESPERA
+            elif current_price > 0 and cond_value is not None:
+                if cond_type == 'PRICE_ABOVE' and current_price > cond_value:
+                    condition_met = True
+                elif cond_type == 'PRICE_BELOW' and current_price < cond_value:
+                    condition_met = True
+
+            if condition_met:
+                target_op.estado = 'ACTIVA'
+                target_op.estado_razon = "Reanudada manualmente por el usuario."
+            else:
+                target_op.estado = 'EN_ESPERA'
+                target_op.estado_razon = "Reanudada, en espera de nueva condición de entrada."
+            # --- FIN DE LA CORRECCIÓN CLAVE ---
             
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
 
-            if not target_op.tiempo_inicio_ejecucion:
+            if not target_op.tiempo_inicio_ejecucion and target_op.estado == 'ACTIVA':
                 target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
                 
-        msg = f"OPERACIÓN {side.upper()} REANUDADA. El sistema está ahora ACTIVO para este lado."
+        msg = f"OPERACIÓN {side.upper()} REANUDADA. Nuevo estado: {target_op.estado}."
         self._memory_logger.log(msg, "WARN")
         return True, msg
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
