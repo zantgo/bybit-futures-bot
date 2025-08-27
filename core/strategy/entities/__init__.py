@@ -108,6 +108,7 @@ class Operacion:
         self.reinvestable_profit_balance: float = 0.0
         
         # --- INICIO DE LA MODIFICACIÓN: Añadir los nuevos atributos de tiempo ---
+        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None # Mantenido por compatibilidad
         self.tiempo_acumulado_activo_seg: float = 0.0
         self.tiempo_ultimo_inicio_activo: Optional[datetime.datetime] = None
         # --- FIN DE LA MODIFICACIÓN ---
@@ -298,7 +299,6 @@ class Operacion:
             "equity_actual_vivo": equity_actual_vivo,
             "roi_twrr_vivo": roi_twrr_vivo
         }
-
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función reset en la clase Operacion) ---
 # ==============================================================================
@@ -327,6 +327,7 @@ class Operacion:
         self.tiempo_inicio_espera = None
         
         # --- INICIO DE LA MODIFICACIÓN: Resetear los nuevos atributos de tiempo ---
+        self.tiempo_inicio_ejecucion = None # Mantenido por compatibilidad
         self.tiempo_acumulado_activo_seg = 0.0
         self.tiempo_ultimo_inicio_activo = None
         # --- FIN DE LA MODIFICACIÓN ---

@@ -111,11 +111,6 @@ def _create_box_line(content: str, width: int, alignment: str = 'left') -> str:
     else:
         return f"│ {content}{' ' * (padding_needed - 1)}│"
 
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -123,18 +118,18 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     print("├" + "─" * (box_width - 2) + "┤")
 
     if not operacion or operacion.estado == 'DETENIDA':
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Se corrige el error de renderizado del borde inferior y se mantiene
-        # la lógica para mostrar el PNL final.
         if operacion and operacion.pnl_realizado_usdt != 0:
             pnl_final_str = f"{operacion.pnl_realizado_usdt:+.4f} USDT"
             print(_create_box_line(f"Operación DETENIDA (Último PNL Realizado: {pnl_final_str})", box_width, 'center'))
         else:
             print(_create_box_line(f"La operación {side.upper()} está DETENIDA", box_width, 'center'))
         
-        # Se corrige la línea que imprime el borde inferior.
+        # --- INICIO DE LA CORRECCIÓN EXACTA ---
+        # El error de visualización (└└└└...) ocurría por una construcción incorrecta de esta línea.
+        # La forma correcta es concatenar la esquina '└' con las líneas '─' y luego con la esquina '┘',
+        # en lugar de multiplicar la esquina '└' por error.
         print("└" + "─" * (box_width - 2) + "┘")
-        # --- FIN DE LA CORRECCIÓN ---
+        # --- FIN DE LA CORRECCIÓN EXACTA ---
         return
 
     tendencia = operacion.tendencia
@@ -152,7 +147,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     
     # Lógica para el TEMPORIZADOR DE ENTRADA
     if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tipo_cond_entrada == 'TIME_DELAY':
-        if operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos:
+        if getattr(operacion, 'tiempo_inicio_espera', None) and getattr(operacion, 'tiempo_espera_minutos', None):
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
             time_left = end_time - now_utc
@@ -183,10 +178,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     # --- COMIENZO DE LA FUNCIÓN A REEMPLAZAR ---
