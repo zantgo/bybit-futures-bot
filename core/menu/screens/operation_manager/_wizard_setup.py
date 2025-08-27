@@ -42,6 +42,11 @@ def init(dependencies: Dict[str, Any]):
     if position_editor and hasattr(position_editor, 'init'):
         position_editor.init(dependencies)
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
+
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     """
     Muestra la caja con la configuración actual de la operación.
@@ -71,7 +76,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     _print_section_header("Estrategia Global")
     strategy_data = {
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
-        "Distancia Promediación (%)": operacion.averaging_distance_pct if operacion.averaging_distance_pct is not None else "Desactivado",
+        "Distancia Promediación (%)": f"{operacion.averaging_distance_pct:.2f}%" if isinstance(operacion.averaging_distance_pct, (int, float)) else "Desactivado",
         "Reinvertir Ganancias": "Activado" if getattr(operacion, 'auto_reinvest_enabled', False) else "Desactivado",
     }
     max_key_len = max(len(k) for k in strategy_data.keys()) if strategy_data else 0
@@ -107,10 +112,19 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones y Límites de Salida")
-    if operacion.tipo_cond_entrada == 'MARKET': entry_cond_str = "Inmediata (Precio de Mercado)"
-    elif operacion.tipo_cond_entrada == 'PRICE_ABOVE': entry_cond_str = f"Precio > {operacion.valor_cond_entrada:.4f}"
-    elif operacion.tipo_cond_entrada == 'PRICE_BELOW': entry_cond_str = f"Precio < {operacion.valor_cond_entrada:.4f}"
-    else: entry_cond_str = "No definida"
+    
+    # --- INICIO DE LA MODIFICACIÓN: Visualizar la nueva condición de entrada por tiempo ---
+    # Se añade la lógica para mostrar el nuevo estado TIME_DELAY
+    entry_cond_str = "No definida"
+    if operacion.tipo_cond_entrada == 'MARKET': 
+        entry_cond_str = "Inmediata (Precio de Mercado)"
+    elif operacion.tipo_cond_entrada == 'PRICE_ABOVE': 
+        entry_cond_str = f"Precio > {operacion.valor_cond_entrada:.4f}"
+    elif operacion.tipo_cond_entrada == 'PRICE_BELOW': 
+        entry_cond_str = f"Precio < {operacion.valor_cond_entrada:.4f}"
+    elif operacion.tipo_cond_entrada == 'TIME_DELAY':
+        entry_cond_str = f"Activar después de {operacion.tiempo_espera_minutos} minutos"
+    # --- FIN DE LA MODIFICACIÓN ---
     
     if operacion.tipo_cond_salida:
         op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
@@ -130,7 +144,9 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
 
-
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
+# ==============================================================================
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
 # ==============================================================================
@@ -385,22 +401,59 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
     else:
         temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
+# ==============================================================================
+
 def _edit_exit_limits_submenu(temp_op: Operacion):
     """Submenú para editar las condiciones de entrada, límites de salida y acción final."""
     print("\n--- Editando Límites y Condiciones de Salida ---")
-    entry_menu = TerminalMenu(["[1] Inmediata (Market)", "[2] Precio SUPERIOR a", "[3] Precio INFERIOR a"], title="\nSelecciona la Condición de Entrada:").show()
-    if entry_menu == 0: temp_op.tipo_cond_entrada, temp_op.valor_cond_entrada = 'MARKET', 0.0
-    elif entry_menu == 1: temp_op.tipo_cond_entrada, temp_op.valor_cond_entrada = 'PRICE_ABOVE', get_input("Activar si precio >", float)
-    elif entry_menu == 2: temp_op.tipo_cond_entrada, temp_op.valor_cond_entrada = 'PRICE_BELOW', get_input("Activar si precio <", float)
+    
+    # --- INICIO DE LA MODIFICACIÓN: Añadir nueva opción al menú y su lógica ---
+    # Se añade la opción "[4] Activar después de X minutos"
+    entry_menu_items = [
+        "[1] Inmediata (Market)", 
+        "[2] Precio SUPERIOR a", 
+        "[3] Precio INFERIOR a",
+        "[4] Activar después de X minutos"
+    ]
+    entry_menu = TerminalMenu(entry_menu_items, title="\nSelecciona la Condición de Entrada:").show()
+    
+    if entry_menu == 0:
+        temp_op.tipo_cond_entrada = 'MARKET'
+        temp_op.valor_cond_entrada = 0.0
+        temp_op.tiempo_espera_minutos = None # Limpiar el valor de tiempo
+    elif entry_menu == 1:
+        temp_op.tipo_cond_entrada = 'PRICE_ABOVE'
+        temp_op.valor_cond_entrada = get_input("Activar si precio >", float)
+        temp_op.tiempo_espera_minutos = None # Limpiar el valor de tiempo
+    elif entry_menu == 2:
+        temp_op.tipo_cond_entrada = 'PRICE_BELOW'
+        temp_op.valor_cond_entrada = get_input("Activar si precio <", float)
+        temp_op.tiempo_espera_minutos = None # Limpiar el valor de tiempo
+    elif entry_menu == 3:
+        temp_op.tipo_cond_entrada = 'TIME_DELAY'
+        temp_op.tiempo_espera_minutos = get_input("Activar después de (minutos)", int, min_val=1)
+        temp_op.valor_cond_entrada = None # Limpiar el valor de precio
+    # --- FIN DE LA MODIFICACIÓN ---
 
     exit_price_menu = TerminalMenu(["[1] Sin condición de precio", "[2] Salir si precio SUPERIOR a", "[3] Salir si precio INFERIOR a"], title="\nCondición de Salida por Precio:").show()
-    if exit_price_menu == 0: temp_op.tipo_cond_salida, temp_op.valor_cond_salida = None, None
-    elif exit_price_menu == 1: temp_op.tipo_cond_salida, temp_op.valor_cond_salida = 'PRICE_ABOVE', get_input("Salir si precio >", float)
-    elif exit_price_menu == 2: temp_op.tipo_cond_salida, temp_op.valor_cond_salida = 'PRICE_BELOW', get_input("Salir si precio <", float)
+    if exit_price_menu == 0:
+        temp_op.tipo_cond_salida, temp_op.valor_cond_salida = None, None
+    elif exit_price_menu == 1:
+        temp_op.tipo_cond_salida, temp_op.valor_cond_salida = 'PRICE_ABOVE', get_input("Salir si precio >", float)
+    elif exit_price_menu == 2:
+        temp_op.tipo_cond_salida, temp_op.valor_cond_salida = 'PRICE_BELOW', get_input("Salir si precio <", float)
 
     temp_op.tiempo_maximo_min = get_input("Límite de Duración (min)", int, temp_op.tiempo_maximo_min, min_val=1, is_optional=True)
     temp_op.max_comercios = get_input("Límite de Trades", int, temp_op.max_comercios, min_val=1, is_optional=True)
     
     action_menu = TerminalMenu(["[1] Pausar Operación", "[2] Detener y Resetear"], title="\nAcción al Cumplir CUALQUIER Límite:").show()
-    if action_menu == 0: temp_op.accion_al_finalizar = 'PAUSAR'
-    elif action_menu == 1: temp_op.accion_al_finalizar = 'DETENER'
+    if action_menu == 0:
+        temp_op.accion_al_finalizar = 'PAUSAR'
+    elif action_menu == 1:
+        temp_op.accion_al_finalizar = 'DETENER'
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
+# ==============================================================================

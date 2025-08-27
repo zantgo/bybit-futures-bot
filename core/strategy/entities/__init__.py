@@ -65,6 +65,11 @@ class Operacion:
     """
     Representa una única Operación Estratégica configurable.
     """
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función __init__ en la clase Operacion) ---
+# ==============================================================================
+
     def __init__(self, id: str):
         self.id: str = id
         self.estado: str = 'DETENIDA'
@@ -91,6 +96,11 @@ class Operacion:
         self.accion_al_finalizar: str = 'PAUSAR'
         self.auto_reinvest_enabled: bool = False 
         
+        # --- INICIO DE LA MODIFICACIÓN: Nuevos atributos para entrada por tiempo ---
+        self.tiempo_espera_minutos: Optional[int] = None
+        self.tiempo_inicio_espera: Optional[datetime.datetime] = None
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         # --- Atributos de Estado Financiero y Contadores ---
         self.capital_inicial_usdt: float = 0.0
         self.pnl_realizado_usdt: float = 0.0
@@ -98,9 +108,7 @@ class Operacion:
         self.comercios_cerrados_contador: int = 0
         self.comisiones_totales_usdt: float = 0.0
         self.profit_balance_acumulado: float = 0.0
-        # --- INICIO DE LA MODIFICACIÓN ---
-        self.reinvestable_profit_balance: float = 0.0 # Bote para reinversión
-        # --- FIN DE LA MODIFICACIÓN ---
+        self.reinvestable_profit_balance: float = 0.0
         self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
         
         # --- Listas de Objetos ---
@@ -111,6 +119,10 @@ class Operacion:
         # Banderas de Estado de Salida ("Triggers" de la Operación)
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
     @property
     def capital_operativo_logico_actual(self) -> float:
@@ -287,7 +299,7 @@ class Operacion:
         }
 
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única en Operacion) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función reset en la clase Operacion) ---
 # ==============================================================================
 
     def reset(self):
@@ -315,6 +327,11 @@ class Operacion:
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []
+        
+        # --- INICIO DE LA MODIFICACIÓN: Resetear los nuevos atributos de tiempo ---
+        self.tiempo_espera_minutos = None
+        self.tiempo_inicio_espera = None
+        # --- FIN DE LA MODIFICACIÓN ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---

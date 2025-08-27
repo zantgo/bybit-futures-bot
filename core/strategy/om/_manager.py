@@ -79,6 +79,7 @@ class OperationManager:
             
             return copy.deepcopy(original_op)
 
+
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
@@ -89,7 +90,6 @@ class OperationManager:
             if not target_op: return False, f"Lado de operación inválido '{side}'."
 
             estado_original = target_op.estado
-            # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
             changes_log = []
             changed_keys = set()
 
@@ -119,8 +119,6 @@ class OperationManager:
                 target_op.sub_period_returns.append(1 + retorno_periodo)
                 flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
                 target_op.capital_flows.append(flow_event)
-                # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                changes_log.append(f"Flujo de Capital Registrado: {diferencia_capital:+.2f}$ (TWRR)")
                 changed_keys.add('capital_flows')
 
             for key, value in params.items():
@@ -128,14 +126,10 @@ class OperationManager:
                     old_value = getattr(target_op, key)
                     if old_value != value:
                         setattr(target_op, key, value)
-                        # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                        changes_log.append(f"'{key}': {old_value} -> {value}")
                         changed_keys.add(key)
             
             if nuevas_posiciones is not None:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
-                # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                changes_log.append(f"'posiciones': actualizadas a {len(target_op.posiciones)} objetos.")
                 changed_keys.add('posiciones')
 
             if estado_original == 'DETENIDA' and params:
@@ -144,8 +138,6 @@ class OperationManager:
                 target_op.reinvestable_profit_balance = 0.0
                 
                 target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
-                # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                changes_log.append(f"'capital_inicial_usdt' (Base ROI) fijado en: {target_op.capital_inicial_usdt:.2f}$")
                 changed_keys.add('capital_inicial_usdt')
                 
                 if target_op.tipo_cond_entrada == 'MARKET':
@@ -155,8 +147,13 @@ class OperationManager:
                 else:
                     target_op.estado = 'EN_ESPERA'
                     target_op.estado_razon = "Operación iniciada, en espera de condición de entrada."
-                # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                changes_log.append(f"'estado': DETENIDA -> {target_op.estado}")
+                
+                # --- INICIO DE LA MODIFICACIÓN: Guardar el tiempo de inicio de la espera ---
+                # Si la nueva operación tiene una condición de tiempo, guardamos la hora actual.
+                if target_op.tipo_cond_entrada == 'TIME_DELAY':
+                    target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+                # --- FIN DE LA MODIFICACIÓN ---
+                    
                 changed_keys.add('estado')
 
             elif estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
@@ -170,8 +167,13 @@ class OperationManager:
                 if not met:
                     target_op.estado = 'EN_ESPERA'
                     target_op.estado_razon = "Condición de entrada ya no se cumple."
-                    # --- MODIFICACIÓN: La siguiente línea se mantiene para la lógica, pero no se usará para el log final ---
-                    changes_log.append(f"'estado': ACTIVA -> EN_ESPERA (nueva condición no se cumple)")
+                    
+                    # --- INICIO DE LA MODIFICACIÓN: Guardar el tiempo de inicio de la espera ---
+                    # Si la nueva condición es de tiempo, también guardamos la hora actual.
+                    if target_op.tipo_cond_entrada == 'TIME_DELAY':
+                        target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+                    # --- FIN DE LA MODIFICACIÓN ---
+                        
                     changed_keys.add('estado')
 
             if 'apalancamiento' in changed_keys:
@@ -196,24 +198,12 @@ class OperationManager:
                     else:
                         self._memory_logger.log(f"OM WARN: No se encontró una cuenta para el lado '{side}' para establecer el apalancamiento.", "WARN")
 
-        # --- INICIO DE LA CORRECCIÓN CLAVE ---
-        # Se elimina la generación y el registro del mensaje de log detallado.
-        
-        # # --- CÓDIGO ORIGINAL COMENTADO ---
-        # if not changes_log:
-        #     return True, f"No se realizaron cambios en la operación {side.upper()}."
-
-        # log_message = f"Operación {side.upper()} actualizada: " + ", ".join(changes_log)
-        # self._memory_logger.log(log_message, "DEBUG")
-        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-        
-        # El mensaje de retorno se mantiene para la TUI, pero ya no se registra en el log.
         return True, f"Operación {side.upper()} actualizada con éxito."
-        # --- FIN DE LA CORRECCIÓN CLAVE ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
+
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)

@@ -109,31 +109,7 @@ class EventProcessor:
             self._memory_logger.log(f"Timestamp/Precio inválido. Saltando. TS:{current_timestamp}, P:{current_price}", level="WARN")
             return
 
-        # --- INICIO DE LA MODIFICACIÓN: Integración del Heartbeat de Sincronización ---
-
-        # # --- CÓDIGO ORIGINAL COMENTADO ---
-        # try:
-        #     # 1. Comprobar Triggers de la Operación (lógica de activación/desactivación automática)
-        #     self._check_operation_triggers(current_price)
-        #
-        #     # 2. Procesar datos y generar señal de bajo nivel
-        #     signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
-        #     
-        #     # 3. Interacción con el Position Manager
-        #     if self._pm_instance:
-        #         self._pm_instance.check_and_close_positions(current_price, current_timestamp)
-        #         self._pm_instance.handle_low_level_signal(
-        #             signal=signal_data.get("signal", "HOLD"),
-        #             entry_price=current_price,
-        #             timestamp=current_timestamp
-        #         )
-        #
-        # except Exception as e:
-        #     self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
-        #     self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-        # --- CÓDIGO NUEVO Y CORREGIDO ---
+       
         try:
             # 1. Comprobar la existencia física de las posiciones ANTES de cualquier otra lógica.
             self._check_physical_position_existence()
@@ -159,6 +135,11 @@ class EventProcessor:
         # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
         # --- FIN DE LA MODIFICACIÓN ---
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -175,7 +156,6 @@ class EventProcessor:
                 if not operacion:
                     continue
 
-                # --- Lógica predictiva de liquidación ---
                 if operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
                     open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
                     estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
@@ -204,12 +184,30 @@ class EventProcessor:
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
                     entry_condition_met = False
+                    
                     if cond_type == 'MARKET':
                         entry_condition_met = True
-                    elif cond_value is not None:
-                        if cond_type == 'PRICE_ABOVE' and current_price > cond_value: entry_condition_met = True
-                        elif cond_type == 'PRICE_BELOW' and current_price < cond_value: entry_condition_met = True
-                    if entry_condition_met: self._om_api.activar_por_condicion(side)
+                    elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value:
+                        entry_condition_met = True
+                    elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value:
+                        entry_condition_met = True
+                    
+                    # --- INICIO DE LA MODIFICACIÓN: Comprobar la condición de tiempo ---
+                    elif (cond_type == 'TIME_DELAY' and 
+                          operacion.tiempo_inicio_espera is not None and 
+                          operacion.tiempo_espera_minutos is not None):
+                        
+                        # Calcular el tiempo transcurrido en minutos
+                        elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds()
+                        elapsed_minutes = elapsed_seconds / 60.0
+                        
+                        # Comprobar si se ha cumplido el tiempo de espera
+                        if elapsed_minutes >= operacion.tiempo_espera_minutos:
+                            entry_condition_met = True
+                    # --- FIN DE LA MODIFICACIÓN ---
+
+                    if entry_condition_met:
+                        self._om_api.activar_por_condicion(side)
 
                 # --- Lógica de SALIDA y GESTIÓN ---
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
@@ -296,6 +294,10 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
