@@ -82,6 +82,10 @@ class OperationManager:
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -130,32 +134,32 @@ class OperationManager:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changed_keys.add('posiciones')
 
-            # --- CÓDIGO NUEVO Y CORREGIDO ---
-            if changed_keys: # Solo evaluar transiciones si hubo cambios
+            # --- CÓDIGO CON MODIFICACIÓN INTEGRADA ---
+            if changed_keys:
                 if estado_original == 'DETENIDA':
-                    # Si estamos iniciando una operación, reseteamos contadores
                     target_op.pnl_realizado_usdt = 0.0
                     target_op.comisiones_totales_usdt = 0.0
                     target_op.reinvestable_profit_balance = 0.0
                     target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 
-                # Lógica unificada para gestionar el estado basado en la condición de entrada
                 if target_op.tipo_cond_entrada == 'MARKET':
                     if target_op.estado != 'ACTIVA':
                         target_op.estado = 'ACTIVA'
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
-                        if not target_op.tiempo_inicio_ejecucion:
-                            target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
-                else: # La condición es de PRECIO o de TIEMPO
+                        
+                        # --- INICIO DE LA CORRECCIÓN CLAVE ---
+                        now = datetime.datetime.now(datetime.timezone.utc)
+                        # Se actualizan ambos atributos de tiempo al activarse.
+                        target_op.tiempo_ultimo_inicio_activo = now
+                        target_op.tiempo_inicio_ejecucion = now
+                        # --- FIN DE LA CORRECCIÓN CLAVE ---
+                else:
                     if target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
                         target_op.estado = 'EN_ESPERA'
                         target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     
                     if target_op.tipo_cond_entrada == 'TIME_DELAY':
-                        # Si la condición es de tiempo, siempre (re)iniciamos el temporizador
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
-            # --- FIN DE LA MODIFICACIÓN ---
 
             if 'apalancamiento' in changed_keys:
                 symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
@@ -181,6 +185,9 @@ class OperationManager:
 
         return True, f"Operación {side.upper()} actualizada con éxito."
 
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 5) ---
@@ -212,13 +219,16 @@ class OperationManager:
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 5) ---
 # ==============================================================================
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 4) ---
+# ==============================================================================
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'PAUSADA':
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
-            
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de reactivación condicional ---
+
             summary = sm_api.get_session_summary() if sm_api else {}
             current_price = summary.get('current_market_price', 0.0)
             cond_type = target_op.tipo_cond_entrada
@@ -237,12 +247,12 @@ class OperationManager:
             if condition_met:
                 target_op.estado = 'ACTIVA'
                 target_op.estado_razon = "Reanudada manualmente por el usuario."
-                # Reiniciamos el cronómetro de duración
-                target_op.tiempo_ultimo_inicio_activo = datetime.datetime.now(datetime.timezone.utc)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                target_op.tiempo_ultimo_inicio_activo = now
+                target_op.tiempo_inicio_ejecucion = now # <-- LÍNEA AÑADIDA
             else:
                 target_op.estado = 'EN_ESPERA'
                 target_op.estado_razon = "Reanudada, en espera de nueva condición de entrada."
-            # --- FIN DE LA MODIFICACIÓN ---
             
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
@@ -250,37 +260,51 @@ class OperationManager:
         msg = f"OPERACIÓN {side.upper()} REANUDADA. Nuevo estado: {target_op.estado}."
         self._memory_logger.log(msg, "WARN")
         return True, msg
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 3 de 5) ---
 # ==============================================================================
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 4) ---
+# ==============================================================================
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
-            if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']: # Se permite desde PAUSADA
+            if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
                 return False, f"Solo se puede forzar la activación desde EN_ESPERA o PAUSADA."
             
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Activación forzada manualmente."
             
-            # --- INICIO DE LA MODIFICACIÓN: Reiniciar el cronómetro de duración ---
-            target_op.tiempo_ultimo_inicio_activo = datetime.datetime.now(datetime.timezone.utc)
-            # --- FIN DE LA MODIFICACIÓN ---
-
+            now = datetime.datetime.now(datetime.timezone.utc)
+            target_op.tiempo_ultimo_inicio_activo = now
+            target_op.tiempo_inicio_ejecucion = now # <-- LÍNEA AÑADIDA
+            
         msg = f"OPERACIÓN {side.upper()} FORZADA A ESTADO ACTIVO manualmente."
         self._memory_logger.log(msg, "WARN")
         return True, msg
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 4 de 5) ---
 # ==============================================================================
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 3 de 4) ---
+# ==============================================================================
     def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
-            if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']: # Se permite desde PAUSADA
+            if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
                 return False, "La operación no estaba esperando una condición."
 
             cond_type = target_op.tipo_cond_entrada
@@ -296,13 +320,16 @@ class OperationManager:
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = reason
             
-            # --- INICIO DE LA MODIFICACIÓN: Reiniciar el cronómetro de duración ---
-            target_op.tiempo_ultimo_inicio_activo = datetime.datetime.now(datetime.timezone.utc)
-            # --- FIN DE LA MODIFICACIÓN ---
-
+            now = datetime.datetime.now(datetime.timezone.utc)
+            target_op.tiempo_ultimo_inicio_activo = now
+            target_op.tiempo_inicio_ejecucion = now # <-- LÍNEA AÑADIDA
+            
         msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 5 de 5) ---
