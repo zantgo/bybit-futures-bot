@@ -298,10 +298,6 @@ class Operacion:
             "roi_twrr_vivo": roi_twrr_vivo
         }
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función reset en la clase Operacion) ---
-# ==============================================================================
-
     def reset(self):
         """
         Limpia la operación para una nueva configuración, PERO CONSERVA los
@@ -332,7 +328,3 @@ class Operacion:
         self.tiempo_espera_minutos = None
         self.tiempo_inicio_espera = None
         # --- FIN DE LA MODIFICACIÓN ---
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================

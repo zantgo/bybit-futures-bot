@@ -78,8 +78,6 @@ class OperationManager:
             if not original_op: return None
             
             return copy.deepcopy(original_op)
-
-
 # ==============================================================================
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
@@ -132,49 +130,32 @@ class OperationManager:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changed_keys.add('posiciones')
 
-            if estado_original == 'DETENIDA' and params:
-                target_op.pnl_realizado_usdt = 0.0
-                target_op.comisiones_totales_usdt = 0.0
-                target_op.reinvestable_profit_balance = 0.0
+            # --- CÓDIGO NUEVO Y CORREGIDO ---
+            if changed_keys: # Solo evaluar transiciones si hubo cambios
+                if estado_original == 'DETENIDA':
+                    # Si estamos iniciando una operación, reseteamos contadores
+                    target_op.pnl_realizado_usdt = 0.0
+                    target_op.comisiones_totales_usdt = 0.0
+                    target_op.reinvestable_profit_balance = 0.0
+                    target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                 
-                target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
-                changed_keys.add('capital_inicial_usdt')
-                
+                # Lógica unificada para gestionar el estado basado en la condición de entrada
                 if target_op.tipo_cond_entrada == 'MARKET':
-                    target_op.estado = 'ACTIVA'
-                    target_op.estado_razon = "Operación iniciada (condición de mercado)."
-                    target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
-                else:
-                    target_op.estado = 'EN_ESPERA'
-                    target_op.estado_razon = "Operación iniciada, en espera de condición de entrada."
-                
-                # --- INICIO DE LA MODIFICACIÓN: Guardar el tiempo de inicio de la espera ---
-                # Si la nueva operación tiene una condición de tiempo, guardamos la hora actual.
-                if target_op.tipo_cond_entrada == 'TIME_DELAY':
-                    target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-                # --- FIN DE LA MODIFICACIÓN ---
+                    if target_op.estado != 'ACTIVA':
+                        target_op.estado = 'ACTIVA'
+                        target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
+                        if not target_op.tiempo_inicio_ejecucion:
+                            target_op.tiempo_inicio_ejecucion = datetime.datetime.now(datetime.timezone.utc)
+                else: # La condición es de PRECIO o de TIEMPO
+                    if target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
+                        target_op.estado = 'EN_ESPERA'
+                        target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     
-                changed_keys.add('estado')
-
-            elif estado_original == 'ACTIVA' and 'tipo_cond_entrada' in params:
-                summary = sm_api.get_session_summary() if sm_api else {}
-                current_price = summary.get('current_market_price', 0.0)
-                cond_type = target_op.tipo_cond_entrada
-                cond_value = target_op.valor_cond_entrada
-                met = (cond_type == 'MARKET') or (cond_value is None) or \
-                      (current_price > 0 and ((cond_type == 'PRICE_ABOVE' and current_price > cond_value) or \
-                                              (cond_type == 'PRICE_BELOW' and current_price < cond_value)))
-                if not met:
-                    target_op.estado = 'EN_ESPERA'
-                    target_op.estado_razon = "Condición de entrada ya no se cumple."
-                    
-                    # --- INICIO DE LA MODIFICACIÓN: Guardar el tiempo de inicio de la espera ---
-                    # Si la nueva condición es de tiempo, también guardamos la hora actual.
                     if target_op.tipo_cond_entrada == 'TIME_DELAY':
+                        # Si la condición es de tiempo, siempre (re)iniciamos el temporizador
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-                    # --- FIN DE LA MODIFICACIÓN ---
-                        
-                    changed_keys.add('estado')
+            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+            # --- FIN DE LA MODIFICACIÓN ---
 
             if 'apalancamiento' in changed_keys:
                 symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
@@ -203,7 +184,6 @@ class OperationManager:
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
 # ==============================================================================
-
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
