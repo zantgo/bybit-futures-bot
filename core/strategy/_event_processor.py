@@ -1,6 +1,4 @@
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Archivo Completo) ---
-# ==============================================================================
+# core/strategy/event_processor.py
 
 """
 Orquestador Principal del Procesamiento de Eventos.
@@ -40,11 +38,6 @@ class EventProcessor:
     desde el cálculo de indicadores hasta la interacción con los gestores de
     operación y posición. Ahora es una clase para una gestión de estado limpia.
     """
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 3) ---
-# ==============================================================================
-
     def __init__(self, dependencies: Dict[str, Any]):
         """
         Inicializa el EventProcessor inyectando todas sus dependencias.
@@ -67,10 +60,6 @@ class EventProcessor:
         self._pm_instance: Optional['PositionManager'] = None
         self._previous_raw_event_price: float = np.nan
         self._is_first_event: bool = True
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
     def initialize(
         self,
@@ -100,9 +89,6 @@ class EventProcessor:
     def get_latest_signal_data(self) -> Dict[str, Any]:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 3) ---
-# ==============================================================================
 
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
@@ -123,12 +109,7 @@ class EventProcessor:
             return
 
         try:
-            # --- INICIO DE LA MODIFICACIÓN: Llamar a la nueva API del PM ---
-            # # --- CÓDIGO ORIGINAL COMENTADO ---
-            # # 1. Comprobar la existencia física de las posiciones ANTES de cualquier otra lógica.
-            # self._check_physical_position_existence()
-            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-            
+
             # --- CÓDIGO NUEVO Y CORREGIDO ---
             # 1. Llamar al heartbeat de sincronización a través de la API del PM
             for side in ['long', 'short']:
@@ -154,6 +135,7 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
+
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -170,29 +152,9 @@ class EventProcessor:
                 if not operacion:
                     continue
 
-                if operacion.estado == 'ACTIVA' and operacion.posiciones_abiertas_count > 0:
-                    open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
-                    estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
-                        open_positions=open_positions_dicts,
-                        leverage=operacion.apalancamiento,
-                        side=side
-                    )
-                    if estimated_liq_price is not None:
-                        liquidation_triggered = False
-                        if side == 'long' and current_price <= estimated_liq_price:
-                            liquidation_triggered = True
-                        elif side == 'short' and current_price >= estimated_liq_price:
-                            liquidation_triggered = True
-                        
-                        if liquidation_triggered:
-                            reason = (
-                                f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral "
-                                f"agregado ({estimated_liq_price:.4f})"
-                            )
-                            self._memory_logger.log(reason, "WARN") 
-                            self._om_api.handle_liquidation_event(side, reason)
-                            continue
-
+                # --- CÓDIGO NUEVO Y CORREGIDO ---
+                
+                # 1. Lógica de ENTRADA (Solo se ejecuta si está en espera para activarse)
                 if operacion.estado == 'EN_ESPERA':
                     cond_type = operacion.tipo_cond_entrada
                     cond_value = operacion.valor_cond_entrada
@@ -208,10 +170,33 @@ class EventProcessor:
                     
                     if entry_condition_met:
                         self._om_api.activar_por_condicion(side)
-                        # No necesitamos `continue`, la lógica de abajo ya no se ejecutará para EN_ESPERA
+                        # Salimos de este ciclo para el 'side' actual, ya que el estado ha cambiado.
+                        # La lógica de riesgo se evaluará en el siguiente tick con el estado 'ACTIVA'.
+                        continue
 
-                # 2. Lógica de RIESGO y SALIDA (Se ejecuta si está ACTIVA o PAUSADA)
+                # 2. Lógica de RIESGO y SALIDA (Se ejecuta si la operación ha sido activada alguna vez)
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
+                    
+                    # 2.1 Comprobar RIESGOS CRÍTICOS (Liquidación y Riesgo por ROI).
+                    # Esto se vigila incluso en estado PAUSADA para proteger el capital.
+                    
+                    # Comprobación de Liquidación Predictiva
+                    if operacion.posiciones_abiertas_count > 0:
+                        open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
+                        estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
+                            open_positions=open_positions_dicts,
+                            leverage=operacion.apalancamiento,
+                            side=side
+                        )
+                        if estimated_liq_price is not None:
+                            if (side == 'long' and current_price <= estimated_liq_price) or \
+                               (side == 'short' and current_price >= estimated_liq_price):
+                                reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
+                                self._memory_logger.log(reason, "WARN")
+                                self._om_api.handle_liquidation_event(side, reason)
+                                continue
+
+                    # Comprobación de SL/TP/TSL por ROI
                     if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
                         realized_roi = operacion.realized_twrr_roi
                         operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
@@ -222,7 +207,6 @@ class EventProcessor:
                     risk_condition_met = False
                     risk_reason = ""
 
-                    # 2.1 Comprobar RIESGOS DE OPERACIÓN (SL/TP/TSL por ROI). Esto se vigila incluso en PAUSA.
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
                     if tsl_act_pct is not None and tsl_dist_pct is not None:
@@ -259,7 +243,7 @@ class EventProcessor:
                         else: self._om_api.pausar_operacion(side, reason=risk_reason)
                         continue
 
-                    # 2.2 Comprobar LÍMITES DE SALIDA (Duración, Trades). Esto SOLO se vigila en estado ACTIVA.
+                    # 2.3 Comprobar LÍMITES DE SALIDA (Duración, Trades). Esto SOLO se vigila en estado ACTIVA.
                     exit_condition_met = False
                     exit_reason = ""
                     if operacion.estado == 'ACTIVA' and not risk_condition_met:
