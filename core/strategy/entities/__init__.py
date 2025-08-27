@@ -73,9 +73,9 @@ class Operacion:
     def __init__(self, id: str):
         self.id: str = id
         self.estado: str = 'DETENIDA'
-        self.estado_razon: str = 'Estado inicial' # <-- NUEVO ATRIBUTO
+        self.estado_razon: str = 'Estado inicial'
         
-        # --- Parámetros de Configuración de la Operación ---
+        # --- Parámetros de Configuración ---
         self.tipo_cond_entrada: Optional[str] = 'MARKET'
         self.valor_cond_entrada: Optional[float] = 0.0
         self.tendencia: Optional[str] = None
@@ -95,11 +95,8 @@ class Operacion:
         self.valor_cond_salida: Optional[float] = None
         self.accion_al_finalizar: str = 'PAUSAR'
         self.auto_reinvest_enabled: bool = False 
-        
-        # --- INICIO DE LA MODIFICACIÓN: Nuevos atributos para entrada por tiempo ---
         self.tiempo_espera_minutos: Optional[int] = None
         self.tiempo_inicio_espera: Optional[datetime.datetime] = None
-        # --- FIN DE LA MODIFICACIÓN ---
         
         # --- Atributos de Estado Financiero y Contadores ---
         self.capital_inicial_usdt: float = 0.0
@@ -109,14 +106,18 @@ class Operacion:
         self.comisiones_totales_usdt: float = 0.0
         self.profit_balance_acumulado: float = 0.0
         self.reinvestable_profit_balance: float = 0.0
-        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None
+        
+        # --- INICIO DE LA MODIFICACIÓN: Añadir los nuevos atributos de tiempo ---
+        self.tiempo_acumulado_activo_seg: float = 0.0
+        self.tiempo_ultimo_inicio_activo: Optional[datetime.datetime] = None
+        # --- FIN DE LA MODIFICACIÓN ---
         
         # --- Listas de Objetos ---
         self.posiciones: List['LogicalPosition'] = []
         self.capital_flows: List['CapitalFlow'] = []
         self.sub_period_returns: List[float] = []
         
-        # Banderas de Estado de Salida ("Triggers" de la Operación)
+        # Banderas de Estado de Salida
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
 
@@ -297,8 +298,9 @@ class Operacion:
             "equity_actual_vivo": equity_actual_vivo,
             "roi_twrr_vivo": roi_twrr_vivo
         }
+
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función reset en la clase Operacion) ---
 # ==============================================================================
 
     def reset(self):
@@ -306,44 +308,9 @@ class Operacion:
         Limpia la operación para una nueva configuración, PERO CONSERVA los
         resultados financieros y la razón del último ciclo.
         """
-        # --- CÓDIGO ORIGINAL COMENTADO ---
-        # # NO se resetean: estado, estado_razon, pnl_realizado_usdt, comisiones, etc.
-        # # Estos se mantienen para visualización hasta que se inicie una nueva operación.
-        # 
-        # self.capital_inicial_usdt = 0.0
-        # self.total_reinvertido_usdt = 0.0
-        # self.comercios_cerrados_contador = 0
-        # self.tiempo_inicio_ejecucion = None
-        # self.profit_balance_acumulado = 0.0
-        # self.auto_reinvest_enabled = False
-        # self.tsl_roi_activo = False
-        # self.tsl_roi_peak_pct = 0.0
-        # self.reinvestable_profit_balance = 0.0
-        # self.dynamic_roi_sl_enabled = False
-        # self.dynamic_roi_sl_trail_pct = None
-        # 
-        # # Lo más importante: se limpian las posiciones y los flujos de capital
-        # # para la nueva configuración.
-        # self.posiciones = []
-        # self.capital_flows = []
-        # self.sub_period_returns = []
-        # 
-        # self.tiempo_espera_minutos = None
-        # self.tiempo_inicio_espera = None
-        # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-        # --- CÓDIGO NUEVO Y CORREGIDO ---
-        # NO se resetean: estado, estado_razon, pnl_realizado_usdt, comisiones, etc.
-        # Estos se mantienen para visualización hasta que se inicie una nueva operación.
-        
         self.capital_inicial_usdt = 0.0
         self.total_reinvertido_usdt = 0.0
         self.comercios_cerrados_contador = 0
-        
-        # --- MODIFICACIÓN CLAVE: El tiempo_inicio_ejecucion ahora NO se resetea aquí. ---
-        # Será manejado explícitamente por el OperationManager al pausar/detener.
-        # self.tiempo_inicio_ejecucion = None # <-- Línea original comentada/eliminada
-        
         self.profit_balance_acumulado = 0.0
         self.auto_reinvest_enabled = False
         self.tsl_roi_activo = False
@@ -352,15 +319,17 @@ class Operacion:
         self.dynamic_roi_sl_enabled = False
         self.dynamic_roi_sl_trail_pct = None
         
-        # Lo más importante: se limpian las posiciones y los flujos de capital
-        # para la nueva configuración.
         self.posiciones = []
         self.capital_flows = []
         self.sub_period_returns = []
         
         self.tiempo_espera_minutos = None
         self.tiempo_inicio_espera = None
-        # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+        
+        # --- INICIO DE LA MODIFICACIÓN: Resetear los nuevos atributos de tiempo ---
+        self.tiempo_acumulado_activo_seg = 0.0
+        self.tiempo_ultimo_inicio_activo = None
+        # --- FIN DE LA MODIFICACIÓN ---
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---
