@@ -335,7 +335,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
         print("└" + "─" * (box_width - 2) + "┘")
 
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DEL C-ÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
 def _display_operation_conditions(operacion: Operacion):
@@ -363,47 +363,41 @@ def _display_operation_conditions(operacion: Operacion):
         # --- Condición de Entrada ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mCondición de Entrada\033[0m", box_width, 'center'))
-        cond_in_str = "No definida (Operación Inactiva)"
+
+        cond_in_str = "No definida" # Default más simple
         if operacion.tipo_cond_entrada == 'MARKET':
             cond_in_str = "- Inmediata (Precio de Mercado)"
-        elif operacion.tipo_cond_entrada and operacion.valor_cond_entrada is not None:
-            op = ">" if operacion.tipo_cond_entrada == 'PRICE_ABOVE' else "<"
-            cond_in_str = f"- Precio {op} {operacion.valor_cond_entrada:.4f}"
+        elif operacion.tipo_cond_entrada == 'PRICE_ABOVE' and operacion.valor_cond_entrada is not None:
+            cond_in_str = f"- Precio > {operacion.valor_cond_entrada:.4f}"
+        elif operacion.tipo_cond_entrada == 'PRICE_BELOW' and operacion.valor_cond_entrada is not None:
+            cond_in_str = f"- Precio < {operacion.valor_cond_entrada:.4f}"
+        elif operacion.tipo_cond_entrada == 'TIME_DELAY' and operacion.tiempo_espera_minutos is not None:
+            cond_in_str = f"- Activar después de {operacion.tiempo_espera_minutos} minutos"
+            
         print(_create_box_line(f"  {cond_in_str}", box_width))
 
         # --- Gestión de Riesgo de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
         sl_roi_str = ""
-        # 1. Comprobar si el modo es Dinámico
         if getattr(operacion, 'dynamic_roi_sl_enabled', False):
             trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
-            # En modo dinámico, el precio objetivo cambia constantemente, por lo que mostramos la regla.
             sl_roi_str = f"SL/TP por ROI (DINÁMICO): Límite móvil @ ROI Realizado - {trail_pct}%"
-        
-        # 2. Comprobar si el modo es Manual
         elif operacion.sl_roi_pct is not None:
-            # Llamamos a la función central y ya corregida de la entidad Operacion
             target_price = operacion.get_roi_sl_tp_price()
             is_sl = operacion.sl_roi_pct < 0
             label = "SL" if is_sl else "TP"
             color_code = "\033[91m" if is_sl else "\033[92m"
-            
-            # Comprobar si se puede calcular el precio (si hay posiciones abiertas)
             if target_price is not None:
                 sl_roi_str = (f"Precio Obj. {label} por ROI (MANUAL): "
                               f"{color_code}${target_price:.4f}{reset} ({operacion.sl_roi_pct}%)")
             else:
                 sl_roi_str = f"SL/TP por ROI (MANUAL): {operacion.sl_roi_pct}% (Esperando 1ra pos.)"
-        
-        # 3. Si no es ni dinámico ni manual, está desactivado.
         else:
             sl_roi_str = "SL/TP por ROI: Desactivado"
         
         print(_create_box_line(f"  - {sl_roi_str}", box_width))
-        # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
         tsl_roi_str = "TSL por ROI: Desactivado"
         if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
