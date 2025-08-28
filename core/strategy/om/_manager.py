@@ -132,18 +132,32 @@ class OperationManager:
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                 
+                # --- INICIO DE LA CORRECCIÓN ---
+                # Se introduce una variable temporal para el nuevo estado y se añade un bloque de log al final.
+                estado_nuevo = target_op.estado # Asumimos que no cambia, por ahora.
+                
                 if target_op.tipo_cond_entrada == 'MARKET':
-                    if target_op.estado != 'ACTIVA':
-                        target_op.estado = 'ACTIVA'
+                    if estado_original != 'ACTIVA':
+                        estado_nuevo = 'ACTIVA' # Guardamos el potencial nuevo estado
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
                         target_op.tiempo_inicio_ejecucion = now
                 elif 'tipo_cond_entrada' in changed_keys and estado_original in ['DETENIDA', 'PAUSADA']:
-                    target_op.estado = 'EN_ESPERA'
+                    estado_nuevo = 'EN_ESPERA' # Guardamos el potencial nuevo estado
                     target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     if target_op.tipo_cond_entrada == 'TIME_DELAY':
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+
+                # Se comprueba si el estado ha cambiado y, si es así, se loguea.
+                if estado_nuevo != estado_original:
+                    self._memory_logger.log(
+                        f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> '{estado_nuevo}'. Razón: {target_op.estado_razon}",
+                        "WARN"
+                    )
+                    target_op.estado = estado_nuevo # Aplicamos el cambio de estado final
+                # --- FIN DE LA CORRECCIÓN ---
+
         return True, f"Operación {side.upper()} actualizada con éxito."
 
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
@@ -152,6 +166,7 @@ class OperationManager:
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
                 return False, f"Solo se puede pausar una operación ACTIVA o EN_ESPERA del lado {side.upper()}."
             
+            estado_original = target_op.estado # Guardamos el estado antes del cambio
             if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
                 elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
@@ -166,7 +181,7 @@ class OperationManager:
             target_op.estado = 'PAUSADA'
             target_op.estado_razon = reason if reason else "Pausada manualmente por el usuario."
         
-        msg = f"OPERACIÓN {side.upper()} PAUSADA (Razón: {target_op.estado_razon})."
+        msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'PAUSADA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
@@ -176,6 +191,7 @@ class OperationManager:
             if not target_op or target_op.estado != 'PAUSADA':
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
 
+            estado_original = target_op.estado
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Reanudada manualmente por el usuario."
             
@@ -186,7 +202,7 @@ class OperationManager:
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
                 
-        msg = f"OPERACIÓN {side.upper()} REANUDADA. Nuevo estado: {target_op.estado}."
+        msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
@@ -196,6 +212,7 @@ class OperationManager:
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
                 return False, f"Solo se puede forzar la activación desde EN_ESPERA o PAUSADA."
             
+            estado_original = target_op.estado
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Activación forzada manualmente."
             
@@ -203,7 +220,7 @@ class OperationManager:
             target_op.tiempo_ultimo_inicio_activo = now
             target_op.tiempo_inicio_ejecucion = now
             
-        msg = f"OPERACIÓN {side.upper()} FORZADA A ESTADO ACTIVO manualmente."
+        msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
@@ -213,6 +230,7 @@ class OperationManager:
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
                 return False, "La operación no estaba esperando una condición."
 
+            estado_original = target_op.estado
             cond_type = target_op.tipo_cond_entrada
             if cond_type == 'TIME_DELAY':
                 reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
@@ -230,7 +248,7 @@ class OperationManager:
             target_op.tiempo_ultimo_inicio_activo = now
             target_op.tiempo_inicio_ejecucion = now
             
-        msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE. Razón: {target_op.estado_razon}"
+        msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
@@ -240,6 +258,7 @@ class OperationManager:
             if not target_op or target_op.estado == 'DETENIDA':
                 return False, f"La operación {side.upper()} ya está detenida o no existe."
             
+            estado_original = target_op.estado
             if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
                 elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
@@ -248,7 +267,7 @@ class OperationManager:
             target_op.estado = 'DETENIENDO'
             target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
             
-            log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon})."
+            log_msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}"
             self._memory_logger.log(log_msg, "WARN")
 
             if not target_op.posiciones_abiertas:
@@ -281,8 +300,9 @@ class OperationManager:
                 return
             
             if not target_op.posiciones_abiertas:
+                estado_original = target_op.estado
                 log_msg = (
-                    f"OPERACIÓN {side.upper()}: Finalizada. Razón: '{target_op.estado_razon}'"
+                    f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIDA'. Razón final: '{target_op.estado_razon}'"
                 )
                 self._memory_logger.log(log_msg, "INFO")
                 target_op.estado = 'DETENIDA'
@@ -327,6 +347,7 @@ class OperationManager:
             if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
                 return
 
+            estado_original = target_op.estado
             self._memory_logger.log(
                 f"OM: Procesando evento de liquidación para {side.upper()}.", "WARN"
             )
@@ -340,4 +361,8 @@ class OperationManager:
             )
             
             target_op.posiciones.clear()
+            self._memory_logger.log(
+                f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}",
+                "WARN"
+            )
             self.revisar_y_transicionar_a_detenida(side)
