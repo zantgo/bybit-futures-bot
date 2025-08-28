@@ -108,9 +108,6 @@ class EventProcessor:
 
         try:
             # 1. Heartbeat de Sincronización Proactiva
-            # En cada tick, ANTES de cualquier otra lógica, se verifica el estado real
-            # de las posiciones en el exchange. Esto detecta liquidaciones o cierres
-            # manuales casi al instante, garantizando que el bot no opere sobre un estado desactualizado.
             for side in ['long', 'short']:
                 self._pm_api.sync_physical_positions(side)
 
@@ -120,7 +117,7 @@ class EventProcessor:
             # 3. Procesar datos y generar señal de bajo nivel
             signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
             
-            # 4. Interacción con el Position Manager (que ahora opera sobre un estado ya sincronizado)
+            # 4. Interacción con el Position Manager
             if self._pm_instance:
                 self._pm_instance.check_and_close_positions(current_price, current_timestamp)
                 self._pm_instance.handle_low_level_signal(
@@ -133,137 +130,134 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
-def _check_operation_triggers(self, current_price: float):
-    """
-    Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
-    y llama a los métodos del OM para transicionar el estado.
-    """
-    if not (self._om_api and self._om_api.is_initialized() and self._pm_api and self._pm_api.is_initialized()):
-        return
+    def _check_operation_triggers(self, current_price: float):
+        """
+        Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
+        y llama a los métodos del OM para transicionar el estado.
+        """
+        if not (self._om_api and self._om_api.is_initialized() and self._pm_api and self._pm_api.is_initialized()):
+            return
 
-    from core.strategy.pm import _calculations as pm_calculations
-    
-    try:
-        for side in ['long', 'short']:
-            operacion: 'Operacion' = self._om_api.get_operation_by_side(side)
-            if not operacion or operacion.estado == 'DETENIDA':
-                continue
+        from core.strategy.pm import _calculations as pm_calculations
+        
+        try:
+            for side in ['long', 'short']:
+                operacion: 'Operacion' = self._om_api.get_operation_by_side(side)
+                if not operacion or operacion.estado == 'DETENIDA':
+                    continue
 
-            # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas)
-            if operacion.posiciones_abiertas_count > 0:
-                
-                # 1.1 Comprobación de Liquidación Predictiva
-                open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
-                estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
-                    open_positions=open_positions_dicts,
-                    leverage=operacion.apalancamiento,
-                    side=side
-                )
-                if estimated_liq_price is not None:
-                    if (side == 'long' and current_price <= estimated_liq_price) or \
-                       (side == 'short' and current_price >= estimated_liq_price):
-                        reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
-                        self._memory_logger.log(reason, "WARN")
-                        self._om_api.handle_liquidation_event(side, reason)
+                # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas)
+                if operacion.posiciones_abiertas_count > 0:
+                    
+                    # 1.1 Comprobación de Liquidación Predictiva
+                    open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
+                    estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
+                        open_positions=open_positions_dicts,
+                        leverage=operacion.apalancamiento,
+                        side=side
+                    )
+                    if estimated_liq_price is not None:
+                        if (side == 'long' and current_price <= estimated_liq_price) or \
+                           (side == 'short' and current_price >= estimated_liq_price):
+                            reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
+                            self._memory_logger.log(reason, "WARN")
+                            self._om_api.handle_liquidation_event(side, reason)
+                            continue
+
+                    # 1.2 Comprobación de SL/TP/TSL por ROI
+                    if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
+                        realized_roi = operacion.realized_twrr_roi
+                        operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
+                    
+                    live_performance = operacion.get_live_performance(current_price, self._utils)
+                    roi = live_performance.get("roi_twrr_vivo", 0.0)
+                    
+                    risk_condition_met = False
+                    risk_reason = ""
+
+                    tsl_act_pct = operacion.tsl_roi_activacion_pct
+                    tsl_dist_pct = operacion.tsl_roi_distancia_pct
+                    if tsl_act_pct is not None and tsl_dist_pct is not None:
+                        tsl_state_changed = False
+                        if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
+                            self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
+                            tsl_state_changed = True
+                        if tsl_state_changed: operacion = self._om_api.get_operation_by_side(side)
+                        if not operacion: continue
+                        if operacion.tsl_roi_activo:
+                            if roi > operacion.tsl_roi_peak_pct:
+                                self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
+                                operacion = self._om_api.get_operation_by_side(side)
+                                if not operacion: continue
+                            umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
+                            if roi <= umbral_disparo:
+                                risk_condition_met = True
+                                risk_reason = f"RIESGO TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
+                    
+                    sl_roi_pct = operacion.sl_roi_pct
+                    if not risk_condition_met and sl_roi_pct is not None:
+                        if sl_roi_pct < 0 and roi <= sl_roi_pct:
+                            risk_condition_met = True
+                            risk_reason = f"RIESGO SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
+                        elif sl_roi_pct > 0 and roi >= sl_roi_pct:
+                            risk_condition_met = True
+                            risk_reason = f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
+
+                    if risk_condition_met:
+                        risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
+                        log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
+                        self._memory_logger.log(log_msg, "WARN")
+                        if risk_action == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
+                        else: self._om_api.pausar_operacion(side, reason=risk_reason)
                         continue
 
-                # 1.2 Comprobación de SL/TP/TSL por ROI
-                if operacion.dynamic_roi_sl_enabled and operacion.dynamic_roi_sl_trail_pct is not None:
-                    realized_roi = operacion.realized_twrr_roi
-                    operacion.sl_roi_pct = realized_roi - operacion.dynamic_roi_sl_trail_pct
-                
-                live_performance = operacion.get_live_performance(current_price, self._utils)
-                roi = live_performance.get("roi_twrr_vivo", 0.0)
-                
-                risk_condition_met = False
-                risk_reason = ""
-
-                tsl_act_pct = operacion.tsl_roi_activacion_pct
-                tsl_dist_pct = operacion.tsl_roi_distancia_pct
-                if tsl_act_pct is not None and tsl_dist_pct is not None:
-                    tsl_state_changed = False
-                    if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
-                        self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
-                        tsl_state_changed = True
-                    if tsl_state_changed: operacion = self._om_api.get_operation_by_side(side)
-                    if not operacion: continue
-                    if operacion.tsl_roi_activo:
-                        if roi > operacion.tsl_roi_peak_pct:
-                            self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
-                            operacion = self._om_api.get_operation_by_side(side)
-                            if not operacion: continue
-                        umbral_disparo = operacion.tsl_roi_peak_pct - tsl_dist_pct
-                        if roi <= umbral_disparo:
-                            risk_condition_met = True
-                            risk_reason = f"RIESGO TSL-ROI (Pico: {operacion.tsl_roi_peak_pct:.2f}%, Actual: {roi:.2f}%)"
-                
-                sl_roi_pct = operacion.sl_roi_pct
-                if not risk_condition_met and sl_roi_pct is not None:
-                    if sl_roi_pct < 0 and roi <= sl_roi_pct:
-                        risk_condition_met = True
-                        risk_reason = f"RIESGO SL-ROI alcanzado ({roi:.2f}% <= {sl_roi_pct}%)"
-                    elif sl_roi_pct > 0 and roi >= sl_roi_pct:
-                        risk_condition_met = True
-                        risk_reason = f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
-
-                if risk_condition_met:
-                    risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
-                    log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
-                    self._memory_logger.log(log_msg, "WARN")
-                    if risk_action == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
-                    else: self._om_api.pausar_operacion(side, reason=risk_reason)
-                    continue
-
-            # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
-            if operacion.estado == 'EN_ESPERA':
-                cond_type = operacion.tipo_cond_entrada
-                cond_value = operacion.valor_cond_entrada
-                entry_condition_met = False
-                
-                if cond_type == 'MARKET': entry_condition_met = True
-                elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value: entry_condition_met = True
-                elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value: entry_condition_met = True
-                elif (cond_type == 'TIME_DELAY' and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos):
-                    elapsed_minutes = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds() / 60.0
-                    if elapsed_minutes >= operacion.tiempo_espera_minutos:
-                        entry_condition_met = True
-                
-                if entry_condition_met:
-                    self._om_api.activar_por_condicion(side)
-                    continue
-
-            # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
-            if operacion.estado == 'ACTIVA':
-                exit_condition_met = False
-                exit_reason = ""
-                
-                if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
-                    exit_condition_met, exit_reason = True, f"Límite de {operacion.max_comercios} trades alcanzado"
-                
-                if not exit_condition_met and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
-                    elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-                    if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
-                        exit_condition_met, exit_reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min) alcanzado"
-
-                exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
-                if not exit_condition_met and exit_type and exit_value is not None:
-                    if exit_type == 'PRICE_ABOVE' and current_price > exit_value: exit_condition_met, exit_reason = True, f"Precio de salida > {exit_value:.4f}"
-                    elif exit_type == 'PRICE_BELOW' and current_price < exit_value: exit_condition_met, exit_reason = True, f"Precio de salida < {exit_value:.4f}"
-
-                if exit_condition_met:
-                    accion_final = operacion.accion_al_finalizar
-                    log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
-                    self._memory_logger.log(log_msg, "WARN")
+                # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
+                if operacion.estado == 'EN_ESPERA':
+                    cond_type = operacion.tipo_cond_entrada
+                    cond_value = operacion.valor_cond_entrada
+                    entry_condition_met = False
                     
-                    # Pasamos la variable `exit_reason` a las funciones de acción.
-                    if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
-                    elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
-                    else: self._om_api.pausar_operacion(side, reason=exit_reason)
-    
-    except Exception as e:
-        self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
-        self._memory_logger.log(traceback.format_exc(), level="ERROR")
+                    if cond_type == 'MARKET': entry_condition_met = True
+                    elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value: entry_condition_met = True
+                    elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value: entry_condition_met = True
+                    elif (cond_type == 'TIME_DELAY' and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos):
+                        elapsed_minutes = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds() / 60.0
+                        if elapsed_minutes >= operacion.tiempo_espera_minutos:
+                            entry_condition_met = True
+                    
+                    if entry_condition_met:
+                        self._om_api.activar_por_condicion(side)
+                        continue
 
+                # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
+                if operacion.estado == 'ACTIVA':
+                    exit_condition_met = False
+                    exit_reason = ""
+                    
+                    if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
+                        exit_condition_met, exit_reason = True, f"Límite de {operacion.max_comercios} trades alcanzado"
+                    
+                    if not exit_condition_met and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
+                        elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                        if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
+                            exit_condition_met, exit_reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min) alcanzado"
+
+                    exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
+                    if not exit_condition_met and exit_type and exit_value is not None:
+                        if exit_type == 'PRICE_ABOVE' and current_price > exit_value: exit_condition_met, exit_reason = True, f"Precio de salida > {exit_value:.4f}"
+                        elif exit_type == 'PRICE_BELOW' and current_price < exit_value: exit_condition_met, exit_reason = True, f"Precio de salida < {exit_value:.4f}"
+
+                    if exit_condition_met:
+                        accion_final = operacion.accion_al_finalizar
+                        log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
+                        self._memory_logger.log(log_msg, "WARN")
+                        if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
+                        elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
+                        else: self._om_api.pausar_operacion(side, reason=exit_reason)
+        
+        except Exception as e:
+            self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
+            self._memory_logger.log(traceback.format_exc(), level="ERROR")
 
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
