@@ -1,6 +1,4 @@
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Archivo Completo) ---
-# ==============================================================================
+# core/menu/screens/operation_manager/_displayers.py
 
 """
 Módulo de Visualizadores del Panel de Control de Operación.
@@ -25,7 +23,7 @@ except ImportError:
         pass
     class Operacion:
         def __init__(self):
-            self.estado, self.tendencia, self.accion_al_finalizar, self.tipo_cond_entrada = 'DESCONOCIDO', 'N/A', 'N/A', 'N/A'
+            self.estado, self.tendencia, self.accion_por_limite_precio, self.tipo_cond_entrada = 'DESCONOCIDO', 'N/A', 'N/A', 'N/A'
             self.estado_razon = "Razón no disponible (fallback)."
             self.apalancamiento, self.pnl_realizado_usdt = 10.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
@@ -37,6 +35,8 @@ except ImportError:
             self.tsl_roi_activo = False
             self.posiciones: List[LogicalPosition] = []
             self.profit_balance_acumulado = 0.0
+            self.accion_por_limite_tiempo = 'PAUSAR'
+            self.accion_por_limite_trades = 'PAUSAR'
         
         def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
             return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
@@ -55,6 +55,8 @@ except ImportError:
         @property
         def posiciones_abiertas_count(self) -> int: return 0
         def get_roi_sl_tp_price(self): return None
+        @property
+        def avg_entry_price(self): return None
 
 
 # --- Inyección de Dependencias ---
@@ -124,12 +126,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         else:
             print(_create_box_line(f"La operación {side.upper()} está DETENIDA", box_width, 'center'))
         
-        # --- INICIO DE LA CORRECCIÓN EXACTA ---
-        # El error de visualización (└└└└...) ocurría por una construcción incorrecta de esta línea.
-        # La forma correcta es concatenar la esquina '└' con las líneas '─' y luego con la esquina '┘',
-        # en lugar de multiplicar la esquina '└' por error.
         print("└" + "─" * (box_width - 2) + "┘")
-        # --- FIN DE LA CORRECCIÓN EXACTA ---
         return
 
     tendencia = operacion.tendencia
@@ -145,7 +142,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
     }
     
-    # Lógica para el TEMPORIZADOR DE ENTRADA
     if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tipo_cond_entrada == 'TIME_DELAY':
         if getattr(operacion, 'tiempo_inicio_espera', None) and getattr(operacion, 'tiempo_espera_minutos', None):
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -156,7 +152,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
                 minutes, seconds = divmod(remainder, 60)
                 data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
     
-    # Lógica para el CRONÓMETRO DE DURACIÓN
     if operacion.tiempo_maximo_min is not None:
         total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
         if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
@@ -203,10 +198,7 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         leverage=operacion.apalancamiento,
         side=side
     )
-
-    # Se obtiene el nuevo valor del precio promedio de entrada desde la propiedad de la operación.
     avg_entry_price = operacion.avg_entry_price
-
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
     pnl_realizado = operacion.pnl_realizado_usdt
@@ -282,14 +274,14 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             sl_str = f"{pos.stop_loss_price:.4f}" if pos.stop_loss_price else "N/A"
 
             tp_act_price = 0.0
-            tsl_act_pct = pos.tsl_activation_pct_at_open
-            if tsl_act_pct > 0 and entry_price > 0:
+            tsl_act_pct = getattr(pos, 'tsl_activation_pct_at_open', 0)
+            if tsl_act_pct and tsl_act_pct > 0 and entry_price > 0:
                 tp_act_price = entry_price * (1 + tsl_act_pct / 100) if side == 'long' else entry_price * (1 - tsl_act_pct / 100)
             tp_act_str = f"{tp_act_price:.4f}" if tp_act_price > 0 else "N/A"
 
             ts_status_str = "Inactivo"
-            if pos.ts_is_active:
-                ts_stop = pos.ts_stop_price
+            if getattr(pos, 'ts_is_active', False):
+                ts_stop = getattr(pos, 'ts_stop_price', None)
                 ts_status_str = f"Activo @ {ts_stop:.4f}" if ts_stop else "Activo (Calc...)"
 
             line = (
@@ -323,10 +315,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
-# ==============================================================================
-# --- INICIO DEL C-ÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -353,21 +341,21 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mCondición de Entrada\033[0m", box_width, 'center'))
 
-        cond_in_str = "No definida" # Default más simple
+        cond_in_str = "No definida"
         if operacion.tipo_cond_entrada == 'MARKET':
             cond_in_str = "- Inmediata (Precio de Mercado)"
         elif operacion.tipo_cond_entrada == 'PRICE_ABOVE' and operacion.valor_cond_entrada is not None:
             cond_in_str = f"- Precio > {operacion.valor_cond_entrada:.4f}"
         elif operacion.tipo_cond_entrada == 'PRICE_BELOW' and operacion.valor_cond_entrada is not None:
             cond_in_str = f"- Precio < {operacion.valor_cond_entrada:.4f}"
-        elif operacion.tipo_cond_entrada == 'TIME_DELAY' and operacion.tiempo_espera_minutos is not None:
+        elif operacion.tipo_cond_entrada == 'TIME_DELAY' and getattr(operacion, 'tiempo_espera_minutos', None) is not None:
             cond_in_str = f"- Activar después de {operacion.tiempo_espera_minutos} minutos"
             
         print(_create_box_line(f"  {cond_in_str}", box_width))
 
         # --- Gestión de Riesgo de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
-        print(_create_box_line("\033[96mGestión de Riesgo de Operación (Acción: DETENER)\033[0m", box_width, 'center'))
+        print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
         sl_roi_str = ""
         if getattr(operacion, 'dynamic_roi_sl_enabled', False):
@@ -397,25 +385,25 @@ def _display_operation_conditions(operacion: Operacion):
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
-        print(_create_box_line(f"\033[96mLímites de Salida (Acción: {operacion.accion_al_finalizar.upper()})\033[0m", box_width, 'center'))
+        print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se refactoriza para mostrar cada límite con su acción individual.
         exit_limits = []
         if operacion.tipo_cond_salida and operacion.valor_cond_salida is not None:
             op = ">" if operacion.tipo_cond_salida == 'PRICE_ABOVE' else "<"
-            exit_limits.append(f"Precio de Salida: {op} {operacion.valor_cond_salida:.4f}")
+            exit_limits.append(f"Precio Salida: {op} {operacion.valor_cond_salida:.4f} (Acción: {operacion.accion_por_limite_precio})")
 
         if operacion.tiempo_maximo_min is not None:
-            exit_limits.append(f"Duración Máxima: {operacion.tiempo_maximo_min} min")
+            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")
         if operacion.max_comercios is not None:
-            exit_limits.append(f"Máximo de Trades: {operacion.max_comercios}")
+            exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})")
         
         if not exit_limits:
             print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
         else:
             for limit in exit_limits:
                 print(_create_box_line(f"  - {limit}", box_width))
+        # --- FIN DE LA CORRECCIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
