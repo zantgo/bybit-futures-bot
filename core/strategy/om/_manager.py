@@ -292,29 +292,36 @@ class OperationManager:
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 5 de 5) ---
 # ==============================================================================
 
-    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
-        with self._lock:
-            target_op = self._get_operation_by_side_internal(side)
-            if not target_op or target_op.estado == 'DETENIDA':
-                return False, f"La operación {side.upper()} ya está detenida o no existe."
-            
-            # --- INICIO DE LA MODIFICACIÓN: Detener el cronómetro de duración ---
-            if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
-                elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
-                target_op.tiempo_acumulado_activo_seg += elapsed_seconds
-                target_op.tiempo_ultimo_inicio_activo = None
-            # --- FIN DE LA MODIFICACIÓN ---
+# Reemplaza esta función completa en core/strategy/om/_manager.py
 
-            target_op.estado = 'DETENIENDO'
-            target_op.estado_razon = reason if reason else "Detenida manualmente, esperando cierre de posiciones."
-            
-            log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon}). Esperando cierre de posiciones."
-            self._memory_logger.log(log_msg, "WARN")
+def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
+    with self._lock:
+        target_op = self._get_operation_by_side_internal(side)
+        if not target_op or target_op.estado == 'DETENIDA':
+            return False, f"La operación {side.upper()} ya está detenida o no existe."
+        
+        if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
+            elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
+            target_op.tiempo_acumulado_activo_seg += elapsed_seconds
+            target_op.tiempo_ultimo_inicio_activo = None
 
-            if not target_op.posiciones_abiertas:
-                self.revisar_y_transicionar_a_detenida(side)
-                return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
-        return True, f"Proceso de detención para {side.upper()} iniciado."
+        target_op.estado = 'DETENIENDO'
+        
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Cambiamos el mensaje por defecto a uno más adecuado.
+        # Si la detención fue por un riesgo (ej. SL por ROI), `reason` tendrá un valor
+        # específico. Si es manual, ahora tendrá un mensaje más limpio.
+        target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
+        # --- FIN DE LA CORRECCIÓN ---
+        
+        log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon}). Esperando cierre de posiciones."
+        self._memory_logger.log(log_msg, "WARN")
+
+        if not target_op.posiciones_abiertas:
+            self.revisar_y_transicionar_a_detenida(side)
+            return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
+            
+    return True, f"Proceso de detención para {side.upper()} iniciado."
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---

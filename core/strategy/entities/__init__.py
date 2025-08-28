@@ -154,6 +154,28 @@ class Operacion:
     def posiciones_pendientes(self) -> List['LogicalPosition']:
         return [p for p in self.posiciones if p.estado == 'PENDIENTE']
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Añade esta nueva propiedad aquí
+    @property
+    def avg_entry_price(self) -> Optional[float]:
+        """Calcula el precio de entrada promedio ponderado de todas las posiciones abiertas."""
+        open_positions = self.posiciones_abiertas
+        if not open_positions:
+            return None
+
+        total_value = 0.0
+        total_size = 0.0
+        for pos in open_positions:
+            if pos.entry_price is not None and pos.size_contracts is not None and pos.size_contracts > 0:
+                 total_value += pos.entry_price * pos.size_contracts
+                 total_size += pos.size_contracts
+
+        if total_size <= 1e-12:
+            return None
+        
+        return safe_division(total_value, total_size)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     @property
     def posiciones_abiertas_count(self) -> int:
         return len(self.posiciones_abiertas)

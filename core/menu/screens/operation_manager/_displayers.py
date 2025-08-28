@@ -180,7 +180,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     print("└" + "─" * (box_width - 2) + "┘")
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
-    # --- COMIENZO DE LA FUNCIÓN A REEMPLAZAR ---
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
@@ -198,23 +197,15 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return
 
     from core.strategy.pm import _calculations as pm_calculations
-    
-    # # --- CÓDIGO ORIGINAL COMENTADO ---
-    # # open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
-    # # aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
-    # #     open_positions=open_positions_dicts,
-    # #     leverage=operacion.apalancamiento,
-    # #     side=side
-    # # )
-    # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
 
-    # --- CÓDIGO NUEVO Y CORREGIDO ---
     aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
         open_positions=operacion.posiciones_abiertas,
         leverage=operacion.apalancamiento,
         side=side
     )
-    # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
+
+    # Se obtiene el nuevo valor del precio promedio de entrada desde la propiedad de la operación.
+    avg_entry_price = operacion.avg_entry_price
 
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
@@ -233,28 +224,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
     
-    # # --- CÓDIGO ORIGINAL COMENTADO ---
-    # # data = {
-    # #     "--- CAPITAL ---": "",
-    # #     "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
-    # #     "Capital Operativo (Lógico)": f"${operacion.capital_operativo_logico_actual:.2f}",
-    # #     "Capital en Uso": f"${operacion.capital_en_uso:.2f}",
-    # #     "Capital Disponible": f"${operacion.capital_disponible:.2f}",
-    # #     "--- RENDIMIENTO Y RIESGO ---": "",
-    # #     "Equity Total (Histórico)": f"${equity_total_historico:.2f}",
-    # #     "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
-    # #     "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
-    # #     "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
-    # #     "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
-    # #     "--- CONTADORES ---": "",
-    # #     "Total Reinvertido": f"${total_reinvertido:.4f}",
-    # #     "Comisiones Totales": f"${comisiones_totales:.4f}",
-    # #     "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
-    # #     "Trades Cerrados": str(operacion.comercios_cerrados_contador),
-    # # }
-    # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-    # --- CÓDIGO NUEVO Y CORREGIDO ---
     data = {
         "--- CAPITAL ---": "",
         "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
@@ -267,14 +236,13 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
         "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
         "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
+        "Precio Break-Even (Est.)": f"\033[96m${avg_entry_price:.4f}\033[0m" if avg_entry_price else "N/A",
         "--- CONTADORES ---": "",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
         "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
-    # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
-
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():
@@ -283,8 +251,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         else: 
             print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
     print("└" + "─" * (box_width - 2) + "┘")
-    # --- FIN DE LA FUNCIÓN A REEMPLAZAR ---
-
 
 def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, current_price: float, side: str):
     box_width = _get_unified_box_width()
