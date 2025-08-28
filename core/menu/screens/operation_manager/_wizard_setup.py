@@ -294,7 +294,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             "[3] Editar Riesgo por Posición Individual (SL/TSL)",
             "[4] Editar Gestión de Riesgo de Operación (SL/TP por ROI)",
             "[5] Editar Condiciones de Entrada",
-            "[6] Editar Condiciones y Límites de Salida",
+            "[6] Editar Condiciones de Salida",
             None,
             "[s] Guardar Cambios",
             "[c] Cancelar y Volver"
