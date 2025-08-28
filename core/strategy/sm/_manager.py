@@ -1,33 +1,9 @@
+# core/strategy/sm/_manager.py
+
 """
 Módulo Gestor de Sesión (SessionManager).
-
-v6.0 (Refactor de Configuración):
-- Adaptado para leer la configuración desde los nuevos diccionarios anidados
-  en `config.py` (BOT_CONFIG, SESSION_CONFIG, OPERATION_DEFAULTS).
-
-v5.2 (Validación de Símbolo en Caliente):
-- `update_session_parameters` ahora valida activamente un cambio en `TICKER_SYMBOL`.
-- Si el nuevo símbolo es inválido, revierte el cambio al último símbolo válido
-  conocido y notifica al usuario, evitando que el Ticker opere con un
-  símbolo incorrecto.
-
-v5.1 (Fallback de Símbolo):
-- El método `initialize` ahora maneja el caso en que el `TICKER_SYMBOL`
-  configurado por el usuario sea inválido.
-
-v5.0 (Recarga en Caliente Completa):
-- `update_session_parameters` ahora detecta cambios en la configuración que
-  afectan a la estrategia o al ticker.
-- Si se detectan cambios, reinicia los componentes relevantes (`TAManager`,
-  `SignalGenerator`, `Ticker`) para aplicar la nueva configuración sin
-  detener la sesión por completo.
-
-v4.0 (Recarga en Caliente y Resumen Agregado):
-- `update_session_parameters` ahora reinicia el TAManager si los parámetros de TA cambian,
-  permitiendo una reconfiguración dinámica sin detener el Ticker.
-- `get_session_summary` ahora agrega el PNL y capital de ambas operaciones (LONG y SHORT)
-  para calcular el rendimiento total de la sesión.
 """
+
 import datetime
 from datetime import timezone
 import traceback
@@ -41,12 +17,15 @@ try:
     from connection import Ticker
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
+    # --- Añadido para tipado correcto ---
+    from core.strategy.entities import Operacion
 except ImportError:
     memory_logger = type('obj', (object,), {'log': print})()
     class EventProcessor: pass
     class Ticker: pass
     class TAManager: pass
     class SignalGenerator: pass
+    class Operacion: pass
 
 STRATEGY_AFFECTING_KEYS = {
     'EMA_WINDOW',
@@ -192,6 +171,40 @@ class SessionManager:
             
             long_op = self._om_api.get_operation_by_side('long')
             short_op = self._om_api.get_operation_by_side('short')
+            
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Se refactoriza la función interna `get_op_details` para que siempre
+            # devuelva el estado y la información relevante, sin importar el estado.
+            def get_op_details(op: Optional[Operacion]) -> Dict[str, Any]:
+                # Si el objeto de operación no existe, devolvemos valores por defecto.
+                if not op: 
+                    return {
+                        "id": "N/A", 
+                        "estado": "NO_INICIADA", 
+                        "tendencia": "N/A",
+                        "duracion_activa": "N/A"
+                    }
+                
+                # Calcular la duración solo si está ACTIVA y tiene un tiempo de inicio.
+                duration_str = "N/A"
+                if op.estado == 'ACTIVA' and getattr(op, 'tiempo_ultimo_inicio_activo', None):
+                    start_time = op.tiempo_ultimo_inicio_activo
+                    duration = datetime.datetime.now(timezone.utc) - start_time
+                    duration_str = str(datetime.timedelta(seconds=int(duration.total_seconds())))
+                
+                return {
+                    "id": op.id,
+                    "estado": op.estado,
+                    "tendencia": op.tendencia,
+                    "duracion_activa": duration_str
+                }
+
+            # Se asegura que la clave 'operations_info' siempre se construya en el resumen.
+            summary['operations_info'] = {
+                'long': get_op_details(long_op),
+                'short': get_op_details(short_op)
+            }
+            # --- FIN DE LA CORRECCIÓN ---
             
             if long_op:
                 summary['comisiones_totales_usdt_long'] = long_op.comisiones_totales_usdt
