@@ -32,7 +32,8 @@ from ..._helpers import (
 )
 
 try:
-    from core.strategy.om._entities import Operacion
+    # Se corrige la importación para usar la entidad correcta desde su ubicación central
+    from core.strategy.entities import Operacion
     import config as config_module
 except ImportError:
     class Operacion: pass
@@ -106,7 +107,7 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             break
 
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DE LA FUNCIÓN CORREGIDA ---
 # ==============================================================================
 
 def _show_single_operation_view(side: str):
@@ -132,9 +133,15 @@ def _show_single_operation_view(side: str):
             current_price = summary.get('current_market_price', 0.0)
             
             ticker_symbol = "N/A"
-            if config_module and "BOT_CONFIG" in dir(config_module) and "TICKER" in config_module.BOT_CONFIG:
-                 ticker_symbol = config_module.BOT_CONFIG["TICKER"].get("SYMBOL", "N/A")
-            header_title = f"Panel de Operación {side.upper()}: {ticker_symbol} @ {current_price:.4f} USDT"
+            if config_module and hasattr(config_module, 'BOT_CONFIG'):
+                 ticker_symbol = config_module.BOT_CONFIG.get("TICKER", {}).get("SYMBOL", "N/A")
+
+            # --- INICIO DE LA CORRECCIÓN EXACTA ---
+            # Se obtiene el estado directamente del objeto `operacion` para asegurar
+            # que siempre tenga un valor y nunca sea 'N/A'.
+            operation_status = operacion.estado if operacion.estado else "DESCONOCIDO"
+            header_title = f"Panel de Operación {side.upper()}: {operation_status.upper()} @ {current_price:.4f} USDT"
+            # --- FIN DE LA CORRECCIÓN EXACTA ---
             
             now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
             
@@ -191,7 +198,7 @@ def _show_single_operation_view(side: str):
                 time.sleep(2)
                 continue
 
-            open_positions_count = summary.get(f'open_{side}_positions_count', 0)
+            open_positions_count = operacion.posiciones_abiertas_count
             if open_positions_count > 0 and current_state not in ['DETENIDA', 'DETENIENDO']:
                 next_idx = len(menu_items)
                 menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
@@ -216,23 +223,21 @@ def _show_single_operation_view(side: str):
                 if choice_index < len(selectable_actions):
                     action = selectable_actions[choice_index]
             
-            # --- INICIO DE LA MODIFICACIÓN: Añadir pausas para sincronización ---
             if action == "start_new": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": 
                 _wizards._operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "pause":
                 om_api.pausar_operacion(side)
-                time.sleep(0.2) # Pausa para permitir que el estado se actualice
+                time.sleep(0.2)
             elif action == "resume":
                 om_api.reanudar_operacion(side)
-                time.sleep(0.2) # Pausa para permitir que el estado se actualice
+                time.sleep(0.2)
             elif action == "force_start":
                 confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show()
                 if confirm_menu == 0:
                     om_api.forzar_activacion_manual(side)
-                    time.sleep(0.2) # Pausa para permitir que el estado se actualice
-            # --- FIN DE LA MODIFICACIÓN ---
+                    time.sleep(0.2)
             
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
@@ -270,5 +275,5 @@ def _show_single_operation_view(side: str):
             break
 
 # ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# --- FIN DE LA FUNCIÓN CORREGIDA ---
 # ==============================================================================

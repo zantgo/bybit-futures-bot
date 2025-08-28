@@ -23,8 +23,8 @@ except ImportError:
             self.tiempo_inicio_ejecucion = None; self.pnl_realizado_usdt = 0.0
             self.comisiones_totales_usdt = 0.0; self.total_reinvertido_usdt = 0.0
             self.profit_balance_acumulado = 0.0
-            self.tsl_roi_activo = False # Añadido para fallback
-            self.tsl_roi_peak_pct = 0.0 # Añadido para fallback
+            self.tsl_roi_activo = False
+            self.tsl_roi_peak_pct = 0.0
         def reset(self): pass
         @property
         def capital_operativo_logico_actual(self) -> float: return 0.0
@@ -41,7 +41,7 @@ except ImportError:
 class OperationManager:
     """
     Gestiona el ciclo de vida y la configuración de las operaciones estratégicas
-    (LONG y SHORT). Actualizado para manejar capital por posición y TWRR.
+    (LONG y SHORT).
     """
     def __init__(self, config: Any, utils: Any, trading_api: Any, memory_logger_instance: Any):
         self._config = config
@@ -61,7 +61,7 @@ class OperationManager:
             if not self.long_operation: self.long_operation = Operacion(id=f"op_long_{uuid.uuid4()}")
             if not self.short_operation: self.short_operation = Operacion(id=f"op_short_{uuid.uuid4()}")
             self._initialized = True
-        self._memory_logger.log("OperationManager inicializado con operaciones LONG y SHORT en estado DETENIDA.", level="INFO")
+        self._memory_logger.log("OperationManager inicializado.", level="INFO")
 
     def is_initialized(self) -> bool:
         return self._initialized
@@ -69,18 +69,14 @@ class OperationManager:
     def _get_operation_by_side_internal(self, side: str) -> Optional[Operacion]:
         if side == 'long': return self.long_operation
         elif side == 'short': return self.short_operation
-        self._memory_logger.log(f"WARN [OM]: Intento de acceso a lado inválido '{side}' en _get_operation_by_side_internal.", "WARN")
+        self._memory_logger.log(f"WARN [OM]: Lado inválido '{side}' en _get_operation_by_side_internal.", "WARN")
         return None
 
     def get_operation_by_side(self, side: str) -> Optional[Operacion]:
         with self._lock:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
-            
             return copy.deepcopy(original_op)
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 3) ---
-# ==============================================================================
 
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
@@ -89,15 +85,13 @@ class OperationManager:
 
             estado_original = target_op.estado
             changed_keys = set()
-
             nuevas_posiciones = params.get('posiciones')
-            
             nuevo_capital_operativo = 0.0
+            
             if nuevas_posiciones is not None:
                 if isinstance(nuevas_posiciones, list) and all(isinstance(p, LogicalPosition) for p in nuevas_posiciones):
                     nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
                 else:
-                    self._memory_logger.log(f"ERROR [OM]: Se intentó actualizar la operación {side} con un formato de posiciones inválido.", "ERROR")
                     nuevas_posiciones = None 
             
             capital_operativo_anterior = target_op.capital_operativo_logico_actual
@@ -129,17 +123,15 @@ class OperationManager:
                 target_op.posiciones = copy.deepcopy(nuevas_posiciones)
                 changed_keys.add('posiciones')
 
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de Transición de Estado Refactorizada ---
             if changed_keys:
                 if estado_original == 'DETENIDA':
                     target_op.pnl_realizado_usdt = 0.0
                     target_op.comisiones_totales_usdt = 0.0
                     target_op.reinvestable_profit_balance = 0.0
                     target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
-                    target_op.tiempo_acumulado_activo_seg = 0.0 # Resetear acumulador
+                    target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                 
-                # Transición a ACTIVA
                 if target_op.tipo_cond_entrada == 'MARKET':
                     if target_op.estado != 'ACTIVA':
                         target_op.estado = 'ACTIVA'
@@ -147,27 +139,12 @@ class OperationManager:
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
                         target_op.tiempo_inicio_ejecucion = now
-                # Transición a EN_ESPERA (desde DETENIDA o PAUSADA)
                 elif 'tipo_cond_entrada' in changed_keys and estado_original in ['DETENIDA', 'PAUSADA']:
                     target_op.estado = 'EN_ESPERA'
                     target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     if target_op.tipo_cond_entrada == 'TIME_DELAY':
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-            # --- FIN DE LA MODIFICACIÓN ---
-
-            if 'apalancamiento' in changed_keys:
-                symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-                # ... (resto de la lógica de apalancamiento sin cambios)
-
         return True, f"Operación {side.upper()} actualizada con éxito."
-        
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 3) ---
-# ==============================================================================
 
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
@@ -175,30 +152,23 @@ class OperationManager:
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
                 return False, f"Solo se puede pausar una operación ACTIVA o EN_ESPERA del lado {side.upper()}."
             
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de Pausa Mejorada ---
             if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
                 elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
             
-            # Detener y resetear el cronómetro de duración y las condiciones de entrada
             target_op.tiempo_ultimo_inicio_activo = None
-            target_op.tiempo_inicio_ejecucion = None # Limpiamos también el antiguo por consistencia
+            target_op.tiempo_inicio_ejecucion = None
             target_op.tipo_cond_entrada = None
             target_op.valor_cond_entrada = None
             target_op.tiempo_espera_minutos = None
             target_op.tiempo_inicio_espera = None
-            # --- FIN DE LA MODIFICACIÓN ---
 
             target_op.estado = 'PAUSADA'
             target_op.estado_razon = reason if reason else "Pausada manualmente por el usuario."
         
-        msg = f"OPERACIÓN {side.upper()} PAUSADA (Razón: {target_op.estado_razon}). No se abrirán nuevas posiciones."
+        msg = f"OPERACIÓN {side.upper()} PAUSADA (Razón: {target_op.estado_razon})."
         self._memory_logger.log(msg, "WARN")
         return True, msg
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 3 de 3) ---
-# ==============================================================================
 
     def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
@@ -206,18 +176,12 @@ class OperationManager:
             if not target_op or target_op.estado != 'PAUSADA':
                 return False, f"Solo se puede reanudar una operación PAUSADA del lado {side.upper()}."
 
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de Reanudación Simplificada ---
-            # Reanudar siempre significa volver a estar ACTIVO.
-            # La lógica para entrar en EN_ESPERA ahora se maneja en create_or_update_operation.
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Reanudada manualmente por el usuario."
             
-            # Reiniciar y empezar el cronómetro de duración desde cero.
-            target_op.tiempo_acumulado_activo_seg = 0.0
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
             target_op.tiempo_inicio_ejecucion = now
-            # --- FIN DE LA MODIFICACIÓN ---
             
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
@@ -225,10 +189,6 @@ class OperationManager:
         msg = f"OPERACIÓN {side.upper()} REANUDADA. Nuevo estado: {target_op.estado}."
         self._memory_logger.log(msg, "WARN")
         return True, msg
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
     def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
@@ -241,23 +201,12 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            target_op.tiempo_inicio_ejecucion = now # <-- LÍNEA AÑADIDA
+            target_op.tiempo_inicio_ejecucion = now
             
         msg = f"OPERACIÓN {side.upper()} FORZADA A ESTADO ACTIVO manualmente."
         self._memory_logger.log(msg, "WARN")
         return True, msg
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 4 de 5) ---
-# ==============================================================================
-
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 3 de 4) ---
-# ==============================================================================
     def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -279,36 +228,116 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            target_op.tiempo_inicio_ejecucion = now # <-- LÍNEA AÑADIDA
+            target_op.tiempo_inicio_ejecucion = now
             
         msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-# Verifica que esta función en core/strategy/om/_manager.py se vea así
-
-def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
-    with self._lock:
-        target_op = self._get_operation_by_side_internal(side)
-        if not target_op or target_op.estado == 'DETENIDA':
-            return False, f"La operación {side.upper()} ya está detenida o no existe."
-        
-        if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
-            elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
-            target_op.tiempo_acumulado_activo_seg += elapsed_seconds
-            target_op.tiempo_ultimo_inicio_activo = None
-
-        target_op.estado = 'DETENIENDO'
-        
-        # Esta es la línea clave. Si 'reason' viene del EventProcessor, se usará.
-        # Si la detención es manual (desde la TUI), `reason` será None y se usará el texto por defecto.
-        target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
-        
-        log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon}). Esperando cierre de posiciones."
-        self._memory_logger.log(log_msg, "WARN")
-
-        if not target_op.posiciones_abiertas:
-            self.revisar_y_transicionar_a_detenida(side)
-            return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
+    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            if not target_op or target_op.estado == 'DETENIDA':
+                return False, f"La operación {side.upper()} ya está detenida o no existe."
             
-    return True, f"Proceso de detención para {side.upper()} iniciado."
+            if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
+                elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
+                target_op.tiempo_acumulado_activo_seg += elapsed_seconds
+                target_op.tiempo_ultimo_inicio_activo = None
+
+            target_op.estado = 'DETENIENDO'
+            target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
+            
+            log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon})."
+            self._memory_logger.log(log_msg, "WARN")
+
+            if not target_op.posiciones_abiertas:
+                self.revisar_y_transicionar_a_detenida(side)
+                return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
+        return True, f"Proceso de detención para {side.upper()} iniciado."
+
+    def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
+        with self._lock:
+            op = self._get_operation_by_side_internal(side)
+            if op:
+                op.pnl_realizado_usdt += pnl_amount
+
+    def actualizar_total_reinvertido(self, side: str, amount: float):
+        with self._lock:
+            op = self._get_operation_by_side_internal(side)
+            if op:
+                op.total_reinvertido_usdt += amount
+    
+    def actualizar_comisiones_totales(self, side: str, fee_amount: float):
+        with self._lock:
+            op = self._get_operation_by_side_internal(side)
+            if op:
+                op.comisiones_totales_usdt += abs(fee_amount)
+    
+    def revisar_y_transicionar_a_detenida(self, side: str):
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            if not target_op or target_op.estado not in ['PAUSADA', 'DETENIENDO']:
+                return
+            
+            if not target_op.posiciones_abiertas:
+                log_msg = (
+                    f"OPERACIÓN {side.upper()}: Finalizada. Razón: '{target_op.estado_razon}'"
+                )
+                self._memory_logger.log(log_msg, "INFO")
+                target_op.estado = 'DETENIDA'
+
+    def actualizar_reinvestable_profit(self, side: str, amount: float):
+        with self._lock:
+            op = self._get_operation_by_side_internal(side)
+            if op:
+                op.reinvestable_profit_balance += amount
+
+    def distribuir_reinvestable_profits(self, side: str):
+        with self._lock:
+            op = self._get_operation_by_side_internal(side)
+            if not op or op.reinvestable_profit_balance <= 1e-9:
+                return
+
+            pending_positions = op.posiciones_pendientes
+            if not pending_positions:
+                self._memory_logger.log(
+                    f"REINVERSIÓN OMITIDA ({side.upper()}): Sin posiciones pendientes.",
+                    "WARN"
+                )
+                return
+
+            total_to_distribute = op.reinvestable_profit_balance
+            amount_per_position = total_to_distribute / len(pending_positions)
+
+            for pos in op.posiciones:
+                if pos.estado == 'PENDIENTE':
+                    pos.capital_asignado += amount_per_position
+            
+            op.reinvestable_profit_balance = 0.0
+            self._memory_logger.log(
+                f"REINVERSIÓN EJECUTADA ({side.upper()}): ${total_to_distribute:.4f} distribuidos.",
+                "INFO"
+            )
+
+    def handle_liquidation_event(self, side: str, reason: str):
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            
+            if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
+                return
+
+            self._memory_logger.log(
+                f"OM: Procesando evento de liquidación para {side.upper()}.", "WARN"
+            )
+
+            target_op.estado = 'DETENIENDO'
+            target_op.estado_razon = reason
+            total_loss = target_op.capital_operativo_logico_actual
+            target_op.pnl_realizado_usdt -= total_loss
+            self._memory_logger.log(
+                f"OM: Pérdida por liquidación de ${total_loss:.4f} registrada.", "WARN"
+            )
+            
+            target_op.posiciones.clear()
+            self.revisar_y_transicionar_a_detenida(side)
