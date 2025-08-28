@@ -84,11 +84,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
 
 
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
-# ==============================================================================
-
 def _edit_entry_conditions_submenu(temp_op: Operacion):
     """
     Submenú dedicado a editar únicamente las Condiciones de Entrada de la operación.
@@ -146,16 +141,6 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         print("\nEdición de campo cancelada.")
         time.sleep(1)
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 2 de 2) ---
-# ==============================================================================
-
 def _edit_exit_conditions_submenu(temp_op: Operacion):
     """
     Submenú dedicado a editar los Límites y Condiciones de Salida de la operación.
@@ -212,14 +197,6 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         except UserInputCancelled:
             print("\nEdición de campo cancelada.")
             time.sleep(1)
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     config_module = _deps.get("config_module")
@@ -310,22 +287,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         print_tui_header(f"Asistente de Operación {side.upper()}")
         
         _display_setup_box(temp_op, _get_terminal_width(), is_modification)
-        
-        # --- INICIO DE LA MODIFICACIÓN: Actualizar el menú principal ---
-        # # --- CÓDIGO ORIGINAL COMENTADO ---
-        # menu_items = [
-        #     "[1] Gestionar Lista de Posiciones y Simular Riesgo",
-        #     "[2] Editar Estrategia Global (Apalancamiento, Promediación, Reinversión)",
-        #     "[3] Editar Riesgo por Posición Individual (SL/TSL)",
-        #     "[4] Editar Gestión de Riesgo de Operación (SL/TP por ROI)",
-        #     "[5] Editar Condiciones de Entrada y Salida",
-        #     None,
-        #     "[s] Guardar Cambios",
-        #     "[c] Cancelar y Volver"
-        # ]
-        # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-        
-        # --- CÓDIGO NUEVO Y CORREGIDO ---
+
         menu_items = [
             "[1] Gestionar Lista de Posiciones y Simular Riesgo",
             "[2] Editar Estrategia Global (Apalancamiento, Promediación, Reinversión)",
@@ -398,15 +360,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             elif choice == 3:
                 _edit_operation_risk_submenu(temp_op)
                 params_changed = True
-            
-            # --- INICIO DE LA MODIFICACIÓN: Actualizar las llamadas a los submenús ---
-            # # --- CÓDIGO ORIGINAL COMENTADO ---
-            # elif choice == 4:
-            #     _edit_exit_limits_submenu(temp_op)
-            #     params_changed = True
-            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
 
-            # --- CÓDIGO NUEVO Y CORREGIDO ---
             elif choice == 4:
                 if is_modification and temp_op.estado == 'ACTIVA':
                     print("\nNo se pueden editar las condiciones de entrada mientras la operación está ACTIVA.")
@@ -448,20 +402,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     """
     Muestra la caja con la configuración actual de la operación.
@@ -501,30 +441,31 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Riesgo por Posición Individual")
     
-    # --- INICIO DE LA MODIFICACIÓN: Añadir cálculo de movimiento de precio ---
     leverage = operacion.apalancamiento if operacion.apalancamiento > 0 else 1.0
 
     sl_individual_str = "Desactivado"
     if operacion.sl_posicion_individual_pct is not None:
         price_move_pct = operacion.sl_posicion_individual_pct / leverage
-        sl_individual_str = f"{operacion.sl_posicion_individual_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+        # --- MODIFICACIÓN: Aumentar decimales a 4 ---
+        sl_individual_str = f"{operacion.sl_posicion_individual_pct}% (Mov. Precio: {price_move_pct:.4f}%)"
 
     tsl_act_str = "Desactivado"
     if operacion.tsl_activacion_pct is not None:
         price_move_pct = operacion.tsl_activacion_pct / leverage
-        tsl_act_str = f"{operacion.tsl_activacion_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+        # --- MODIFICACIÓN: Aumentar decimales a 4 ---
+        tsl_act_str = f"{operacion.tsl_activacion_pct}% (Mov. Precio: {price_move_pct:.4f}%)"
         
     tsl_dist_str = "N/A"
     if operacion.tsl_distancia_pct is not None:
         price_move_pct = operacion.tsl_distancia_pct / leverage
-        tsl_dist_str = f"{operacion.tsl_distancia_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+        # --- MODIFICACIÓN: Aumentar decimales a 4 ---
+        tsl_dist_str = f"{operacion.tsl_distancia_pct}% (Mov. Precio: {price_move_pct:.4f}%)"
 
     risk_data = {
         "SL Individual (%)": sl_individual_str,
         "Activación TSL (%)": tsl_act_str,
         "Distancia TSL (%)": tsl_dist_str if operacion.tsl_activacion_pct else "N/A",
     }
-    # --- FIN DE LA MODIFICACIÓN ---
     
     max_key_len = max(len(k) for k in risk_data.keys()) if risk_data else 0
     for label, value in risk_data.items():
@@ -538,13 +479,12 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
         op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {trail_pct}%)"
     else:
-        # --- INICIO DE LA MODIFICACIÓN: Añadir cálculo de movimiento de precio ---
         sl_roi_str = "Desactivado"
         if operacion.sl_roi_pct is not None:
             price_move_pct = operacion.sl_roi_pct / leverage
-            sl_roi_str = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {price_move_pct:.2f}%)"
+            # --- MODIFICACIÓN: Aumentar decimales a 4 ---
+            sl_roi_str = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {price_move_pct:.4f}%)"
         op_risk_data["Límite SL/TP por ROI (%)"] = sl_roi_str
-        # --- FIN DE LA MODIFICACIÓN ---
 
     op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
     
@@ -553,7 +493,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         _print_line(label, value, max_key_len)
     
     print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Condiciones y Límites de Salida")
+    _print_section_header("Condición de Entrada")
     
     entry_cond_str = "No definida"
     if operacion.tipo_cond_entrada == 'MARKET': 
@@ -587,14 +527,3 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         _print_line(label, value, max_key_len)
 
     print("└" + "─" * (box_width - 2) + "┘")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
