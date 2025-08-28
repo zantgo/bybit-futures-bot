@@ -1,5 +1,3 @@
-# core/menu/screens/operation_manager/_main.py
-
 """
 Módulo Principal del Panel de Control de Operación.
 
@@ -65,7 +63,11 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
         return
 
     while True:
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+        # Se añade clear_screen() al inicio del bucle del selector de operaciones.
         clear_screen()
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         print_tui_header("Panel de Control de Operaciones")
 
         try:
@@ -138,7 +140,12 @@ def _show_single_operation_view(side: str):
             
             now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
             
+            # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+            # El clear_screen() se mantiene aquí, es correcto para el bucle
+            # de una vista detallada.
             clear_screen()
+            # --- FIN DE LA MODIFICACIÓN ---
+            
             print_tui_header(title=header_title, subtitle=now_str)
 
             if not summary or summary.get('error'):
@@ -216,13 +223,10 @@ def _show_single_operation_view(side: str):
                 if choice_index < len(selectable_actions):
                     action = selectable_actions[choice_index]
             
-            # --- INICIO DE LA MODIFICACIÓN (Paso Final) ---
-            # Se cambia la llamada para usar el nombre de función público correcto.
             if action == "start_new": 
                 _wizards.operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": 
                 _wizards.operation_setup_wizard(om_api, side, is_modification=True)
-            # --- FIN DE LA MODIFICACIÓN ---
             elif action == "pause":
                 om_api.pausar_operacion(side)
                 time.sleep(0.2)
@@ -230,14 +234,24 @@ def _show_single_operation_view(side: str):
                 om_api.reanudar_operacion(side)
                 time.sleep(0.2)
             elif action == "force_start":
-                confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show()
-                if confirm_menu == 0:
+                # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+                # Se asegura que el menú de confirmación limpie la pantalla.
+                confirm_options = MENU_STYLE.copy()
+                confirm_options['clear_screen'] = True
+                confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?", **confirm_options)
+                if confirm_menu.show() == 0:
+                # --- FIN DE LA MODIFICACIÓN ---
                     om_api.forzar_activacion_manual(side)
                     time.sleep(0.2)
             
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
-                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title)
+                # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+                # Se asegura que el menú de confirmación limpie la pantalla.
+                confirm_options = MENU_STYLE.copy()
+                confirm_options['clear_screen'] = True
+                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title, **confirm_options)
+                # --- FIN DE LA MODIFICACIÓN ---
                 
                 if confirm_menu.show() == 0:
                     print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")

@@ -30,14 +30,12 @@ except ImportError:
     class Operacion: pass
     class LogicalPosition: pass
 
-# --- INICIO DE LA MODIFICACIÓN ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
     """Recibe y almacena las dependencias para este módulo."""
     global _deps
     _deps = dependencies
-# --- FIN DE LA MODIFICACIÓN ---
 
 def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
     params_changed_in_submenu = False
@@ -138,29 +136,49 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     if getattr(operacion, 'dynamic_roi_sl_enabled', False): op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {getattr(operacion, 'dynamic_roi_sl_trail_pct', 0)}%)"
     else: op_risk_data["Límite SL/TP por ROI (%)"] = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {operacion.sl_roi_pct / leverage:.4f}%)" if operacion.sl_roi_pct is not None else "Desactivado"
     op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
-    op_risk_data["Acción por Riesgo de ROI"] = operacion.accion_por_riesgo_roi
+    op_risk_data["Acción por SL/TP ROI"] = operacion.accion_por_sl_tp_roi
+    op_risk_data["Acción por TSL ROI"] = operacion.accion_por_tsl_roi
     max_key = max(len(k) for k in op_risk_data.keys()) if op_risk_data else 0
     for label, value in op_risk_data.items(): _print_line(label, value, max_key)
     
+    # --- INICIO DE LA MODIFICACIÓN (Visualización ordenada) ---
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Entrada")
-    cond_strings = []
-    if not operacion.condiciones_entrada and not operacion.tiempo_espera_minutos: cond_strings.append("- Inmediata (Market)")
+    
+    max_key_entry = len("Precio SUPERIOR a") # Longitud de la clave más larga para alinear
+    if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
+        _print_line("Modo de Entrada", "Inmediata (Market)", max_key_entry)
     else:
-        for c in operacion.condiciones_entrada: cond_strings.append(f"- Precio {'>' if c['tipo'] == 'PRICE_ABOVE' else '<'} {c['valor']:.4f}")
-        if operacion.tiempo_espera_minutos: cond_strings.append(f"- Activar después de {operacion.tiempo_espera_minutos} min")
-    _print_line("Condiciones (Lógica OR)", " O ".join(cond_strings), 25)
+        if operacion.cond_entrada_above is not None: _print_line("Precio SUPERIOR a", f"{operacion.cond_entrada_above:.4f}", max_key_entry)
+        if operacion.cond_entrada_below is not None: _print_line("Precio INFERIOR a", f"{operacion.cond_entrada_below:.4f}", max_key_entry)
+        if operacion.tiempo_espera_minutos: _print_line("Temporizador", f"{operacion.tiempo_espera_minutos} min", max_key_entry)
 
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Salida")
-    exit_limits_data = {}
-    for i, c in enumerate(operacion.condiciones_salida_precio): exit_limits_data[f"Límite Precio Salida {i+1}"] = f"Precio {'>' if c['tipo'] == 'PRICE_ABOVE' else '<'} {c['valor']:.4f} (Acción: {c['accion']})"
-    exit_limits_data["Límite Duración (min)"] = f"{operacion.tiempo_maximo_min or 'Ilimitado'} (Acción: {operacion.accion_por_limite_tiempo})"
-    exit_limits_data["Límite Máx. Trades"] = f"{operacion.max_comercios or 'Ilimitado'} (Acción: {operacion.accion_por_limite_trades})"
-    max_key = max(len(k) for k in exit_limits_data.keys()) if exit_limits_data else 0
-    if not any(operacion.condiciones_salida_precio) and not operacion.tiempo_maximo_min and not operacion.max_comercios: _print_line("Ningún límite configurado", "", max_key)
-    else:
-        for label, value in exit_limits_data.items(): _print_line(label, value, max_key)
+    
+    exit_labels = []
+    if operacion.cond_salida_above: exit_labels.append("Salida Superior")
+    if operacion.cond_salida_below: exit_labels.append("Salida Inferior")
+    exit_labels.extend(["Límite Duración (min)", "Límite Máx. Trades"])
+    max_key_exit = max(len(k) for k in exit_labels) if exit_labels else 20
+
+    has_exit_cond = False
+    if operacion.cond_salida_above:
+        has_exit_cond = True
+        _print_line("Salida Superior", f"Precio > {operacion.cond_salida_above['valor']:.4f} (Acción: {operacion.cond_salida_above['accion']})", max_key_exit)
+    if operacion.cond_salida_below:
+        has_exit_cond = True
+        _print_line("Salida Inferior", f"Precio < {operacion.cond_salida_below['valor']:.4f} (Acción: {operacion.cond_salida_below['accion']})", max_key_exit)
+    if operacion.tiempo_maximo_min:
+        has_exit_cond = True
+        _print_line("Límite Duración (min)", f"{operacion.tiempo_maximo_min} (Acción: {operacion.accion_por_limite_tiempo})", max_key_exit)
+    if operacion.max_comercios:
+        has_exit_cond = True
+        _print_line("Límite Máx. Trades", f"{operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})", max_key_exit)
+        
+    if not has_exit_cond:
+        _print_line("Límites de Salida", "Ninguno configurado", max_key_exit)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
     
@@ -178,20 +196,20 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op = Operacion(id=f"op_{side}_{uuid.uuid4().hex[:8]}")
         temp_op.tendencia = "LONG_ONLY" if side == 'long' else "SHORT_ONLY"
         temp_op.apalancamiento = defaults["CAPITAL"]["LEVERAGE"]
-        temp_op.condiciones_entrada = []
-        temp_op.condiciones_salida_precio = []
         temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"] if side == 'long' else defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_SHORT"]
         temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL"]["PERCENTAGE"] if defaults["RISK"]["INDIVIDUAL_SL"]["ENABLED"] else None
-        if defaults["RISK"]["INDIVIDUAL_TSL"]["ENABLED"]:
-            temp_op.tsl_activacion_pct, temp_op.tsl_distancia_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_ACTIVATION_PCT"], defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_DISTANCE_PCT"]
+        if defaults["RISK"]["INDIVIDUAL_TSL"]["ENABLED"]: temp_op.tsl_activacion_pct, temp_op.tsl_distancia_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_ACTIVATION_PCT"], defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_DISTANCE_PCT"]
         dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
         temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
         temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
         if temp_op.dynamic_roi_sl_enabled: temp_op.sl_roi_pct = None
         else: temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
-        if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]:
-            temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
-        temp_op.accion_por_riesgo_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
+        if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
+        
+        # Inicializar nuevos atributos
+        temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
+        temp_op.accion_por_tsl_roi = 'PAUSAR'
+
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
         temp_op.tiempo_maximo_min = defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None
@@ -200,8 +218,7 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.accion_por_limite_trades = default_action
         base_size = defaults["CAPITAL"]["BASE_SIZE_USDT"]
         max_pos = defaults["CAPITAL"]["MAX_POSITIONS"]
-        for _ in range(max_pos):
-            temp_op.posiciones.append(LogicalPosition(id=f"pos_{uuid.uuid4().hex[:8]}", estado='PENDIENTE', capital_asignado=base_size, valor_nominal=base_size * temp_op.apalancamiento))
+        for _ in range(max_pos): temp_op.posiciones.append(LogicalPosition(id=f"pos_{uuid.uuid4().hex[:8]}", estado='PENDIENTE', capital_asignado=base_size, valor_nominal=base_size * temp_op.apalancamiento))
 
     params_changed = False
 
@@ -219,20 +236,8 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         print_tui_header(f"Asistente de Operación {side.upper()}")
         _display_setup_box(temp_op, _get_terminal_width(), is_modification)
 
-        menu_items = [
-            "[1] Gestionar Lista de Posiciones y Simular Riesgo",
-            "[2] Editar Estrategia Global",
-            "[3] Editar Riesgo por Posición Individual",
-            "[4] Editar Gestión de Riesgo de Operación",
-            "[5] Editar Condiciones de Entrada",
-            "[6] Editar Condiciones de Salida",
-            None,
-            "[s] Guardar Cambios",
-            "[c] Cancelar y Volver"
-        ]
-        
-        if is_modification and temp_op.estado == 'ACTIVA':
-            menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
+        menu_items = [ "[1] Gestionar Lista de Posiciones y Simular Riesgo", "[2] Editar Estrategia Global", "[3] Editar Riesgo por Posición Individual", "[4] Editar Gestión de Riesgo de Operación", "[5] Editar Condiciones de Entrada", "[6] Editar Condiciones de Salida", None, "[s] Guardar Cambios", "[c] Cancelar y Volver" ]
+        if is_modification and temp_op.estado == 'ACTIVA': menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
         
         menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
         menu = TerminalMenu(menu_items, title="\nSelecciona una categoría para editar:", **menu_options)

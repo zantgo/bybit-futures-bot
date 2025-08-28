@@ -19,7 +19,16 @@ except ImportError:
             self.id = id; self.estado = 'DETENIDA'; self.estado_razon = 'Inicial'; self.posiciones: list = []
             self.capital_flows: list = []; self.sub_period_returns: list = []
             self.capital_inicial_usdt = 0.0; self.apalancamiento = 10.0
-            self.tipo_cond_entrada = None; self.valor_cond_entrada = None
+            # --- ATRIBUTOS ELIMINADOS DE LA ENTIDAD REAL ---
+            # self.tipo_cond_entrada = None; self.valor_cond_entrada = None
+            # --- NUEVOS ATRIBUTOS EN LA ENTIDAD REAL ---
+            self.cond_entrada_above: Optional[float] = None
+            self.cond_entrada_below: Optional[float] = None
+            self.cond_salida_above: Optional[Dict[str, Any]] = None
+            self.cond_salida_below: Optional[Dict[str, Any]] = None
+            self.tiempo_espera_minutos: Optional[int] = None
+            self.tiempo_inicio_espera: Optional[datetime.datetime] = None
+            # --- FIN DE CAMBIOS EN LA ENTIDAD ---
             self.tiempo_inicio_ejecucion = None; self.pnl_realizado_usdt = 0.0
             self.comisiones_totales_usdt = 0.0; self.total_reinvertido_usdt = 0.0
             self.profit_balance_acumulado = 0.0
@@ -30,13 +39,15 @@ except ImportError:
         def capital_operativo_logico_actual(self) -> float: return 0.0
         @property
         def posiciones_abiertas(self) -> list: return []
+        @property
+        def posiciones_pendientes(self) -> list: return []
     class LogicalPosition: pass
     class CapitalFlow: pass
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
     sm_api = None
-    utils = type('obj', (object,), {'safe_division': lambda n, d: 0 if d == 0 else n / d})()
+    utils = type('obj', (object,), {'safe_division': lambda n, d, default=0.0: 0 if d == 0 else n / d})()
 
 class OperationManager:
     """
@@ -132,31 +143,39 @@ class OperationManager:
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                 
-                # --- INICIO DE LA CORRECCIÓN ---
-                # Se introduce una variable temporal para el nuevo estado y se añade un bloque de log al final.
-                estado_nuevo = target_op.estado # Asumimos que no cambia, por ahora.
+                # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+                estado_nuevo = target_op.estado
+
+                # Se evalúa si hay condiciones de entrada. La ausencia de todas las
+                # condiciones (precio y tiempo) implica una entrada a mercado.
+                is_market_entry = all(v is None for v in [
+                    target_op.cond_entrada_above,
+                    target_op.cond_entrada_below,
+                    target_op.tiempo_espera_minutos
+                ])
                 
-                if target_op.tipo_cond_entrada == 'MARKET':
+                if is_market_entry:
                     if estado_original != 'ACTIVA':
-                        estado_nuevo = 'ACTIVA' # Guardamos el potencial nuevo estado
+                        estado_nuevo = 'ACTIVA'
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
-                        target_op.tiempo_inicio_ejecucion = now
-                elif 'tipo_cond_entrada' in changed_keys and estado_original in ['DETENIDA', 'PAUSADA']:
-                    estado_nuevo = 'EN_ESPERA' # Guardamos el potencial nuevo estado
+                        if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+                            target_op.tiempo_inicio_ejecucion = now
+                # Si se ha modificado alguna condición de entrada y el estado era DETENIDA o PAUSADA
+                elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
+                    estado_nuevo = 'EN_ESPERA'
                     target_op.estado_razon = "Operación en espera de nueva condición de entrada."
-                    if target_op.tipo_cond_entrada == 'TIME_DELAY':
+                    if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+                # --- FIN DE LA CORRECCIÓN ---
 
-                # Se comprueba si el estado ha cambiado y, si es así, se loguea.
                 if estado_nuevo != estado_original:
                     self._memory_logger.log(
                         f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> '{estado_nuevo}'. Razón: {target_op.estado_razon}",
                         "WARN"
                     )
-                    target_op.estado = estado_nuevo # Aplicamos el cambio de estado final
-                # --- FIN DE LA CORRECCIÓN ---
+                    target_op.estado = estado_nuevo
 
         return True, f"Operación {side.upper()} actualizada con éxito."
 
@@ -166,15 +185,21 @@ class OperationManager:
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
                 return False, f"Solo se puede pausar una operación ACTIVA o EN_ESPERA del lado {side.upper()}."
             
-            estado_original = target_op.estado # Guardamos el estado antes del cambio
+            estado_original = target_op.estado
             if target_op.estado == 'ACTIVA' and target_op.tiempo_ultimo_inicio_activo:
                 elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
             
             target_op.tiempo_ultimo_inicio_activo = None
-            target_op.tiempo_inicio_ejecucion = None
-            target_op.tipo_cond_entrada = None
-            target_op.valor_cond_entrada = None
+            
+            # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+            # Limpiar las condiciones de entrada específicas en lugar de las antiguas.
+            # target_op.tipo_cond_entrada = None # <-- COMENTADO/ELIMINADO
+            # target_op.valor_cond_entrada = None # <-- COMENTADO/ELIMINADO
+            target_op.cond_entrada_above = None
+            target_op.cond_entrada_below = None
+            # --- FIN DE LA CORRECCIÓN ---
+            
             target_op.tiempo_espera_minutos = None
             target_op.tiempo_inicio_espera = None
 
@@ -197,7 +222,8 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            target_op.tiempo_inicio_ejecucion = now
+            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+                target_op.tiempo_inicio_ejecucion = now
             
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
@@ -218,7 +244,8 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            target_op.tiempo_inicio_ejecucion = now
+            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+                target_op.tiempo_inicio_ejecucion = now
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
@@ -231,22 +258,25 @@ class OperationManager:
                 return False, "La operación no estaba esperando una condición."
 
             estado_original = target_op.estado
-            cond_type = target_op.tipo_cond_entrada
-            if cond_type == 'TIME_DELAY':
-                reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
-            elif cond_type == 'PRICE_ABOVE':
-                reason = f"Activada por precio > {target_op.valor_cond_entrada:.4f}."
-            elif cond_type == 'PRICE_BELOW':
-                reason = f"Activada por precio < {target_op.valor_cond_entrada:.4f}."
-            else:
-                reason = "Condición de entrada alcanzada."
+            
+            # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+            # Determinar la razón basándose en las nuevas condiciones
+            reason = "Condición de entrada alcanzada."
+            if target_op.tiempo_espera_minutos is not None:
+                 reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
+            elif target_op.cond_entrada_above is not None:
+                 reason = f"Activada por precio > {target_op.cond_entrada_above:.4f}."
+            elif target_op.cond_entrada_below is not None:
+                 reason = f"Activada por precio < {target_op.cond_entrada_below:.4f}."
+            # --- FIN DE LA CORRECCIÓN ---
             
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = reason
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            target_op.tiempo_inicio_ejecucion = now
+            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+                target_op.tiempo_inicio_ejecucion = now
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
@@ -292,23 +322,14 @@ class OperationManager:
             op = self._get_operation_by_side_internal(side)
             if op:
                 op.comisiones_totales_usdt += abs(fee_amount)
-    
-# Reemplaza la función existente en core/strategy/om/_manager.py con esta versión
 
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Se ha eliminado 'PAUSADA' de la condición.
-            # Ahora, esta función solo actuará si la operación ya ha recibido
-            # una orden explícita de detenerse (estado 'DETENIENDO').
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
-            # --- FIN DE LA CORRECCIÓN ---
             
-            # Esta lógica se mantiene sin cambios. Solo se ejecutará si la
-            # condición anterior se cumple.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (

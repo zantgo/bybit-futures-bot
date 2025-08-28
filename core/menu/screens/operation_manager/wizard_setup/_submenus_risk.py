@@ -54,7 +54,9 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         risk_mode_menu = TerminalMenu(
             [f"[1] Límite SL/TP por ROI ({sl_roi_str})", 
              f"[2] Límite TSL por ROI ({tsl_roi_str})",
-             f"[3] Acción por Riesgo de ROI ({temp_op.accion_por_riesgo_roi})",
+             None,
+             f"[3] Acción al alcanzar SL/TP por ROI ({temp_op.accion_por_sl_tp_roi})",
+             f"[4] Acción al alcanzar TSL por ROI ({temp_op.accion_por_tsl_roi})",
              None, 
              "[b] Volver al menú anterior"],
             title=risk_mode_title,
@@ -62,7 +64,7 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         )
         choice = risk_mode_menu.show()
 
-        if choice is None or choice == 4:
+        if choice is None or choice == 6:
             break
 
         try:
@@ -79,8 +81,9 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                     new_val = get_input("Distancia del Trailing Stop al ROI Realizado (%)", float, temp_op.dynamic_roi_sl_trail_pct, min_val=0.1)
                     if new_val != temp_op.dynamic_roi_sl_trail_pct: temp_op.dynamic_roi_sl_trail_pct = new_val; params_changed_in_submenu = True
                 elif sl_tp_menu == 2:
-                    temp_op.dynamic_roi_sl_enabled, temp_op.dynamic_roi_sl_trail_pct, temp_op.sl_roi_pct = False, None, None
-                    params_changed_in_submenu = True
+                    if temp_op.dynamic_roi_sl_enabled or temp_op.sl_roi_pct is not None:
+                        temp_op.dynamic_roi_sl_enabled, temp_op.dynamic_roi_sl_trail_pct, temp_op.sl_roi_pct = False, None, None
+                        params_changed_in_submenu = True
 
             elif choice == 1:
                 tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_op.tsl_roi_activacion_pct, min_val=0.0, is_optional=True, context_info="Introduce un valor para activar o deja vacío para desactivar.")
@@ -94,10 +97,16 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                         temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
                         params_changed_in_submenu = True
                 
-            elif choice == 2:
-                new_action = get_action_menu("Acción al activarse un riesgo de ROI", temp_op.accion_por_riesgo_roi)
-                if new_action != temp_op.accion_por_riesgo_roi:
-                    temp_op.accion_por_riesgo_roi = new_action
+            elif choice == 3:
+                new_action = get_action_menu("Acción al alcanzar SL/TP por ROI", temp_op.accion_por_sl_tp_roi)
+                if new_action != temp_op.accion_por_sl_tp_roi:
+                    temp_op.accion_por_sl_tp_roi = new_action
+                    params_changed_in_submenu = True
+
+            elif choice == 4:
+                new_action = get_action_menu("Acción al alcanzar TSL por ROI", temp_op.accion_por_tsl_roi)
+                if new_action != temp_op.accion_por_tsl_roi:
+                    temp_op.accion_por_tsl_roi = new_action
                     params_changed_in_submenu = True
 
         except UserInputCancelled:

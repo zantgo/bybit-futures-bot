@@ -1,5 +1,3 @@
-# core/menu/screens/operation_manager/_displayers.py
-
 """
 Módulo de Visualizadores del Panel de Control de Operación.
 
@@ -23,12 +21,23 @@ except ImportError:
         pass
     class Operacion:
         def __init__(self):
-            self.estado, self.tendencia, self.accion_por_riesgo_roi = 'DESCONOCIDO', 'N/A', 'N/A'
-            self.condiciones_entrada, self.condiciones_salida_precio = [], []
+            self.estado, self.tendencia = 'DESCONOCIDO', 'N/A'
+            # --- ATRIBUTOS ELIMINADOS DE LA ENTIDAD REAL ---
+            # self.condiciones_entrada, self.condiciones_salida_precio = [], []
+            # --- NUEVOS ATRIBUTOS EN LA ENTIDAD REAL ---
+            self.cond_entrada_above: Optional[float] = None
+            self.cond_entrada_below: Optional[float] = None
+            self.cond_salida_above: Optional[Dict[str, Any]] = None
+            self.cond_salida_below: Optional[Dict[str, Any]] = None
+            self.tiempo_espera_minutos: Optional[int] = None
+            self.tiempo_inicio_espera: Optional[datetime.datetime] = None
+            self.accion_por_sl_tp_roi = 'DETENER'
+            self.accion_por_tsl_roi = 'PAUSAR'
+            # --- FIN DE CAMBIOS EN LA ENTIDAD ---
             self.estado_razon = "Razón no disponible (fallback)."
             self.apalancamiento, self.pnl_realizado_usdt = 10.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
-            self.total_reinvertido_usdt, self.tiempo_espera_minutos = 0.0, None
+            self.total_reinvertido_usdt = 0.0
             self.tsl_roi_activacion_pct, self.tsl_roi_distancia_pct, self.sl_roi_pct = None, None, None
             self.tsl_roi_peak_pct = 0.0
             self.comercios_cerrados_contador, self.tiempo_maximo_min, self.max_comercios = 0, None, None
@@ -342,18 +351,23 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mCondición de Entrada\033[0m", box_width, 'center'))
 
-        # MODIFICACIÓN: Usar los nuevos atributos de la operación
-        entry_cond_strs = []
-        if not operacion.condiciones_entrada and not operacion.tiempo_espera_minutos:
-            entry_cond_strs.append("- Inmediata (Market)")
+        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+        # Se reemplaza la lógica que usaba 'condiciones_entrada' por la que usa los nuevos atributos.
+        # if not operacion.condiciones_entrada and not operacion.tiempo_espera_minutos: # <-- LÍNEA ORIGINAL COMENTADA
+        if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
+            entry_cond_str = "- Inmediata (Market)"
         else:
-            for c in operacion.condiciones_entrada:
-                op = '>' if c.get('tipo') == 'PRICE_ABOVE' else '<'
-                entry_cond_strs.append(f"- Precio {op} {c.get('valor', 0.0):.4f}")
+            entry_conds = []
+            if operacion.cond_entrada_above is not None:
+                entry_conds.append(f"Precio > {operacion.cond_entrada_above:.4f}")
+            if operacion.cond_entrada_below is not None:
+                entry_conds.append(f"Precio < {operacion.cond_entrada_below:.4f}")
             if operacion.tiempo_espera_minutos:
-                entry_cond_strs.append(f"- Activar después de {operacion.tiempo_espera_minutos} min")
+                entry_conds.append(f"Tras {operacion.tiempo_espera_minutos} min")
+            entry_cond_str = f"- {' O '.join(entry_conds)}"
         
-        print(_create_box_line(f"  {' O '.join(entry_cond_strs)}", box_width))
+        print(_create_box_line(f"  {entry_cond_str}", box_width))
+        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
 
 
         # --- Gestión de Riesgo de Operación ---
@@ -385,17 +399,30 @@ def _display_operation_conditions(operacion: Operacion):
             if operacion.tsl_roi_activo:
                 tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         print(_create_box_line(f"  - {tsl_roi_str}", box_width))
-        print(_create_box_line(f"  - Acción por Riesgo de ROI: {operacion.accion_por_riesgo_roi}", box_width))
+        
+        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+        # Se reemplaza 'accion_por_riesgo_roi' por los nuevos atributos específicos
+        # print(_create_box_line(f"  - Acción por Riesgo de ROI: {operacion.accion_por_riesgo_roi}", box_width)) # <-- LÍNEA ORIGINAL COMENTADA
+        print(_create_box_line(f"  - Acción por SL/TP ROI: {operacion.accion_por_sl_tp_roi}", box_width))
+        print(_create_box_line(f"  - Acción por TSL ROI: {operacion.accion_por_tsl_roi}", box_width))
+        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
 
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
         
+        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+        # Se reemplaza la lógica que usaba 'condiciones_salida_precio' por la que usa los nuevos atributos.
         exit_limits = []
-        for c in operacion.condiciones_salida_precio:
-            op = '>' if c.get('tipo') == 'PRICE_ABOVE' else '<'
-            exit_limits.append(f"Precio Salida: {op} {c.get('valor', 0.0):.4f} (Acción: {c.get('accion', 'N/A')})")
+        if operacion.cond_salida_above:
+            cond = operacion.cond_salida_above
+            exit_limits.append(f"Precio Salida: > {cond['valor']:.4f} (Acción: {cond['accion']})")
+        
+        if operacion.cond_salida_below:
+            cond = operacion.cond_salida_below
+            exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
+        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
         
         if operacion.tiempo_maximo_min is not None:
             exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")

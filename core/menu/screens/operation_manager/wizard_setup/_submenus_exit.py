@@ -19,27 +19,37 @@ from core.strategy.entities import Operacion
 from ._submenus_risk import get_action_menu
 
 def _edit_exit_conditions_submenu(temp_op: Operacion):
+    """
+    Submenú para gestionar las condiciones de salida de la operación con una UI simplificada.
+    """
     params_changed_in_submenu = False
     while True:
         clear_screen()
         print_tui_header("Editor de Condiciones de Salida")
 
+        # --- Obtener y formatear el estado actual de las condiciones ---
+        above_cond = temp_op.cond_salida_above
+        below_cond = temp_op.cond_salida_below
+        
+        above_str = f"Precio > {above_cond['valor']:.4f} (Acción: {above_cond['accion']})" if above_cond else "Desactivado"
+        below_str = f"Precio < {below_cond['valor']:.4f} (Acción: {below_cond['accion']})" if below_cond else "Desactivado"
+        time_str = f"{temp_op.tiempo_maximo_min or 'Ilimitado'} min (Acción: {temp_op.accion_por_limite_tiempo})"
+        trades_str = f"{temp_op.max_comercios or 'Ilimitado'} (Acción: {temp_op.accion_por_limite_trades})"
+
         print("\nCondiciones Actuales (Se ejecutará la PRIMERA que se cumpla):")
-        if not temp_op.condiciones_salida_precio and not temp_op.tiempo_maximo_min and not temp_op.max_comercios:
-            print("  - Ningún límite de salida configurado.")
-        
-        for c in temp_op.condiciones_salida_precio:
-            op = '>' if c['tipo'] == 'PRICE_ABOVE' else '<'
-            print(f"  - Precio {op} {c['valor']:.4f} (Acción: {c['accion']})")
-        
-        print(f"  - Límite de Duración: {temp_op.tiempo_maximo_min or 'Ilimitado'} min (Acción: {temp_op.accion_por_limite_tiempo})")
-        print(f"  - Límite de Trades: {temp_op.max_comercios or 'Ilimitado'} (Acción: {temp_op.accion_por_limite_trades})")
-        
+        print(f"  - Salida por Precio SUPERIOR: {above_str}")
+        print(f"  - Salida por Precio INFERIOR: {below_str}")
+        print(f"  - Límite de Duración: {time_str}")
+        print(f"  - Límite de Trades: {trades_str}")
+
+        # --- Crear menú con opciones fijas ---
         menu_items = [
-            "[1] Gestionar condiciones de precio",
-            "[2] Configurar límite de duración",
-            "[3] Configurar límite de trades",
+            f"[1] Editar Condición 'Precio SUPERIOR a'",
+            f"[2] Editar Condición 'Precio INFERIOR a'",
+            "[3] Editar Límite de Duración",
+            "[4] Editar Límite de Trades",
             None,
+            "[d] Desactivar TODAS las condiciones de salida",
             "[b] Volver al menú anterior"
         ]
 
@@ -47,48 +57,51 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         menu_options['clear_screen'] = False
         choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
 
-        if choice is None or choice == 4: break
+        if choice is None or choice == 6: break
         
         try:
             if choice == 0:
-                while True:
-                    price_cond_items = [f"[{i+1}] Eliminar: Precio {'>' if c['tipo'] == 'PRICE_ABOVE' else '<'} {c['valor']:.4f} (Acción: {c['accion']})" for i, c in enumerate(temp_op.condiciones_salida_precio)]
-                    price_cond_items.extend([None, "[a] Añadir nueva condición de precio", "[d] Eliminar TODAS las condiciones de precio", "[b] Volver"])
-                    
-                    price_menu_options = MENU_STYLE.copy(); price_menu_options['clear_screen'] = False
-                    price_menu_choice = TerminalMenu(price_cond_items, title="\nGestionar condiciones de precio:", **price_menu_options).show()
-                    
-                    if price_menu_choice is None or price_menu_choice == len(price_cond_items) - 1: break
-                    elif price_menu_choice == len(price_cond_items) - 3: # Añadir
-                        add_menu = TerminalMenu(["[1] Salir si precio SUPERIOR a", "[2] Salir si precio INFERIOR a"], title="\nTipo de condición:").show()
-                        if add_menu is not None:
-                            tipo = 'PRICE_ABOVE' if add_menu == 0 else 'PRICE_BELOW'
-                            op = '>' if tipo == 'PRICE_ABOVE' else '<'
-                            valor = get_input(f"Salir si precio {op}", float, context_info="Añadir Condición de Salida")
-                            accion = get_action_menu("Acción al alcanzar este precio", 'PAUSAR')
-                            temp_op.condiciones_salida_precio.append({'tipo': tipo, 'valor': valor, 'accion': accion})
-                            params_changed_in_submenu = True
-                    elif price_menu_choice == len(price_cond_items) - 2: # Eliminar Todas
-                        if temp_op.condiciones_salida_precio:
-                            temp_op.condiciones_salida_precio.clear(); params_changed_in_submenu = True
-                    elif price_menu_choice < len(temp_op.condiciones_salida_precio): # Eliminar una
-                        temp_op.condiciones_salida_precio.pop(price_menu_choice); params_changed_in_submenu = True
+                valor = get_input("Salir si precio >", float, above_cond['valor'] if above_cond else None, is_optional=True, context_info="Deja vacío para desactivar")
+                if valor is not None:
+                    accion = get_action_menu("Acción al alcanzar este precio", above_cond['accion'] if above_cond else 'PAUSAR')
+                    temp_op.cond_salida_above = {'valor': valor, 'accion': accion}
+                else:
+                    temp_op.cond_salida_above = None
+                params_changed_in_submenu = True
 
             elif choice == 1:
-                new_val = get_input("Límite de Duración (min)", int, temp_op.tiempo_maximo_min, min_val=1, is_optional=True, context_info="Límites de Salida")
+                valor = get_input("Salir si precio <", float, below_cond['valor'] if below_cond else None, is_optional=True, context_info="Deja vacío para desactivar")
+                if valor is not None:
+                    accion = get_action_menu("Acción al alcanzar este precio", below_cond['accion'] if below_cond else 'PAUSAR')
+                    temp_op.cond_salida_below = {'valor': valor, 'accion': accion}
+                else:
+                    temp_op.cond_salida_below = None
+                params_changed_in_submenu = True
+
+            elif choice == 2:
+                new_val = get_input("Límite de Duración (min)", int, temp_op.tiempo_maximo_min, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
                 if new_val != temp_op.tiempo_maximo_min:
                     temp_op.tiempo_maximo_min = new_val
                     if temp_op.tiempo_maximo_min is not None:
                         temp_op.accion_por_limite_tiempo = get_action_menu("Acción al alcanzar el tiempo máximo", temp_op.accion_por_limite_tiempo)
                     params_changed_in_submenu = True
             
-            elif choice == 2:
-                new_val = get_input("Límite de Trades", int, temp_op.max_comercios, min_val=1, is_optional=True, context_info="Límites de Salida")
+            elif choice == 3:
+                new_val = get_input("Límite de Trades", int, temp_op.max_comercios, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
                 if new_val != temp_op.max_comercios:
                     temp_op.max_comercios = new_val
                     if temp_op.max_comercios is not None:
                         temp_op.accion_por_limite_trades = get_action_menu("Acción al alcanzar el máximo de trades", temp_op.accion_por_limite_trades)
                     params_changed_in_submenu = True
+
+            elif choice == 5: # Desactivar todas
+                if temp_op.cond_salida_above or temp_op.cond_salida_below or temp_op.tiempo_maximo_min or temp_op.max_comercios:
+                    temp_op.cond_salida_above = None
+                    temp_op.cond_salida_below = None
+                    temp_op.tiempo_maximo_min = None
+                    temp_op.max_comercios = None
+                    params_changed_in_submenu = True
+                    print("\nTodas las condiciones de salida han sido desactivadas."); time.sleep(1.5)
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)

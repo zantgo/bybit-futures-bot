@@ -100,7 +100,13 @@ def show_general_config_editor_screen(config_module: Any) -> bool:
 def _show_general_config_menu(config_module: Any):
     """Muestra el menú interactivo para editar la configuración general."""
     while True:
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+        # Se añade clear_screen() al inicio del bucle para asegurar que la pantalla
+        # se redibuje de forma limpia en cada iteración, especialmente después de
+        # que una ventana de get_input() o un submenú se haya cerrado.
         clear_screen()
+        # --- FIN DE LA MODIFICACIÓN ---
+
         print_tui_header("Editor de Configuración General")
 
         # Obtener valores actuales

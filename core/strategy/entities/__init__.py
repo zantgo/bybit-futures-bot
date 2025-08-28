@@ -86,21 +86,22 @@ class Operacion:
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
         
-        # --- INICIO DE LA MODIFICACIÓN (Paso 1 del Plan) ---
-        # Reemplazar condiciones de entrada/salida únicas por listas para lógica "OR"
-        # y añadir acción configurable para riesgo de ROI.
+        # --- INICIO DE LA MODIFICACIÓN (Simplificación Definitiva del Modelo) ---
         
-        # Atributos antiguos (reemplazados)
-        # self.tipo_cond_entrada: Optional[str] = 'MARKET'                 # <-- REEMPLAZADO
-        # self.valor_cond_entrada: Optional[float] = 0.0                   # <-- REEMPLAZADO
-        # self.tipo_cond_salida: Optional[str] = None                      # <-- REEMPLAZADO
-        # self.valor_cond_salida: Optional[float] = None                   # <-- REEMPLAZADO
-        # self.accion_por_limite_precio: str = 'PAUSAR'                    # <-- REEMPLAZADO
+        # Atributos de lista (reemplazados)
+        # self.condiciones_entrada: List[Dict[str, Any]] = []          # <-- REEMPLAZADO
+        # self.condiciones_salida_precio: List[Dict[str, Any]] = []    # <-- REEMPLAZADO
+        # self.accion_por_riesgo_roi: str = 'DETENER'                  # <-- REEMPLAZADO
 
-        # Nuevos atributos para condiciones múltiples y riesgo configurable
-        self.condiciones_entrada: List[Dict[str, Any]] = []  # ej: [{'tipo': 'PRICE_ABOVE', 'valor': 100.0}]
-        self.condiciones_salida_precio: List[Dict[str, Any]] = [] # ej: [{'tipo': 'PRICE_BELOW', 'valor': 50.0, 'accion': 'PAUSAR'}]
-        self.accion_por_riesgo_roi: str = 'DETENER'  # 'PAUSAR' o 'DETENER'
+        # Nuevos atributos específicos para una UI más clara
+        self.cond_entrada_above: Optional[float] = None
+        self.cond_entrada_below: Optional[float] = None
+        
+        self.cond_salida_above: Optional[Dict[str, Any]] = None # ej: {'valor': 100.0, 'accion': 'PAUSAR'}
+        self.cond_salida_below: Optional[Dict[str, Any]] = None # ej: {'valor': 50.0, 'accion': 'DETENER'}
+        
+        self.accion_por_sl_tp_roi: str = 'DETENER'
+        self.accion_por_tsl_roi: str = 'PAUSAR'
 
         # Atributos de acción por límite de tiempo/trades se mantienen
         self.accion_por_limite_tiempo: str = 'PAUSAR'
@@ -171,7 +172,7 @@ class Operacion:
         total_value = 0.0
         total_size = 0.0
         for pos in open_positions:
-            if pos.entry_price is not None and pos.size_contracts is not None and pos.size_contracts > 0:
+            if pos.entry_price is not None and pos.size_contracts is not None and pos.size_contracts > 1e-12:
                  total_value += pos.entry_price * pos.size_contracts
                  total_size += pos.size_contracts
 
@@ -223,38 +224,34 @@ class Operacion:
         if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
             sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl_trail_pct
 
-        if sl_roi_pct_target is None:
-            return None
-
-        open_positions = self.posiciones_abiertas
-        if not open_positions:
+        if sl_roi_pct_target is None or not self.posiciones_abiertas:
             return None
 
         total_value = 0.0
         total_size = 0.0
-        for pos in open_positions:
-            if pos.entry_price is None or pos.entry_price <= 0: continue
-            size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
-            if size > 0:
-                total_value += pos.entry_price * size
-                total_size += size
+        for pos in self.posiciones_abiertas:
+            if pos.entry_price is not None and pos.entry_price > 0 and pos.capital_asignado > 0:
+                size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
+                if size > 1e-12:
+                    total_value += pos.entry_price * size
+                    total_size += size
         
         if total_size <= 1e-12:
             return None
             
         avg_entry_price = safe_division(total_value, total_size)
-
         base_capital = self.capital_en_uso
+        
         if base_capital <= 0:
             return None
             
         pnl_target = (sl_roi_pct_target / 100) * base_capital
-        unrealized_pnl_needed = pnl_target
+        price_change_per_contract = safe_division(pnl_target, total_size)
 
         if self.tendencia == 'LONG_ONLY':
-            target_price = avg_entry_price + safe_division(unrealized_pnl_needed, total_size)
+            target_price = avg_entry_price + price_change_per_contract
         elif self.tendencia == 'SHORT_ONLY':
-            target_price = avg_entry_price - safe_division(unrealized_pnl_needed, total_size)
+            target_price = avg_entry_price - price_change_per_contract
         else:
             return None
             
@@ -268,11 +265,10 @@ class Operacion:
             current_price = 0.0
 
         pnl_no_realizado = 0.0
-        posiciones_abiertas = self.posiciones_abiertas
         side = 'long' if self.tendencia == 'LONG_ONLY' else 'short'
 
-        for pos in posiciones_abiertas:
-            if pos.entry_price and pos.entry_price > 0 and pos.size_contracts and pos.size_contracts > 0:
+        for pos in self.posiciones_abiertas:
+            if pos.entry_price is not None and pos.entry_price > 0 and pos.size_contracts is not None and pos.size_contracts > 0:
                 if side == 'long':
                     pnl_no_realizado += (current_price - pos.entry_price) * pos.size_contracts
                 else:

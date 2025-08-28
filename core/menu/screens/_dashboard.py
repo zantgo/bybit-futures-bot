@@ -249,11 +249,7 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
         pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
         equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Comentamos la línea de cálculo incorrecta y la reemplazamos por la llamada a la nueva propiedad.
-        # roi_realizado = utils.safe_division(pnl_realizado, operacion.capital_inicial_usdt) * 100
         roi_realizado = operacion.realized_twrr_roi
-        # --- FIN DE LA MODIFICACIÓN ---
         
         roi_no_realizado = utils.safe_division(pnl_no_realizado, operacion.capital_operativo_logico_actual) * 100
         
@@ -357,6 +353,13 @@ def show_dashboard_screen(session_manager: Any):
         time.sleep(0.2)
 
     while True:
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+        # Se añade clear_screen() al inicio del bucle para asegurar que cada
+        # "frame" del dashboard se dibuje en una pantalla limpia, eliminando
+        # artefactos visuales de iteraciones anteriores o pantallas previas.
+        clear_screen()
+        # --- FIN DE LA MODIFICACIÓN ---
+
         error_message = None
         summary = {}
         try:
@@ -366,7 +369,6 @@ def show_dashboard_screen(session_manager: Any):
         except Exception as e:
             error_message = f"ERROR CRÍTICO: Excepción inesperada en el dashboard: {e}"
 
-        clear_screen()
         if error_message:
             print(f"\033[91m{error_message}\033[0m")
 
@@ -414,7 +416,10 @@ def show_dashboard_screen(session_manager: Any):
         elif action == 'help':
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
-            confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **helpers_module.MENU_STYLE)
+            # El menú de confirmación debe limpiar la pantalla para ser el foco principal
+            confirm_menu_options = helpers_module.MENU_STYLE.copy()
+            confirm_menu_options['clear_screen'] = True
+            confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **confirm_menu_options)
             if confirm_menu.show() == 0:
                 break
 

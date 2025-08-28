@@ -186,7 +186,13 @@ def show_welcome_screen(bot_controller: Any):
 
     # --- PASO 2: BUCLE PRINCIPAL DEL MENÚ ---
     while True:
+        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
+        # Se añade clear_screen() al inicio del bucle para asegurar que la pantalla
+        # de bienvenida siempre se redibuje de forma limpia, especialmente después
+        # de volver de otras pantallas como el editor de configuración o el log viewer.
         clear_screen()
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         _display_welcome_panel(bot_controller)
         
         menu_items = [
@@ -228,7 +234,10 @@ def show_welcome_screen(bot_controller: Any):
         elif choice == 'edit_general_config': show_general_config_editor_screen(config_module)
         elif choice == 'view_logs': _log_viewer.show_log_viewer()
         elif choice == 'exit' or choice is None:
-            confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="\n¿Confirmas apagar el bot?", **MENU_STYLE)
+            # El menú de confirmación debe limpiar la pantalla para ser el foco
+            confirm_menu_options = MENU_STYLE.copy()
+            confirm_menu_options['clear_screen'] = True
+            confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="\n¿Confirmas apagar el bot?", **confirm_menu_options)
             if confirm_menu.show() == 0:
                 print("\nIniciando apagado ordenado...")
                 bot_controller.shutdown_bot()

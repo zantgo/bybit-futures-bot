@@ -22,7 +22,7 @@ MENU_STYLE = {
     "menu_cursor_style": ("fg_yellow", "bold"),
     "menu_highlight_style": ("bg_cyan", "fg_black"),
     "cycle_cursor": True,
-    "clear_screen": True,
+    "clear_screen": False,
 }
 
 RESET_COLOR = "\033[0m"
