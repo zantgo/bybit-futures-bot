@@ -457,6 +457,11 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
 # --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
 # ==============================================================================
 
+
+# ==============================================================================
+# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# ==============================================================================
+
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     """
     Muestra la caja con la configuración actual de la operación.
@@ -495,11 +500,32 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Riesgo por Posición Individual")
+    
+    # --- INICIO DE LA MODIFICACIÓN: Añadir cálculo de movimiento de precio ---
+    leverage = operacion.apalancamiento if operacion.apalancamiento > 0 else 1.0
+
+    sl_individual_str = "Desactivado"
+    if operacion.sl_posicion_individual_pct is not None:
+        price_move_pct = operacion.sl_posicion_individual_pct / leverage
+        sl_individual_str = f"{operacion.sl_posicion_individual_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+
+    tsl_act_str = "Desactivado"
+    if operacion.tsl_activacion_pct is not None:
+        price_move_pct = operacion.tsl_activacion_pct / leverage
+        tsl_act_str = f"{operacion.tsl_activacion_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+        
+    tsl_dist_str = "N/A"
+    if operacion.tsl_distancia_pct is not None:
+        price_move_pct = operacion.tsl_distancia_pct / leverage
+        tsl_dist_str = f"{operacion.tsl_distancia_pct}% (Mov. Precio: {price_move_pct:.2f}%)"
+
     risk_data = {
-        "SL Individual (%)": operacion.sl_posicion_individual_pct or "Desactivado",
-        "Activación TSL (%)": operacion.tsl_activacion_pct or "Desactivado",
-        "Distancia TSL (%)": operacion.tsl_distancia_pct if operacion.tsl_activacion_pct else "N/A",
+        "SL Individual (%)": sl_individual_str,
+        "Activación TSL (%)": tsl_act_str,
+        "Distancia TSL (%)": tsl_dist_str if operacion.tsl_activacion_pct else "N/A",
     }
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     max_key_len = max(len(k) for k in risk_data.keys()) if risk_data else 0
     for label, value in risk_data.items():
         _print_line(label, value, max_key_len)
@@ -512,7 +538,13 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
         op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {trail_pct}%)"
     else:
-        op_risk_data["Límite SL/TP por ROI (%)"] = f"{operacion.sl_roi_pct}" if operacion.sl_roi_pct is not None else "Desactivado"
+        # --- INICIO DE LA MODIFICACIÓN: Añadir cálculo de movimiento de precio ---
+        sl_roi_str = "Desactivado"
+        if operacion.sl_roi_pct is not None:
+            price_move_pct = operacion.sl_roi_pct / leverage
+            sl_roi_str = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {price_move_pct:.2f}%)"
+        op_risk_data["Límite SL/TP por ROI (%)"] = sl_roi_str
+        # --- FIN DE LA MODIFICACIÓN ---
 
     op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
     
@@ -520,11 +552,8 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     for label, value in op_risk_data.items():
         _print_line(label, value, max_key_len)
     
-    # --- INICIO DE LA CORRECCIÓN DEFINITIVA ---
-    # Se refactoriza la visualización de condiciones para ser más clara y robusta.
-    
     print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Condición de Entrada")
+    _print_section_header("Condiciones y Límites de Salida")
     
     entry_cond_str = "No definida"
     if operacion.tipo_cond_entrada == 'MARKET': 
@@ -556,9 +585,12 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     max_key_len = max(len(k) for k in exit_limits_data.keys()) if exit_limits_data else 0
     for label, value in exit_limits_data.items():
         _print_line(label, value, max_key_len)
-    # --- FIN DE LA CORRECCIÓN DEFINITIVA ---
 
     print("└" + "─" * (box_width - 2) + "┘")
+
+# ==============================================================================
+# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# ==============================================================================
 
 # ==============================================================================
 # --- FIN DEL CÓDIGO A REEMPLAZAR ---

@@ -1,4 +1,4 @@
-# core/strategy/event_processor.py
+# core/strategy/_event_processor.py
 
 """
 Orquestador Principal del Procesamiento de Eventos.
@@ -44,9 +44,7 @@ class EventProcessor:
         """
         self._config = dependencies.get('config_module')
         self._utils = dependencies.get('utils_module')
-        # --- INICIO DE LA MODIFICACIÓN: Inyectar el adaptador de exchange ---
         self._exchange_adapter = dependencies.get('exchange_adapter')
-        # --- FIN DE LA MODIFICACIÓN ---
         self._memory_logger = dependencies.get('memory_logger_module')
         self._signal_logger = dependencies.get('signal_logger_module')
         self._pm_api = dependencies.get('position_manager_api_module')
@@ -109,12 +107,12 @@ class EventProcessor:
             return
 
         try:
-
-            # --- CÓDIGO NUEVO Y CORREGIDO ---
-            # 1. Llamar al heartbeat de sincronización a través de la API del PM
+            # 1. Heartbeat de Sincronización Proactiva
+            # En cada tick, ANTES de cualquier otra lógica, se verifica el estado real
+            # de las posiciones en el exchange. Esto detecta liquidaciones o cierres
+            # manuales casi al instante, garantizando que el bot no opere sobre un estado desactualizado.
             for side in ['long', 'short']:
                 self._pm_api.sync_physical_positions(side)
-            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
 
             # 2. Comprobar Triggers de la Operación (lógica predictiva de liquidación, SL/TP, etc.)
             self._check_operation_triggers(current_price)
@@ -122,7 +120,7 @@ class EventProcessor:
             # 3. Procesar datos y generar señal de bajo nivel
             signal_data = self._process_tick_and_generate_signal(current_timestamp, current_price)
             
-            # 4. Interacción con el Position Manager
+            # 4. Interacción con el Position Manager (que ahora opera sobre un estado ya sincronizado)
             if self._pm_instance:
                 self._pm_instance.check_and_close_positions(current_price, current_timestamp)
                 self._pm_instance.handle_low_level_signal(
@@ -134,10 +132,6 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
 
     def _check_operation_triggers(self, current_price: float):
         """
@@ -154,8 +148,6 @@ class EventProcessor:
                 operacion: 'Operacion' = self._om_api.get_operation_by_side(side)
                 if not operacion or operacion.estado == 'DETENIDA':
                     continue
-
-                # --- INICIO DE LA MODIFICACIÓN: Lógica de estados final y robusta ---
 
                 # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas, sin importar el estado)
                 if operacion.posiciones_abiertas_count > 0:
@@ -265,15 +257,10 @@ class EventProcessor:
                         if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
                         elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
                         else: self._om_api.pausar_operacion(side, reason=exit_reason)
-                # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
@@ -303,4 +290,3 @@ class EventProcessor:
         
         self._previous_raw_event_price = price
         return signal_data
-

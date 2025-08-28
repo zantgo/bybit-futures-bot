@@ -1,9 +1,16 @@
-# Contenido completo para: core/strategy/pm/manager/_workflow.py
+# Contenido completo y corregido para: core/strategy/pm/manager/_workflow.py
 import datetime
 from typing import Any, List, Dict
 
 class _Workflow:
-    """Clase base que contiene los métodos de workflow del PositionManager."""
+    """
+    Clase base que contiene los métodos de workflow del PositionManager.
+    
+    Esta versión unifica y refina la lógica del "Heartbeat" de seguridad:
+    - `sync_physical_positions` contiene la lógica de sincronización.
+    - `check_and_close_positions` ha sido simplificada, ya que asume que la
+      sincronización ya fue ejecutada proactivamente por el EventProcessor.
+    """
 
     def handle_low_level_signal(self, signal: str, entry_price: float, timestamp: datetime.datetime):
         """Gestiona una señal de bajo nivel (BUY/SELL) para potencialmente abrir una posición."""
@@ -20,14 +27,9 @@ class _Workflow:
         if operacion and operacion.estado == 'ACTIVA' and self._can_open_new_position(side_to_open):
             self._open_logical_position(side_to_open, entry_price, timestamp)
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 1 de 2) ---
-# ==============================================================================
-
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
-        Ahora integra la sincronización física antes de actuar en estado DETENIENDO.
         """
         if not self._initialized or not self._executor:
             return
@@ -37,38 +39,20 @@ class _Workflow:
             if not operacion:
                 continue
 
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de Detención Robusta ---
-            # # --- CÓDIGO ORIGINAL COMENTADO ---
-            # # --- GESTIÓN DE DETENCIÓN FORZOSA ---
-            # if operacion.estado == 'DETENIENDO':
-            #     if operacion.posiciones_abiertas_count > 0:
-            #         self._memory_logger.log(f"PM Workflow: Detectado estado DETENIENDO para {side.upper()}. "
-            #                                 f"Iniciando cierre de {operacion.posiciones_abiertas_count} posiciones.", "WARN")
-            #         self.close_all_logical_positions(side, reason="FORCE_STOP")
-            #     continue
-            # # --- FIN CÓDIGO ORIGINAL COMENTADO ---
-
-            # --- CÓDIGO NUEVO Y CORREGIDO ---
+            # --- GESTIÓN DE DETENCIÓN FORZOSA ---
+            # Si la operación está en proceso de detención, intentamos cerrar lo que quede.
+            # Se asume que el heartbeat proactivo del EventProcessor ya ha sincronizado el estado,
+            # por lo que no es necesario volver a llamar a sync_physical_positions aquí.
             if operacion.estado == 'DETENIENDO':
-                # 1. Primero, sincronizar para saber la verdad del exchange.
-                self.sync_physical_positions(side)
-                
-                # 2. Volver a obtener el estado, que podría haber sido limpiado por la sincronización.
-                operacion_actualizada = self._om_api.get_operation_by_side(side)
-                if not operacion_actualizada: continue
-
-                # 3. Solo si AÚN quedan posiciones abiertas, intentar cerrarlas.
-                if operacion_actualizada.posiciones_abiertas_count > 0:
+                if operacion.posiciones_abiertas_count > 0:
                     self._memory_logger.log(f"PM Workflow: Estado DETENIENDO confirmado para {side.upper()}. "
-                                            f"Intentando cierre forzoso de {operacion_actualizada.posiciones_abiertas_count} posiciones.", "WARN")
+                                            f"Intentando cierre forzoso de {operacion.posiciones_abiertas_count} posiciones.", "WARN")
                     self.close_all_logical_positions(side, reason="FORCE_STOP")
                 
-                # En cualquier caso, se detiene el procesamiento normal para este lado.
+                # Se detiene el procesamiento normal para este lado en este tick.
                 continue
-            # --- FIN CÓDIGO NUEVO Y CORREGIDO ---
-            # --- FIN DE LA MODIFICACIÓN ---
 
-            if operacion.estado not in ['ACTIVA', 'PAUSADA']:
+            if operacion.estado not in ['ACTIVA', 'PAUSADA', 'EN_ESPERA']:
                 continue
 
             initial_open_indices = [i for i, p in enumerate(operacion.posiciones) if p.estado == 'ABIERTA']
@@ -76,13 +60,16 @@ class _Workflow:
             if not initial_open_indices:
                 continue
 
+            # Actualizar trailing stops primero
             for index in initial_open_indices:
                 self._update_trailing_stop(side, index, current_price)
 
+            # Volver a obtener el estado por si el TSL se actualizó
             operacion_actualizada = self._om_api.get_operation_by_side(side)
             if not operacion_actualizada:
                 continue
 
+            # Comprobar condiciones de cierre
             positions_to_close = []
             for index in initial_open_indices:
                 if index >= len(operacion_actualizada.posiciones):
@@ -90,17 +77,20 @@ class _Workflow:
                 
                 pos = operacion_actualizada.posiciones[index]
                 
+                # Comprobar Stop Loss
                 sl_price = pos.stop_loss_price
                 if sl_price and ((side == 'long' and current_price <= sl_price) or \
                                  (side == 'short' and current_price >= sl_price)):
                     positions_to_close.append({'index': index, 'reason': 'SL'})
                     continue
 
+                # Comprobar Trailing Stop
                 ts_stop_price = pos.ts_stop_price
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or \
                                       (side == 'short' and current_price >= ts_stop_price)):
                     positions_to_close.append({'index': index, 'reason': 'TS'})
 
+            # Ejecutar cierres
             if positions_to_close:
                 for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
                     self._close_logical_position(
@@ -111,31 +101,20 @@ class _Workflow:
                         reason=close_info.get('reason', "UNKNOWN")
                     )
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A AÑADIR (Nueva Función) ---
-# ==============================================================================
-
     def sync_physical_positions(self, side: str):
         """
-        Comprueba la existencia real de una posición en el exchange y sincroniza
-        el estado interno del bot si hay una discrepancia.
+        Contiene la LÓGICA del Heartbeat de seguridad. Comprueba la existencia real
+        de una posición en el exchange y sincroniza el estado interno del bot si
+        hay una discrepancia grave (ej. liquidación, cierre manual).
         """
-        # No ejecutar en modo de simulación
         if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
             return
 
         operacion = self._om_api.get_operation_by_side(side)
         
-        # Solo actuar si el bot cree que hay posiciones abiertas
-        if not (operacion and operacion.posiciones_abiertas_count > 0):
-            return
-            
-        # El estado ACTIVA o DETENIENDO son los únicos relevantes para esta comprobación
-        if operacion.estado not in ['ACTIVA', 'DETENIENDO']:
+        # Optimización clave: Solo se hace la llamada a la API si el bot cree que
+        # tiene posiciones abiertas que necesitan ser verificadas.
+        if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'DETENIENDO']):
             return
 
         try:
@@ -148,20 +127,16 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            # Si la lista está vacía, significa que no hay posición en el exchange
+            # Si la lista está vacía, pero el bot cree que hay posiciones, es una emergencia.
             if not physical_positions:
                 reason = (
-                    f"CIERRE INESPERADO DETECTADO ({side.upper()}): "
+                    f"HEARTBEAT: CIERRE INESPERADO DETECTADO ({side.upper()}). "
                     f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
-                    f"pero no se encontró ninguna en el exchange. Posible liquidación."
+                    f"pero no se encontró ninguna en el exchange. Posible liquidación o cierre manual."
                 )
                 self._memory_logger.log(reason, "WARN")
                 
-                # Llamar al manejador de liquidación para resetear el estado
+                # Llamar al manejador de eventos de emergencia para resetear el estado lógico.
                 self._om_api.handle_liquidation_event(side, reason)
         except Exception as e:
-            self._memory_logger.log(f"PM ERROR: Excepción durante la sincronización física de posiciones ({side}): {e}", "ERROR")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A AÑADIR ---
-# ==============================================================================
+            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
