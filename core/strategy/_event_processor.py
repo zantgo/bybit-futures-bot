@@ -1,5 +1,3 @@
-# core/strategy/_event_processor.py
-
 """
 Orquestador Principal del Procesamiento de Eventos.
 """
@@ -130,6 +128,7 @@ class EventProcessor:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
 
+    # --- INICIO DE LA MODIFICACIÓN (Paso 3 del Plan) ---
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -158,7 +157,7 @@ class EventProcessor:
                     )
                     if estimated_liq_price is not None:
                         if (side == 'long' and current_price <= estimated_liq_price) or \
-                           (side == 'short' and current_price >= estimated_liq_price):
+                        (side == 'short' and current_price >= estimated_liq_price):
                             reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
                             self._memory_logger.log(reason, "WARN")
                             self._om_api.handle_liquidation_event(side, reason)
@@ -204,7 +203,8 @@ class EventProcessor:
                             risk_reason = f"RIESGO TP-ROI alcanzado ({roi:.2f}% >= {sl_roi_pct}%)"
 
                     if risk_condition_met:
-                        risk_action = self._config.OPERATION_DEFAULTS["OPERATION_RISK"]["AFTER_STATE"]
+                        # LEER ACCIÓN CONFIGURADA EN LA OPERACIÓN
+                        risk_action = operacion.accion_por_riesgo_roi
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
                         if risk_action == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
@@ -213,14 +213,21 @@ class EventProcessor:
 
                 # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
-                    cond_type = operacion.tipo_cond_entrada
-                    cond_value = operacion.valor_cond_entrada
                     entry_condition_met = False
                     
-                    if cond_type == 'MARKET': entry_condition_met = True
-                    elif cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value: entry_condition_met = True
-                    elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value: entry_condition_met = True
-                    elif (cond_type == 'TIME_DELAY' and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos):
+                    # 2.1 Lógica "OR" para condiciones de precio
+                    for cond in operacion.condiciones_entrada:
+                        cond_type = cond.get('tipo')
+                        cond_value = cond.get('valor')
+                        if cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value:
+                            entry_condition_met = True
+                            break
+                        if cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value:
+                            entry_condition_met = True
+                            break
+
+                    # 2.2 Lógica para temporizador (se mantiene separada)
+                    if not entry_condition_met and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos:
                         elapsed_minutes = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds() / 60.0
                         if elapsed_minutes >= operacion.tiempo_espera_minutos:
                             entry_condition_met = True
@@ -231,34 +238,57 @@ class EventProcessor:
 
                 # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
                 if operacion.estado == 'ACTIVA':
-                    exit_condition_met = False
-                    exit_reason = ""
-                    
+                    # 3.1 Comprobación de Límite de Trades
                     if operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
-                        exit_condition_met, exit_reason = True, f"Límite de {operacion.max_comercios} trades alcanzado"
-                    
-                    if not exit_condition_met and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
-                        elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-                        if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
-                            exit_condition_met, exit_reason = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min) alcanzado"
-
-                    exit_type, exit_value = operacion.tipo_cond_salida, operacion.valor_cond_salida
-                    if not exit_condition_met and exit_type and exit_value is not None:
-                        if exit_type == 'PRICE_ABOVE' and current_price > exit_value: exit_condition_met, exit_reason = True, f"Precio de salida > {exit_value:.4f}"
-                        elif exit_type == 'PRICE_BELOW' and current_price < exit_value: exit_condition_met, exit_reason = True, f"Precio de salida < {exit_value:.4f}"
-
-                    if exit_condition_met:
-                        accion_final = operacion.accion_al_finalizar
-                        log_msg = f"CONDICIÓN DE SALIDA CUMPLIDA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
+                        exit_reason = f"Límite de {operacion.max_comercios} trades alcanzado"
+                        accion_final = operacion.accion_por_limite_trades
+                        log_msg = f"LÍMITE ALCANZADO ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
                         if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
-                        elif accion_final == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=exit_reason)
-                        else: self._om_api.pausar_operacion(side, reason=exit_reason)
+                        elif accion_final == 'DETENER': self._om_api.detener_operacion(side, True, reason=exit_reason)
+                        continue 
+
+                    # 3.2 Comprobación de Límite de Tiempo
+                    if operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
+                        elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                        if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
+                            exit_reason = f"Límite de tiempo ({operacion.tiempo_maximo_min} min) alcanzado"
+                            accion_final = operacion.accion_por_limite_tiempo
+                            log_msg = f"LÍMITE ALCANZADO ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
+                            self._memory_logger.log(log_msg, "WARN")
+                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
+                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, True, reason=exit_reason)
+                            continue
+                    
+                    # 3.3 Lógica "OR" para condiciones de salida por precio
+                    for cond in operacion.condiciones_salida_precio:
+                        cond_type = cond.get('tipo')
+                        cond_value = cond.get('valor')
+                        accion_final = cond.get('accion', 'PAUSAR')
+                        
+                        price_condition_met = False
+                        exit_reason = ""
+                        
+                        if cond_type == 'PRICE_ABOVE' and cond_value is not None and current_price > cond_value:
+                            price_condition_met = True
+                            exit_reason = f"Precio de salida > {cond_value:.4f}"
+                        elif cond_type == 'PRICE_BELOW' and cond_value is not None and current_price < cond_value:
+                            price_condition_met = True
+                            exit_reason = f"Precio de salida < {cond_value:.4f}"
+                        
+                        if price_condition_met:
+                            log_msg = f"LÍMITE DE PRECIO ALCANZADO ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
+                            self._memory_logger.log(log_msg, "WARN")
+                            if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
+                            elif accion_final == 'DETENER': self._om_api.detener_operacion(side, True, reason=exit_reason)
+                            # Se añade un break para que solo se ejecute la primera condición que se cumpla
+                            break 
         
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-
+    # --- FIN DE LA MODIFICACIÓN ---
+            
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y

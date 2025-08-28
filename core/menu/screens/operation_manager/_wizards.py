@@ -1,8 +1,5 @@
-"""
-Módulo fachada para los Asistentes del Panel de Control de Operación.
+# core/menu/screens/operation_manager/_wizards.py
 
-Este módulo importa y delega las llamadas a los asistentes específicos.
-"""
 import time
 from typing import Any, Dict
 
@@ -18,27 +15,30 @@ from ..._helpers import (
     MENU_STYLE
 )
 
-# Importar el nuevo asistente unificado
-from . import _wizard_setup 
+# Importar el nuevo asistente unificado desde su propio paquete
+from . import wizard_setup 
 
 _deps: Dict[str, Any] = {}
 
+# --- INICIO DE LA MODIFICACIÓN ---
 def init(dependencies: Dict[str, Any]):
     """Recibe las dependencias e inicializa los submódulos de asistentes."""
     global _deps
     _deps = dependencies
     
-    if hasattr(_wizard_setup, 'init'):
-        _wizard_setup.init(dependencies)
+    # Se asegura de que las dependencias se pasen al nuevo paquete refactorizado.
+    if hasattr(wizard_setup, 'init'):
+        wizard_setup.init(dependencies)
+# --- FIN DE LA MODIFICACIÓN ---
 
-def _operation_setup_wizard(om_api: Any, side: str, is_modification: bool = False):
+def operation_setup_wizard(om_api: Any, side: str, is_modification: bool = False):
     """
     Actúa como un despachador que llama al asistente unificado para
     crear o modificar una operación.
     """
-    _wizard_setup.operation_setup_wizard(om_api, side, is_modification)
+    wizard_setup.operation_setup_wizard(om_api, side, is_modification)
 
-def _force_close_all_wizard(pm_api: Any, side: str):
+def force_close_all_wizard(pm_api: Any, side: str):
     """Asistente para el cierre de pánico de todas las posiciones de un lado."""
     if not TerminalMenu:
         print("Error: 'simple-term-menu' no está instalado."); time.sleep(2); return

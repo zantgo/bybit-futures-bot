@@ -293,12 +293,22 @@ class OperationManager:
             if op:
                 op.comisiones_totales_usdt += abs(fee_amount)
     
+# Reemplaza la función existente en core/strategy/om/_manager.py con esta versión
+
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
-            if not target_op or target_op.estado not in ['PAUSADA', 'DETENIENDO']:
-                return
             
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Se ha eliminado 'PAUSADA' de la condición.
+            # Ahora, esta función solo actuará si la operación ya ha recibido
+            # una orden explícita de detenerse (estado 'DETENIENDO').
+            if not target_op or target_op.estado != 'DETENIENDO':
+                return
+            # --- FIN DE LA CORRECCIÓN ---
+            
+            # Esta lógica se mantiene sin cambios. Solo se ejecutará si la
+            # condición anterior se cumple.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (

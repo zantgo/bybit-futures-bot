@@ -1,4 +1,4 @@
-# ./core/menu/screens/operation_manager/_main.py
+# core/menu/screens/operation_manager/_main.py
 
 """
 Módulo Principal del Panel de Control de Operación.
@@ -106,9 +106,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             press_enter_to_continue()
             break
 
-# ==============================================================================
-# --- INICIO DE LA FUNCIÓN CORREGIDA ---
-# ==============================================================================
 
 def _show_single_operation_view(side: str):
     """
@@ -136,12 +133,8 @@ def _show_single_operation_view(side: str):
             if config_module and hasattr(config_module, 'BOT_CONFIG'):
                  ticker_symbol = config_module.BOT_CONFIG.get("TICKER", {}).get("SYMBOL", "N/A")
 
-            # --- INICIO DE LA CORRECCIÓN EXACTA ---
-            # Se obtiene el estado directamente del objeto `operacion` para asegurar
-            # que siempre tenga un valor y nunca sea 'N/A'.
             operation_status = operacion.estado if operacion.estado else "DESCONOCIDO"
             header_title = f"Panel de Operación {side.upper()}: {operation_status.upper()} @ {current_price:.4f} USDT"
-            # --- FIN DE LA CORRECCIÓN EXACTA ---
             
             now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
             
@@ -223,10 +216,13 @@ def _show_single_operation_view(side: str):
                 if choice_index < len(selectable_actions):
                     action = selectable_actions[choice_index]
             
+            # --- INICIO DE LA MODIFICACIÓN (Paso Final) ---
+            # Se cambia la llamada para usar el nombre de función público correcto.
             if action == "start_new": 
-                _wizards._operation_setup_wizard(om_api, side, is_modification=False)
+                _wizards.operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": 
-                _wizards._operation_setup_wizard(om_api, side, is_modification=True)
+                _wizards.operation_setup_wizard(om_api, side, is_modification=True)
+            # --- FIN DE LA MODIFICACIÓN ---
             elif action == "pause":
                 om_api.pausar_operacion(side)
                 time.sleep(0.2)
@@ -257,7 +253,7 @@ def _show_single_operation_view(side: str):
                     time.sleep(2.5)
 
             elif action == "panic_close": 
-                _wizards._force_close_all_wizard(pm_api, side)
+                _wizards.force_close_all_wizard(pm_api, side)
             elif action == "refresh": 
                 continue
             elif action == "help": 
@@ -273,7 +269,3 @@ def _show_single_operation_view(side: str):
             traceback.print_exc()
             press_enter_to_continue()
             break
-
-# ==============================================================================
-# --- FIN DE LA FUNCIÓN CORREGIDA ---
-# ==============================================================================

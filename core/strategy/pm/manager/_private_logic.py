@@ -50,14 +50,14 @@ class _PrivateLogic:
 
             if not price_condition_met:
                 price_diff_pct = (abs(current_price - last_position_entry_price) / last_position_entry_price) * 100
-                
+                '''
                 self._memory_logger.log(
                     f"Apertura omitida ({side.upper()}): Distancia insuficiente. "
                     f"Última entrada: {last_position_entry_price:.4f}, Actual: {current_price:.4f}. "
                     f"Distancia: {price_diff_pct:.2f}%, Requerida: {required_distance_pct:.2f}%",
                     level="DEBUG"
                 )
-                
+                '''
                 return False
 
         return True

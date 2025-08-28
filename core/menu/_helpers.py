@@ -13,7 +13,8 @@ from datetime import timezone
 import textwrap
 from typing import Dict, Any, Optional, Callable
 import shutil
-import re # <-- SE AÑADE ESTA IMPORTACIÓN NECESARIA
+import re
+import time  # <--- IMPORTACIÓN AÑADIDA PARA CORREGIR EL NameError
 
 # --- Estilo Visual Consistente para simple-term-menu ---
 MENU_STYLE = {
@@ -59,8 +60,6 @@ def press_enter_to_continue():
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-# --- INICIO DE LA CORRECCIÓN: Añadir todas las funciones de UI faltantes ---
-
 def _get_terminal_width():
     """Obtiene el ancho actual del terminal."""
     try:
@@ -94,8 +93,6 @@ def _create_config_box_line(content: str, width: int) -> str:
     padding = ' ' * max(0, width - len(clean_content) - 4)
     return f"│ {content}{padding} │"
 
-# --- FIN DE LA CORRECCIÓN ---
-
 def format_datetime_utc(dt_object: Optional[datetime.datetime], fmt: str = '%H:%M:%S %d-%m-%Y (UTC)') -> str:
     if not isinstance(dt_object, datetime.datetime): return "N/A"
     try:
@@ -107,69 +104,93 @@ def print_tui_header(title: str, subtitle: Optional[str] = None, width: int = 90
     """
     Imprime una cabecera TUI estandarizada, ahora con soporte para subtítulo.
     """
-    print("=" * width)
-    print(f"{title.center(width)}")
+    # Usar el ancho del terminal dinámicamente si es posible
+    effective_width = _get_terminal_width()
+    
+    print("=" * effective_width)
+    print(f"{title.center(effective_width)}")
     if subtitle:
-        print(f"{subtitle.center(width)}")
-    print("=" * width)
+        print(f"{subtitle.center(effective_width)}")
+    print("=" * effective_width)
 
 class UserInputCancelled(Exception):
     """Excepción para ser lanzada cuando el usuario cancela un wizard de entrada."""
     pass
 
+# --- INICIO DE LA MODIFICACIÓN (Función `get_input` a prueba de errores) ---
 def get_input(
     prompt: str,
     type_func: Callable,
     default: Optional[Any] = None,
     min_val: Optional[float] = None,
     max_val: Optional[float] = None,
-    is_optional: bool = False
+    is_optional: bool = False,
+    context_info: Optional[str] = None
 ) -> Any:
     """
-    Función robusta para obtener entrada del usuario con validación.
-
-    Args:
-        is_optional (bool): Si es True, una entrada vacía devuelve None.
-                            Si es False, una entrada vacía usa el default o da error.
+    Función robusta para obtener entrada del usuario con una UI consistente y validación.
     """
     while True:
-        prompt_parts = [f"\n{prompt}"]
+        clear_screen()
+        
+        header_title = "Asistente de Entrada de Datos"
+        if context_info:
+            print_tui_header(header_title, subtitle=context_info)
+        else:
+            print_tui_header(header_title)
+        
+        prompt_parts = [f"\n  {prompt}"]
         
         default_display = default
         if is_optional and default is None:
             default_display = "DESACTIVADO"
         
         if default is not None:
-            prompt_parts.append(f"[{default_display}]")
+            prompt_parts.append(f" (Actual: {default_display})")
         
-        options = ["'c' para cancelar"]
+        full_prompt = "".join(prompt_parts)
+        print(full_prompt)
+        
+        help_parts = []
         if is_optional:
-            options.append("Enter para desactivar")
-            
-        prompt_parts.append(f"(o {', '.join(options)}):")
-        full_prompt = " ".join(prompt_parts) + " "
+            help_parts.append("Presiona [Enter] para desactivar/limpiar el valor.")
+        if default is not None and not is_optional:
+            help_parts.append(f"Presiona [Enter] para usar el valor actual ({default_display}).")
+        help_parts.append("Escribe 'c' y presiona [Enter] para cancelar.")
+        
+        print(f"  > {' | '.join(help_parts)}")
         
         try:
-            val_str = input(full_prompt).strip()
+            val_str = input("\n  >> ").strip()
 
             if val_str.lower() == 'c':
                 raise UserInputCancelled("Entrada cancelada por el usuario.")
 
-            if not val_str: # Usuario presionó Enter
+            if not val_str:
                 if is_optional:
-                    return None # Desactivar campo opcional
+                    return None
                 if default is not None:
-                    return default # Usar default para campo obligatorio
-                print("Error: Este campo es obligatorio y no puede estar vacío.")
+                    return default
+                print("\n  \033[91mError: Este campo es obligatorio y no puede estar vacío.\033[0m")
+                time.sleep(1.5)
                 continue
 
-            value = type_func(val_str)
+            # CORRECCIÓN: Filtrar secuencias de escape ANSI antes de convertir
+            cleaned_val_str = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', val_str)
+            if not cleaned_val_str: # Si el resultado es una cadena vacía (solo eran secuencias)
+                 print("\n  \033[91mError: Entrada inválida. Por favor, introduce un número o valor válido.\033[0m")
+                 time.sleep(1.5)
+                 continue
+
+            value = type_func(cleaned_val_str)
 
             if min_val is not None and value < min_val:
-                print(f"Error: El valor debe ser como mínimo {min_val}.")
+                print(f"\n  \033[91mError: El valor debe ser como mínimo {min_val}.\033[0m")
+                time.sleep(1.5)
                 continue
             if max_val is not None and value > max_val:
-                print(f"Error: El valor no puede ser mayor que {max_val}.")
+                print(f"\n  \033[91mError: El valor no puede ser mayor que {max_val}.\033[0m")
+                time.sleep(1.5)
                 continue
             
             return value
@@ -177,9 +198,12 @@ def get_input(
         except UserInputCancelled:
             raise
         except (ValueError, TypeError):
-            print(f"Error: Entrada inválida. Introduce un valor de tipo '{type_func.__name__}'.")
+            print(f"\n  \033[91mError: Entrada inválida. Introduce un valor de tipo '{type_func.__name__}'.\033[0m")
+            time.sleep(1.5)
         except Exception as e:
-            print(f"Error inesperado: {e}")
+            print(f"\n  \033[91mError inesperado: {e}\033[0m")
+            time.sleep(1.5)
+# --- FIN DE LA MODIFICACIÓN ---
 
 def print_section(title: str, data: Dict[str, Any], is_account_balance: bool = False):
     print(f"\n--- {title} {'-' * (76 - len(title))}")

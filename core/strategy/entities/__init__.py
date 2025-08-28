@@ -66,18 +66,12 @@ class Operacion:
     Representa una única Operación Estratégica configurable.
     """
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función __init__ en la clase Operacion) ---
-# ==============================================================================
-
     def __init__(self, id: str):
         self.id: str = id
         self.estado: str = 'DETENIDA'
         self.estado_razon: str = 'Estado inicial'
         
         # --- Parámetros de Configuración ---
-        self.tipo_cond_entrada: Optional[str] = 'MARKET'
-        self.valor_cond_entrada: Optional[float] = 0.0
         self.tendencia: Optional[str] = None
         self.apalancamiento: float = 10.0
         self.averaging_distance_pct: float = 0.5
@@ -91,9 +85,28 @@ class Operacion:
         self.dynamic_roi_sl_trail_pct: Optional[float] = None
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
-        self.tipo_cond_salida: Optional[str] = None
-        self.valor_cond_salida: Optional[float] = None
-        self.accion_al_finalizar: str = 'PAUSAR'
+        
+        # --- INICIO DE LA MODIFICACIÓN (Paso 1 del Plan) ---
+        # Reemplazar condiciones de entrada/salida únicas por listas para lógica "OR"
+        # y añadir acción configurable para riesgo de ROI.
+        
+        # Atributos antiguos (reemplazados)
+        # self.tipo_cond_entrada: Optional[str] = 'MARKET'                 # <-- REEMPLAZADO
+        # self.valor_cond_entrada: Optional[float] = 0.0                   # <-- REEMPLAZADO
+        # self.tipo_cond_salida: Optional[str] = None                      # <-- REEMPLAZADO
+        # self.valor_cond_salida: Optional[float] = None                   # <-- REEMPLAZADO
+        # self.accion_por_limite_precio: str = 'PAUSAR'                    # <-- REEMPLAZADO
+
+        # Nuevos atributos para condiciones múltiples y riesgo configurable
+        self.condiciones_entrada: List[Dict[str, Any]] = []  # ej: [{'tipo': 'PRICE_ABOVE', 'valor': 100.0}]
+        self.condiciones_salida_precio: List[Dict[str, Any]] = [] # ej: [{'tipo': 'PRICE_BELOW', 'valor': 50.0, 'accion': 'PAUSAR'}]
+        self.accion_por_riesgo_roi: str = 'DETENER'  # 'PAUSAR' o 'DETENER'
+
+        # Atributos de acción por límite de tiempo/trades se mantienen
+        self.accion_por_limite_tiempo: str = 'PAUSAR'
+        self.accion_por_limite_trades: str = 'PAUSAR'
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         self.auto_reinvest_enabled: bool = False 
         self.tiempo_espera_minutos: Optional[int] = None
         self.tiempo_inicio_espera: Optional[datetime.datetime] = None
@@ -107,11 +120,9 @@ class Operacion:
         self.profit_balance_acumulado: float = 0.0
         self.reinvestable_profit_balance: float = 0.0
         
-        # --- INICIO DE LA MODIFICACIÓN: Añadir los nuevos atributos de tiempo ---
-        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None # Mantenido por compatibilidad
+        self.tiempo_inicio_ejecucion: Optional[datetime.datetime] = None 
         self.tiempo_acumulado_activo_seg: float = 0.0
         self.tiempo_ultimo_inicio_activo: Optional[datetime.datetime] = None
-        # --- FIN DE LA MODIFICACIÓN ---
         
         # --- Listas de Objetos ---
         self.posiciones: List['LogicalPosition'] = []
@@ -121,10 +132,6 @@ class Operacion:
         # Banderas de Estado de Salida
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
     @property
     def capital_operativo_logico_actual(self) -> float:
@@ -153,9 +160,7 @@ class Operacion:
     @property
     def posiciones_pendientes(self) -> List['LogicalPosition']:
         return [p for p in self.posiciones if p.estado == 'PENDIENTE']
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Añade esta nueva propiedad aquí
+    
     @property
     def avg_entry_price(self) -> Optional[float]:
         """Calcula el precio de entrada promedio ponderado de todas las posiciones abiertas."""
@@ -174,7 +179,6 @@ class Operacion:
             return None
         
         return safe_division(total_value, total_size)
-    # --- FIN DE LA MODIFICACIÓN ---
     
     @property
     def posiciones_abiertas_count(self) -> int:
@@ -193,40 +197,27 @@ class Operacion:
     def realized_twrr_roi(self) -> float:
         """
         Calcula el Time-Weighted Rate of Return (TWRR) basado únicamente en el PNL realizado
-        y los flujos de capital. Esto proporciona un ROI preciso a pesar de los cambios
-        en el capital operativo a lo largo del tiempo.
+        y los flujos de capital.
         """
-        # 1. Determinar el capital inicial para el período de cálculo actual.
         equity_inicial_periodo_actual = self.capital_inicial_usdt
         if self.capital_flows:
             last_flow = self.capital_flows[-1]
             equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
 
-        # 2. Calcular el PNL del período actual (solo PNL realizado).
-        # El equity actual basado en PNL realizado es `equity_total_usdt`.
         pnl_periodo_actual = self.equity_total_usdt - equity_inicial_periodo_actual
-        
-        # 3. Calcular el retorno del período actual.
         retorno_periodo_actual = safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
         
-        # 4. Encadenar con los retornos de los sub-períodos anteriores.
         total_return_factor = 1.0
         for r in self.sub_period_returns:
             total_return_factor *= r
         
         total_return_factor *= (1 + retorno_periodo_actual)
         
-        # 5. Calcular el ROI final.
         return (total_return_factor - 1) * 100
-
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función en la clase Operacion) ---
-# ==============================================================================
 
     def get_roi_sl_tp_price(self) -> Optional[float]:
         """
-        Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado,
-        recalculando el tamaño de la posición basado en el apalancamiento actual.
+        Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado.
         """
         sl_roi_pct_target = self.sl_roi_pct
         if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
@@ -239,17 +230,14 @@ class Operacion:
         if not open_positions:
             return None
 
-        # --- INICIO DE LA CORRECCIÓN: Recalcular tamaño y promedio ---
         total_value = 0.0
         total_size = 0.0
         for pos in open_positions:
             if pos.entry_price is None or pos.entry_price <= 0: continue
-            # Recalcula el tamaño usando el apalancamiento actual de la operación
             size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
             if size > 0:
                 total_value += pos.entry_price * size
                 total_size += size
-        # --- FIN DE LA CORRECCIÓN ---
         
         if total_size <= 1e-12:
             return None
@@ -272,16 +260,9 @@ class Operacion:
             
         return target_price if target_price > 0 else None
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
     def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
         """
-        Calcula y devuelve las métricas de rendimiento "en vivo" que dependen
-        del precio de mercado actual.
+        Calcula y devuelve las métricas de rendimiento "en vivo".
         """
         if not isinstance(current_price, (int, float)) or current_price <= 0:
             current_price = 0.0
@@ -321,14 +302,10 @@ class Operacion:
             "equity_actual_vivo": equity_actual_vivo,
             "roi_twrr_vivo": roi_twrr_vivo
         }
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función reset en la clase Operacion) ---
-# ==============================================================================
 
     def reset(self):
         """
-        Limpia la operación para una nueva configuración, PERO CONSERVA los
-        resultados financieros y la razón del último ciclo.
+        Limpia la operación para una nueva configuración.
         """
         self.capital_inicial_usdt = 0.0
         self.total_reinvertido_usdt = 0.0
@@ -348,12 +325,6 @@ class Operacion:
         self.tiempo_espera_minutos = None
         self.tiempo_inicio_espera = None
         
-        # --- INICIO DE LA MODIFICACIÓN: Resetear los nuevos atributos de tiempo ---
-        self.tiempo_inicio_ejecucion = None # Mantenido por compatibilidad
+        self.tiempo_inicio_ejecucion = None
         self.tiempo_acumulado_activo_seg = 0.0
         self.tiempo_ultimo_inicio_activo = None
-        # --- FIN DE LA MODIFICACIÓN ---
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================

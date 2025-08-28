@@ -20,10 +20,7 @@ from typing import List, Dict, Optional, Any
 # --- Dependencias del Proyecto ---
 try:
     from ._logical_table import LogicalPositionTable
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se corrige la importación para apuntar a la ubicación centralizada.
     from core.strategy.entities import LogicalPosition, PhysicalPosition
-    # --- FIN DE LA MODIFICACIÓN ---
     from core.exchange import AbstractExchange
     from core.logging import memory_logger
 except ImportError:
@@ -101,28 +98,21 @@ class PositionState:
             memory_logger.log(traceback.format_exc(), level="ERROR")
             self._initialized = False
 
-    # --- INICIO DE LA MODIFICACIÓN: Implementación del método ---
-    def sync_logical_positions(self, all_positions: Dict[str, List[LogicalPosition]]):
+    def sync_positions_from_operation(self, operacion_obj: Any):
         """
-        Sincroniza el estado de las tablas lógicas con un nuevo conjunto completo de posiciones.
-
-        Args:
-            all_positions: Un diccionario con claves 'long' y 'short' que contiene
-                           las listas completas de las nuevas posiciones lógicas.
+        Sincroniza el estado de las tablas lógicas con un nuevo conjunto completo de posiciones desde un objeto Operacion.
         """
-        if not self._initialized: return
+        if not self._initialized or not operacion_obj: return
         
-        long_positions = all_positions.get('long', [])
-        short_positions = all_positions.get('short', [])
+        long_positions = operacion_obj.posiciones if operacion_obj.tendencia == 'LONG_ONLY' else []
+        short_positions = operacion_obj.posiciones if operacion_obj.tendencia == 'SHORT_ONLY' else []
         
         if self._long_table:
             self._long_table.sync_positions(long_positions)
-            
         if self._short_table:
             self._short_table.sync_positions(short_positions)
         
         memory_logger.log("PositionState sincronizado con el nuevo estado de la Operación.", level="DEBUG")
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def _get_table_for_side(self, side: str) -> Optional[LogicalPositionTable]:
         """Método auxiliar para obtener la tabla correcta."""
@@ -132,8 +122,6 @@ class PositionState:
             return self._short_table
         return None
 
-    # --- Métodos para Posiciones Lógicas (con tipado mejorado) ---
-    
     def add_logical_position_obj(self, side: str, position_obj: LogicalPosition) -> bool:
         """Añade una nueva posición lógica (objeto) a la tabla correspondiente."""
         if not self._initialized: return False
@@ -158,39 +146,12 @@ class PositionState:
         table = self._get_table_for_side(side)
         return table.update_position_details(position_id, details_to_update) if table else False
 
-    # --- (COMENTADO) Métodos antiguos que operaban con diccionarios. ---
-    # Se mantienen comentados para referencia, pero la nueva lógica usa los métodos
-    # basados en objetos (`_obj`) para mayor seguridad de tipos.
-    """
-    def add_logical_position(self, side: str, position_data: Dict[str, Any]) -> bool:
-        #Esta función ha sido reemplazada por add_logical_position_obj
-        if not self._initialized: return False
-        try:
-            pos_obj = LogicalPosition(**position_data)
-            table = self._get_table_for_side(side)
-            return table.add_position(pos_obj) if table else False
-        except TypeError as e:
-            memory_logger.log(f"ERROR [PS add_logical_position]: Datos de posición inválidos: {e}", "ERROR")
-            return False
-
-    def get_open_logical_positions(self, side: str) -> List[Dict[str, Any]]:
-        #Esta función ha sido reemplazada por get_open_logical_positions_objects
-        from dataclasses import asdict
-        if not self._initialized: return []
-        table = self._get_table_for_side(side)
-        if table:
-            return [asdict(pos) for pos in table.get_positions()]
-        return []
-    """
-
     def display_logical_table(self, side: str):
         """Solicita a la tabla lógica que imprima su estado."""
         if not self._initialized: return
         table = self._get_table_for_side(side)
         if table:
             table.display_table()
-
-    # --- Métodos para Posiciones Físicas ---
 
     def get_physical_position_state(self, side: str) -> Dict[str, Any]:
         """Devuelve una copia del estado físico en formato de diccionario."""
@@ -209,13 +170,16 @@ class PositionState:
             
         return state_dict
 
+    # --- INICIO DE LA CORRECCIÓN ---
+    # La firma de la función ha sido modificada para aceptar explícitamente los
+    # argumentos con nombre (keyword arguments) que le envía el PositionExecutor.
     def update_physical_position_state(
         self,
         side: str,
-        avg_price: float,
-        total_size: float,
-        total_margin: float,
-        liq_price: Optional[float],
+        avg_entry_price: float,
+        total_size_contracts: float,
+        total_margin_usdt: float,
+        liquidation_price: Optional[float],
         timestamp: datetime.datetime
     ):
         """Actualiza el estado de la posición física."""
@@ -223,11 +187,13 @@ class PositionState:
         
         target_physical = self.physical_long_position if side == 'long' else self.physical_short_position
         
-        target_physical.avg_entry_price = self._utils.safe_float_convert(avg_price, 0.0)
-        target_physical.total_size_contracts = self._utils.safe_float_convert(total_size, 0.0)
-        target_physical.total_margin_usdt = self._utils.safe_float_convert(total_margin, 0.0)
-        target_physical.est_liq_price = self._utils.safe_float_convert(liq_price)
+        # El cuerpo de la función ahora usa los nuevos nombres de los argumentos.
+        target_physical.avg_entry_price = self._utils.safe_float_convert(avg_entry_price, 0.0)
+        target_physical.total_size_contracts = self._utils.safe_float_convert(total_size_contracts, 0.0)
+        target_physical.total_margin_usdt = self._utils.safe_float_convert(total_margin_usdt, 0.0)
+        target_physical.est_liq_price = self._utils.safe_float_convert(liquidation_price)
         target_physical.last_update_ts = timestamp
+    # --- FIN DE LA CORRECCIÓN ---
 
     def reset_physical_position_state(self, side: str):
         """Resetea el estado físico a sus valores por defecto."""
