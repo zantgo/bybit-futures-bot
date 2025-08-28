@@ -70,10 +70,10 @@ SESSION_CONFIG = {
     # Parámetros de Generación de Señales
     "SIGNAL": {
         "ENABLED": True, 
-        "PRICE_CHANGE_BUY_PERCENTAGE": -0.25,
-        "PRICE_CHANGE_SELL_PERCENTAGE": 0.25,
-        "WEIGHTED_DECREMENT_THRESHOLD": 0.45,
-        "WEIGHTED_INCREMENT_THRESHOLD": 0.45,
+        "PRICE_CHANGE_BUY_PERCENTAGE": -0.15,
+        "PRICE_CHANGE_SELL_PERCENTAGE": 0.15,
+        "WEIGHTED_DECREMENT_THRESHOLD": 0.35,
+        "WEIGHTED_INCREMENT_THRESHOLD": 0.35,
     },
 
     # Parámetros de Ganancias
@@ -97,8 +97,8 @@ OPERATION_DEFAULTS = {
     },
     "RISK": {
         "INDIVIDUAL_SL": {
-            "ENABLED": False, 
-            "PERCENTAGE": 10.0, 
+            "ENABLED": True, 
+            "PERCENTAGE": 50.0, 
         },
         "INDIVIDUAL_TSL": {
             "ENABLED": True, 
