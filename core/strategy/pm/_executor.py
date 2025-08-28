@@ -1,3 +1,5 @@
+# core/strategy/pm/_executor.py
+
 import time
 import datetime, uuid, traceback
 from typing import Optional, Dict, Any
@@ -7,10 +9,7 @@ try:
     from core.logging import memory_logger
     from core.exchange import AbstractExchange, StandardOrder
     from core.strategy.entities import LogicalPosition, Operacion # Añadido Operacion para el type hint
-    # --- INICIO DEL CAMBIO 1: Importar la fachada de la API del core ---
-    # Esto nos da acceso a la nueva función get_position_info_api.
     from core import api as core_api
-    # --- FIN DEL CAMBIO 1 ---
 except ImportError as e:
     print(f"ERROR FATAL [Executor Import]: {e}")
     def LogicalPosition(*args, **kwargs):
@@ -18,9 +17,7 @@ except ImportError as e:
     class AbstractExchange: pass
     class StandardOrder: pass
     class Operacion: pass # Fallback
-    # --- INICIO DEL CAMBIO 2: Añadir fallback para la nueva importación ---
     core_api = None
-    # --- FIN DEL CAMBIO 2 ---
     class MemoryLoggerFallback:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
@@ -66,10 +63,7 @@ class PositionExecutor:
         
         leverage = operacion.apalancamiento
 
-        # --- INICIO DEL CAMBIO 3: Lógica de Comprobación y Corrección de Apalancamiento ---
-        # Este bloque se ejecuta antes de cualquier cálculo o log de apertura.
         if not self._config.BOT_CONFIG["PAPER_TRADING_MODE"] and core_api:
-            # Determinar la cuenta correcta a comprobar
             account_purpose = 'longs' if side == 'long' else 'shorts'
             account_name_map = {
                 'longs': self._config.BOT_CONFIG["ACCOUNTS"]["LONGS"],
@@ -79,16 +73,13 @@ class PositionExecutor:
 
             if account_name:
                 try:
-                    # Llamar a la nueva función de la API para leer la info de posición (que incluye el apalancamiento)
                     position_info = core_api.get_position_info_api(symbol=self._symbol, account_name=account_name)
                     if position_info:
                         current_leverage = float(position_info.get('leverage', 0))
-                        # Comparamos el apalancamiento del exchange con el del bot
                         if abs(current_leverage - leverage) > 1e-9:
                             memory_logger.log(f"WARN [Executor]: Desincronización de apalancamiento detectada en '{account_name}'. "
                                               f"Exchange: {current_leverage}x, Bot: {leverage}x. Corrigiendo...", level="WARN")
                             
-                            # Si son diferentes, se envía una orden para corregirlo
                             success = self._exchange.set_leverage(symbol=self._symbol, leverage=leverage, account_purpose=account_purpose)
                             if not success:
                                 result['message'] = "Fallo al corregir el apalancamiento desincronizado. Se aborta la apertura."
@@ -99,9 +90,7 @@ class PositionExecutor:
 
                 except Exception as e:
                     memory_logger.log(f"ERROR [Executor]: Excepción al verificar apalancamiento: {e}", level="ERROR")
-                    # No abortamos la operación, pero el error queda registrado.
-        # --- FIN DEL CAMBIO 3 ---
-
+        
         memory_logger.log(f"OPEN [{side.upper()}] -> Solicitud para abrir @ {entry_price:.{self._price_prec}f}", level="INFO")
 
         try:
@@ -186,88 +175,79 @@ class PositionExecutor:
         result['api_order_id'] = api_order_id
         return result
 
-# Reemplaza esta función completa en core/strategy/pm/_executor.py
+    # --- INICIO DE LA FUNCIÓN CORREGIDA Y AÑADIDA ---
+    def execute_close(self, position_to_close: LogicalPosition, side: str, exit_price: float, timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
+        """Orquesta el cierre de una posición a través de la interfaz de exchange."""
+        result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
+        
+        pos_id_short = str(position_to_close.id)[-6:]
+        memory_logger.log(f"CLOSE [{side.upper()} ID:{pos_id_short}] -> Solicitud para cerrar @ {exit_price:.{self._price_prec}f} (Razón: {exit_reason})", level="INFO")
 
-def execute_close(self, position_to_close: LogicalPosition, side: str, exit_price: float, timestamp: datetime.datetime, exit_reason: str = "UNKNOWN") -> Dict[str, Any]:
-    """Orquesta el cierre de una posición a través de la interfaz de exchange."""
-    result = {'success': False, 'pnl_net_usdt': 0.0, 'message': 'Error no especificado'}
-    
-    pos_id_short = str(position_to_close.id)[-6:]
-    memory_logger.log(f"CLOSE [{side.upper()} ID:{pos_id_short}] -> Solicitud para cerrar @ {exit_price:.{self._price_prec}f} (Razón: {exit_reason})", level="INFO")
-
-    size_to_close_float = self._utils.safe_float_convert(position_to_close.size_contracts, 0.0)
-    
-    format_qty_result = self._helpers.format_quantity_for_api(size_to_close_float, self._symbol, is_live=True, exchange_adapter=self._exchange)
-    if not format_qty_result['success']:
-        result['message'] = f"Error formateando cantidad para API: {format_qty_result['error']}"
-        return result
-    size_to_close_str = format_qty_result['qty_str']
-    
-    execution_success = False
-    
-    if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
-        memory_logger.log(f"  -> MODO PAPEL: Simulación de orden de cierre aceptada para ID {pos_id_short}.", "WARN")
-        execution_success = True
-    else:
-        try:
-            order_to_close = StandardOrder(
-                symbol=self._symbol,
-                side="sell" if side == 'long' else "buy",
-                order_type="market",
-                quantity_contracts=float(size_to_close_str),
-                reduce_only=True
-            )
-            
-            account_purpose = 'longs' if side == 'long' else 'shorts'
-            success, response_msg = self._exchange.place_order(order_to_close, account_purpose=account_purpose)
-            
-            if success:
-                execution_success = True
-            else:
-                if "position does not exist" in response_msg.lower() or "110001" in response_msg:
+        size_to_close_float = self._utils.safe_float_convert(position_to_close.size_contracts, 0.0)
+        
+        format_qty_result = self._helpers.format_quantity_for_api(size_to_close_float, self._symbol, is_live=True, exchange_adapter=self._exchange)
+        if not format_qty_result['success']:
+            result['message'] = f"Error formateando cantidad para API: {format_qty_result['error']}"
+            return result
+        size_to_close_str = format_qty_result['qty_str']
+        
+        execution_success = False
+        
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            memory_logger.log(f"  -> MODO PAPEL: Simulación de orden de cierre aceptada para ID {pos_id_short}.", "WARN")
+            execution_success = True
+        else:
+            try:
+                order_to_close = StandardOrder(
+                    symbol=self._symbol,
+                    side="sell" if side == 'long' else "buy",
+                    order_type="market",
+                    quantity_contracts=float(size_to_close_str),
+                    reduce_only=True
+                )
+                
+                account_purpose = 'longs' if side == 'long' else 'shorts'
+                success, response_msg = self._exchange.place_order(order_to_close, account_purpose=account_purpose)
+                
+                if success:
                     execution_success = True
-                    memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
                 else:
-                    result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
-        except Exception as e:
-            result['message'] = f"Excepción durante ejecución de cierre: {e}"
+                    if "position does not exist" in response_msg.lower() or "110001" in response_msg:
+                        execution_success = True
+                        memory_logger.log(f"WARN [Exec Close]: Posición no encontrada en el exchange ({response_msg}). Asumiendo ya cerrada.", level="WARN")
+                    else:
+                        result['message'] = f"Fallo en Exchange al colocar orden de cierre: {response_msg}"
+            except Exception as e:
+                result['message'] = f"Excepción durante ejecución de cierre: {e}"
 
-    if execution_success:
-        removed_pos_dict = asdict(position_to_close)
+        if execution_success:
+            removed_pos_dict = asdict(position_to_close)
 
-        calc_res = self._calculations.calculate_pnl_commission_reinvestment(
-            side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
-        )
+            calc_res = self._calculations.calculate_pnl_commission_reinvestment(
+                side, removed_pos_dict['entry_price'], exit_price, removed_pos_dict['size_contracts']
+            )
 
-        operacion = self._state_manager._om_api.get_operation_by_side(side)
-        
-        if operacion and not operacion.auto_reinvest_enabled:
-            if calc_res.get('pnl_net_usdt', 0.0) > 0:
-                calc_res['amount_transferable_to_profit'] += calc_res['amount_reinvested_in_operational_margin']
-                calc_res['amount_reinvested_in_operational_margin'] = 0.0
+            operacion = self._state_manager._om_api.get_operation_by_side(side)
+            
+            if operacion and not operacion.auto_reinvest_enabled:
+                if calc_res.get('pnl_net_usdt', 0.0) > 0:
+                    calc_res['amount_transferable_to_profit'] += calc_res['amount_reinvested_in_operational_margin']
+                    calc_res['amount_reinvested_in_operational_margin'] = 0.0
 
-        result.update(calc_res)
+            result.update(calc_res)
+            
+            if self._closed_position_logger and removed_pos_dict:
+                log_data = {**removed_pos_dict, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
+                self._closed_position_logger.log_closed_position(log_data)
+            
+            if not self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+                time.sleep(0.5) 
+                self.sync_physical_state(side)
+            
+            result['success'] = True
+            result['message'] = f"Cierre {side.upper()} ID {pos_id_short} exitoso."
         
-        if self._closed_position_logger and removed_pos_dict:
-            log_data = {**removed_pos_dict, **calc_res, "exit_price": exit_price, "exit_timestamp": timestamp, "exit_reason": exit_reason}
-            self._closed_position_logger.log_closed_position(log_data)
-        
-        # --- INICIO DE LA SOLUCIÓN ---
-        # Sincronización Inmediata después del Cierre Exitoso
-        # Antes de devolver el éxito, forzamos una sincronización del estado físico.
-        # Esto asegura que cuando el `PositionManager` reciba el resultado, el
-        # estado del `PositionState` ya refleje la realidad del exchange (cero posiciones).
-        # Aunque esto añade una llamada a la API, solo ocurre en un cierre, no en cada tick.
-        if not self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
-            # Pequeña pausa para dar tiempo a la API a procesar el cierre
-            time.sleep(0.5) 
-            self.sync_physical_state(side)
-        # --- FIN DE LA SOLUCIÓN ---
-        
-        result['success'] = True
-        result['message'] = f"Cierre {side.upper()} ID {pos_id_short} exitoso."
-    
-    return result
+        return result
 
     def sync_physical_state(self, side: str):
         """Sincroniza el estado físico interno con el real del exchange."""
@@ -289,3 +269,4 @@ def execute_close(self, position_to_close: LogicalPosition, side: str, exit_pric
                 self._position_state.reset_physical_position_state(side)
         except Exception as e:
             memory_logger.log(f"ERROR [Sync State]: Excepción sincronizando {side.upper()}: {e}", level="ERROR")
+    # --- FIN DE LA FUNCIÓN CORREGIDA Y AÑADIDA ---
