@@ -284,15 +284,8 @@ class OperationManager:
         msg = f"OPERACIÓN {side.upper()} ACTIVADA AUTOMÁTICAMENTE. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función 5 de 5) ---
-# ==============================================================================
-
-# Reemplaza esta función completa en core/strategy/om/_manager.py
+# Verifica que esta función en core/strategy/om/_manager.py se vea así
 
 def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
     with self._lock:
@@ -307,12 +300,9 @@ def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: O
 
         target_op.estado = 'DETENIENDO'
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Cambiamos el mensaje por defecto a uno más adecuado.
-        # Si la detención fue por un riesgo (ej. SL por ROI), `reason` tendrá un valor
-        # específico. Si es manual, ahora tendrá un mensaje más limpio.
+        # Esta es la línea clave. Si 'reason' viene del EventProcessor, se usará.
+        # Si la detención es manual (desde la TUI), `reason` será None y se usará el texto por defecto.
         target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
-        # --- FIN DE LA CORRECCIÓN ---
         
         log_msg = f"OPERACIÓN {side.upper()} en estado DETENIENDO (Razón: {target_op.estado_razon}). Esperando cierre de posiciones."
         self._memory_logger.log(log_msg, "WARN")
@@ -322,109 +312,3 @@ def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: O
             return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
             
     return True, f"Proceso de detención para {side.upper()} iniciado."
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
-    def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
-        with self._lock:
-            op = self._get_operation_by_side_internal(side)
-            if op:
-                op.pnl_realizado_usdt += pnl_amount
-
-    def actualizar_total_reinvertido(self, side: str, amount: float):
-        with self._lock:
-            op = self._get_operation_by_side_internal(side)
-            if op:
-                op.total_reinvertido_usdt += amount
-    
-    def actualizar_comisiones_totales(self, side: str, fee_amount: float):
-        with self._lock:
-            op = self._get_operation_by_side_internal(side)
-            if op:
-                op.comisiones_totales_usdt += abs(fee_amount)
-    
-    def revisar_y_transicionar_a_detenida(self, side: str):
-        with self._lock:
-            target_op = self._get_operation_by_side_internal(side)
-            # Solo actuar si la operación está en un estado que puede ser detenido
-            if not target_op or target_op.estado not in ['PAUSADA', 'DETENIENDO']:
-                return
-            
-            # La condición para finalizar es que no queden posiciones abiertas.
-            if not target_op.posiciones_abiertas:
-                # --- INICIO DE LA CORRECCIÓN CLAVE ---
-                # En lugar de resetear, simplemente cambiamos el estado.
-                # La 'estado_razon' que se estableció previamente (ej. por liquidación) se conserva.
-                
-                log_msg = (
-                    f"OPERACIÓN {side.upper()}: Finalizada. Última posición cerrada. "
-                    f"Estado final: DETENIDA. Razón: '{target_op.estado_razon}'"
-                )
-                self._memory_logger.log(log_msg, "INFO")
-                
-                # Solo cambiamos el estado. El resto de los datos (PNL, razón) permanecen.
-                target_op.estado = 'DETENIDA'
-
-    def actualizar_reinvestable_profit(self, side: str, amount: float):
-        """Añade fondos al bote de reinversión."""
-        with self._lock:
-            op = self._get_operation_by_side_internal(side)
-            if op:
-                op.reinvestable_profit_balance += amount
-
-    def distribuir_reinvestable_profits(self, side: str):
-        """Distribuye el saldo de reinversión acumulado entre las posiciones pendientes."""
-        with self._lock:
-            op = self._get_operation_by_side_internal(side)
-            if not op or op.reinvestable_profit_balance <= 1e-9:
-                return
-
-            pending_positions = op.posiciones_pendientes
-            if not pending_positions:
-                self._memory_logger.log(
-                    f"REINVERSIÓN OMITIDA ({side.upper()}): No hay posiciones pendientes para distribuir "
-                    f"${op.reinvestable_profit_balance:.4f}. El saldo se mantiene acumulado.",
-                    "WARN"
-                )
-                return
-
-            total_to_distribute = op.reinvestable_profit_balance
-            amount_per_position = total_to_distribute / len(pending_positions)
-
-            for pos in op.posiciones:
-                if pos.estado == 'PENDIENTE':
-                    pos.capital_asignado += amount_per_position
-            
-            op.reinvestable_profit_balance = 0.0
-
-            self._memory_logger.log(
-                f"REINVERSIÓN EJECUTADA ({side.upper()}): Se distribuyeron ${total_to_distribute:.4f} "
-                f"entre {len(pending_positions)} posiciones pendientes (${amount_per_position:.4f} c/u).",
-                "INFO"
-            )
-
-    def handle_liquidation_event(self, side: str, reason: str):
-        with self._lock:
-            target_op = self._get_operation_by_side_internal(side)
-            
-            if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
-                return
-
-            self._memory_logger.log(
-                f"OM: Procesando evento de liquidación para la operación {side.upper()}.", "WARN"
-            )
-
-            target_op.estado = 'DETENIENDO'
-            target_op.estado_razon = reason
-
-            total_loss = target_op.capital_operativo_logico_actual
-            target_op.pnl_realizado_usdt -= total_loss
-
-            self._memory_logger.log(
-                f"OM: Pérdida por liquidación de ${total_loss:.4f} registrada para {side.upper()}.", "WARN"
-            )
-            
-            target_op.posiciones.clear()
-            
-            self.revisar_y_transicionar_a_detenida(side)
