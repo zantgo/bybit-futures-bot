@@ -1,3 +1,5 @@
+# ./core/strategy/pm/_logical_table.py
+
 import datetime
 import traceback
 import copy
@@ -46,7 +48,6 @@ class LogicalPositionTable:
         self._lock = threading.Lock()
         
         memory_logger.log(f"[LPT {self.side.upper()}] Tabla inicializada. Modo Live: {self.is_live_mode}", level="INFO")
-    # --- FIN DE LA PARTE CRÍTICA ---
 
     def sync_positions(self, new_positions: List[LogicalPosition]):
         if not isinstance(new_positions, list):
@@ -54,6 +55,10 @@ class LogicalPositionTable:
             return
         with self._lock:
             self._positions = copy.deepcopy(new_positions)
+            
+        # --- SOLUCIÓN APLICADA AQUÍ ---
+        # El print() que causaba el problema ha sido eliminado.
+        # Se deja únicamente la llamada correcta al memory_logger.
         memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
 
     def add_position(self, position_data: LogicalPosition) -> bool:
