@@ -1,4 +1,4 @@
-# core/strategy/om/_manager.py
+# ./core/strategy/om/_manager.py
 
 import datetime
 import uuid
@@ -19,16 +19,12 @@ except ImportError:
             self.id = id; self.estado = 'DETENIDA'; self.estado_razon = 'Inicial'; self.posiciones: list = []
             self.capital_flows: list = []; self.sub_period_returns: list = []
             self.capital_inicial_usdt = 0.0; self.apalancamiento = 10.0
-            # --- ATRIBUTOS ELIMINADOS DE LA ENTIDAD REAL ---
-            # self.tipo_cond_entrada = None; self.valor_cond_entrada = None
-            # --- NUEVOS ATRIBUTOS EN LA ENTIDAD REAL ---
             self.cond_entrada_above: Optional[float] = None
             self.cond_entrada_below: Optional[float] = None
             self.cond_salida_above: Optional[Dict[str, Any]] = None
             self.cond_salida_below: Optional[Dict[str, Any]] = None
             self.tiempo_espera_minutos: Optional[int] = None
             self.tiempo_inicio_espera: Optional[datetime.datetime] = None
-            # --- FIN DE CAMBIOS EN LA ENTIDAD ---
             self.tiempo_inicio_ejecucion = None; self.pnl_realizado_usdt = 0.0
             self.comisiones_totales_usdt = 0.0; self.total_reinvertido_usdt = 0.0
             self.profit_balance_acumulado = 0.0
@@ -143,11 +139,16 @@ class OperationManager:
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                 
-                # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
-                estado_nuevo = target_op.estado
+                # --- INICIO DE LA SOLUCIÓN DEL BUG CRÍTICO ---
+                # Si la operación está en proceso de detención, no permitimos que ninguna
+                # lógica la reactive. Se delega la transición final a DETENIDA a la función
+                # 'revisar_y_transicionar_a_detenida'.
+                if estado_original == 'DETENIENDO':
+                    return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
+                # --- FIN DE LA SOLUCIÓN DEL BUG CRÍTICO ---
 
-                # Se evalúa si hay condiciones de entrada. La ausencia de todas las
-                # condiciones (precio y tiempo) implica una entrada a mercado.
+                estado_nuevo = target_op.estado
+                
                 is_market_entry = all(v is None for v in [
                     target_op.cond_entrada_above,
                     target_op.cond_entrada_below,
@@ -160,15 +161,13 @@ class OperationManager:
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
-                        if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+                        if not target_op.tiempo_inicio_ejecucion:
                             target_op.tiempo_inicio_ejecucion = now
-                # Si se ha modificado alguna condición de entrada y el estado era DETENIDA o PAUSADA
                 elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
                     estado_nuevo = 'EN_ESPERA'
                     target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-                # --- FIN DE LA CORRECCIÓN ---
 
                 if estado_nuevo != estado_original:
                     self._memory_logger.log(
@@ -192,13 +191,8 @@ class OperationManager:
             
             target_op.tiempo_ultimo_inicio_activo = None
             
-            # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
-            # Limpiar las condiciones de entrada específicas en lugar de las antiguas.
-            # target_op.tipo_cond_entrada = None # <-- COMENTADO/ELIMINADO
-            # target_op.valor_cond_entrada = None # <-- COMENTADO/ELIMINADO
             target_op.cond_entrada_above = None
             target_op.cond_entrada_below = None
-            # --- FIN DE LA CORRECCIÓN ---
             
             target_op.tiempo_espera_minutos = None
             target_op.tiempo_inicio_espera = None
@@ -222,7 +216,7 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+            if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
             
             target_op.tsl_roi_activo = False
@@ -244,7 +238,7 @@ class OperationManager:
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+            if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
@@ -259,8 +253,6 @@ class OperationManager:
 
             estado_original = target_op.estado
             
-            # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
-            # Determinar la razón basándose en las nuevas condiciones
             reason = "Condición de entrada alcanzada."
             if target_op.tiempo_espera_minutos is not None:
                  reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
@@ -268,14 +260,13 @@ class OperationManager:
                  reason = f"Activada por precio > {target_op.cond_entrada_above:.4f}."
             elif target_op.cond_entrada_below is not None:
                  reason = f"Activada por precio < {target_op.cond_entrada_below:.4f}."
-            # --- FIN DE LA CORRECCIÓN ---
             
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = reason
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
-            if not target_op.tiempo_inicio_ejecucion: # Solo establecer si no existe
+            if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
