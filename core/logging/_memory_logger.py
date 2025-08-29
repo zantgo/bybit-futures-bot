@@ -9,6 +9,7 @@ import collections
 import datetime
 from datetime import timezone
 from typing import List, Tuple
+import sys  # <--- IMPORTACIÓN AÑADIDA (Necesaria para la solución)
 
 # --- Estado del Módulo ---
 # Se mantiene el tamaño máximo de 1000 entradas para el historial de la TUI.
@@ -34,7 +35,10 @@ def log(message: str, level: str = "INFO"):
 
     # Imprimir solo si estamos en modo "verboso"
     if _is_verbose_mode:
-        print(f"[{timestamp}][{level}] {message}")
+        # --- LÍNEA CORREGIDA ---
+        # Se redirige la salida a sys.stderr para evitar conflictos con la TUI,
+        # pero manteniendo la funcionalidad del modo verboso.
+        print(f"[{timestamp}][{level}] {message}", file=sys.stderr)
 
 def get_logs() -> List[Tuple[str, str, str]]:
     """Devuelve una copia de todos los logs almacenados."""
