@@ -57,9 +57,8 @@ class LogicalPositionTable:
             self._positions = copy.deepcopy(new_positions)
             
         # --- SOLUCIÓN APLICADA AQUÍ ---
-        # El print() que causaba el problema ha sido eliminado.
-        # Se deja únicamente la llamada correcta al memory_logger.
-        memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
+        # La siguiente línea que genera el mensaje no deseado ha sido completamente comentada.
+        # memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
 
     def add_position(self, position_data: LogicalPosition) -> bool:
         if not isinstance(position_data, LogicalPosition): 
@@ -143,21 +142,27 @@ class LogicalPositionTable:
         if not self._utils: return 0.0
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
-        return sum(pos.size_contracts for pos in positions_copy)
+        # --- CORRECCIÓN: Asegurar que size_contracts no sea None ---
+        return sum(pos.size_contracts for pos in positions_copy if pos.size_contracts is not None)
 
     def get_total_used_margin(self) -> float:
         if not self._utils: return 0.0
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
-        return sum(pos.margin_usdt for pos in positions_copy)
+        # --- CORRECCIÓN: Asegurar que margin_usdt no sea None ---
+        return sum(pos.margin_usdt for pos in positions_copy if pos.margin_usdt is not None)
 
     def get_average_entry_price(self) -> float:
         if not self._utils: return 0.0
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
         if not positions_copy: return 0.0
-        total_value = sum(pos.size_contracts * pos.entry_price for pos in positions_copy)
-        total_size = sum(pos.size_contracts for pos in positions_copy)
+        # --- CORRECCIÓN: Filtrar posiciones sin datos válidos ---
+        valid_positions = [p for p in positions_copy if p.size_contracts is not None and p.entry_price is not None]
+        if not valid_positions: return 0.0
+        
+        total_value = sum(pos.size_contracts * pos.entry_price for pos in valid_positions)
+        total_size = sum(pos.size_contracts for pos in valid_positions)
         return self._utils.safe_division(total_value, total_size, default=0.0)
 
     def display_table(self):
@@ -179,20 +184,22 @@ class LogicalPositionTable:
         ]
         
         for pos in positions_copy:
+            # --- CORRECCIONES PARA ROBUSTEZ ---
             entry_ts_str = self._utils.format_datetime(pos.entry_timestamp, '%H:%M:%S') if self._utils and pos.entry_timestamp else "N/A"
             tp_activation_price = 'N/A'
-            if pos.tsl_activation_pct_at_open > 0:
+            if hasattr(pos, 'tsl_activation_pct_at_open') and pos.tsl_activation_pct_at_open > 0 and pos.entry_price:
                 price = pos.entry_price * (1 + pos.tsl_activation_pct_at_open / 100) if self.side == 'long' else pos.entry_price * (1 - pos.tsl_activation_pct_at_open / 100)
                 tp_activation_price = f"{price:.{price_prec}f}"
             
             ts_status = "Inactivo"
-            if pos.ts_is_active:
-                ts_status = f"Activo @ {pos.ts_stop_price:.{price_prec}f}" if pos.ts_stop_price else "Activo (Calculando)"
+            if hasattr(pos, 'ts_is_active') and pos.ts_is_active:
+                ts_stop_price = getattr(pos, 'ts_stop_price', None)
+                ts_status = f"Activo @ {ts_stop_price:.{price_prec}f}" if ts_stop_price else "Activo (Calculando)"
 
             data_for_df.append({
                 'ID': str(pos.id)[-6:], 'Entry Time': entry_ts_str,
-                'Entry Price': f"{pos.entry_price:.{price_prec}f}", 'Size': f"{pos.size_contracts:.{qty_prec}f}",
-                'Margin': f"{pos.margin_usdt:.2f}", 'Leverage': f"{pos.leverage:.1f}x",
+                'Entry Price': f"{pos.entry_price or 0:.{price_prec}f}", 'Size': f"{pos.size_contracts or 0:.{qty_prec}f}",
+                'Margin': f"{pos.margin_usdt or 0:.2f}", 'Leverage': f"{getattr(pos, 'leverage', 'N/A'):.1f}x" if hasattr(pos, 'leverage') else 'N/A',
                 'Stop Loss': f"{pos.stop_loss_price:.{price_prec}f}" if pos.stop_loss_price else 'N/A',
                 'TP Act. (Price)': tp_activation_price, 'TS Status': ts_status
             })
