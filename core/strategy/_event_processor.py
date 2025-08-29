@@ -240,79 +240,66 @@ class EventProcessor:
                     if entry_condition_met:
                         self._om_api.activar_por_condicion(side)
                         continue
-
+                    
                 # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
                 if operacion.estado == 'ACTIVA':
                     exit_triggered, exit_reason, accion_final = False, "", ""
 
-                    # ==============================================================================
-                    # --- INICIO DE LA SOLUCIÓN PARA LÍMITES DE SALIDA ---
-                    # ==============================================================================
-                    #
-                    # --- LÓGICA ORIGINAL (COMENTADA PARA REVISIÓN) ---
-                    # El problema aquí es idéntico al de la entrada: la lógica es absoluta y no
-                    # considera la dirección de la operación (LONG vs SHORT).
-                    #
-                    # if operacion.cond_salida_above:
-                    #     cond = operacion.cond_salida_above
-                    #     if current_price > cond.get('valor', float('inf')): # <--- ESTO ES INCORRECTO PARA UN SHORT
-                    #         exit_triggered = True
-                    #         exit_reason = f"Límite de Precio > {cond.get('valor'):.4f}"
-                    #         accion_final = cond.get('accion', 'PAUSAR')
-                    # 
-                    # if not exit_triggered and operacion.cond_salida_below:
-                    #     cond = operacion.cond_salida_below
-                    #     if current_price < cond.get('valor', 0.0): # <--- ESTO ES INCORRECTO PARA UN LONG
-                    #         exit_triggered = True
-                    #         exit_reason = f"Límite de Precio < {cond.get('valor'):.4f}"
-                    #         accion_final = cond.get('accion', 'PAUSAR')
-                    # --- FIN DE LA LÓGICA ORIGINAL ---
+                    # --- INICIO DE LA SOLUCIÓN DEFINITIVA (LÓGICA DIRECCIONAL Y MENSAJES PRECISOS) ---
 
-                    # --- LÓGICA NUEVA Y CORREGIDA ---
-                    # Esta nueva lógica interpreta las condiciones de salida de forma direccional y certera.
-                    
-                    # Condición de Take Profit (TP): salir cuando el precio se mueve a nuestro favor.
-                    if not exit_triggered and operacion.cond_salida_above:
-                        cond = operacion.cond_salida_above
-                        # Para LONG, un TP es cuando el precio sube.
-                        # Para SHORT, un TP es cuando el precio BAJA (por eso la condición es diferente).
-                        if (side == 'long' and current_price > cond.get('valor', float('inf'))) or \
-                        (side == 'short' and current_price < cond.get('valor', float('inf'))): # <- Condición corregida para SHORT
-                            exit_triggered = True
-                            exit_reason = f"Límite de Toma de Ganancias (TP) alcanzado @ {cond.get('valor'):.4f}"
-                            accion_final = cond.get('accion', 'PAUSAR')
-                    
-                    # Condición de Stop Loss (SL): salir cuando el precio se mueve en nuestra contra.
-                    if not exit_triggered and operacion.cond_salida_below:
-                        cond = operacion.cond_salida_below
-                        # Para LONG, un SL es cuando el precio baja.
-                        # Para SHORT, un SL es cuando el precio SUBE (condición corregida).
-                        if (side == 'long' and current_price < cond.get('valor', 0.0)) or \
-                        (side == 'short' and current_price > cond.get('valor', 0.0)): # <- Condición corregida para SHORT
-                            exit_triggered = True
-                            exit_reason = f"Límite de Stop Loss (SL) alcanzado @ {cond.get('valor'):.4f}"
-                            accion_final = cond.get('accion', 'PAUSAR')
-                    # ==============================================================================
-                    # --- FIN DE LA SOLUCIÓN ---
-                    # ==============================================================================
+                    # 3.1 GESTIÓN DE RIESGO POR PRECIO FIJO: Solo se evalúa si hay posiciones abiertas.
+                    if operacion.posiciones_abiertas_count > 0:
+                        
+                        # Evaluar la condición de salida por precio SUPERIOR
+                        if not exit_triggered and operacion.cond_salida_above:
+                            cond = operacion.cond_salida_above
+                            valor_limite = cond.get('valor', float('inf'))
+                            
+                            if current_price > valor_limite:
+                                exit_triggered = True
+                                # Para un LONG, es un TP. Para un SHORT, es un SL.
+                                tipo_limite = "Take Profit" if side == 'long' else "Stop Loss"
+                                exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} > {valor_limite:.4f})"
+                                accion_final = cond.get('accion', 'PAUSAR')
+                        
+                        # Evaluar la condición de salida por precio INFERIOR
+                        if not exit_triggered and operacion.cond_salida_below:
+                            cond = operacion.cond_salida_below
+                            valor_limite = cond.get('valor', 0.0)
 
-                    # Lógica para límite de trades (sin cambios, ya era correcta)
+                            if current_price < valor_limite:
+                                exit_triggered = True
+                                # Para un LONG, es un SL. Para un SHORT, es un TP.
+                                tipo_limite = "Stop Loss" if side == 'long' else "Take Profit"
+                                exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} < {valor_limite:.4f})"
+                                accion_final = cond.get('accion', 'PAUSAR')
+
+                    # 3.2 LÍMITES OPERATIVOS: Se evalúan siempre que la operación esté ACTIVA.
+                    # Lógica para límite de trades
                     if not exit_triggered and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
-                        exit_triggered, exit_reason, accion_final = True, f"Límite de {operacion.max_comercios} trades", operacion.accion_por_limite_trades
+                        exit_triggered = True
+                        exit_reason = f"Límite de {operacion.max_comercios} trades alcanzado"
+                        accion_final = operacion.accion_por_limite_trades
 
-                    # Lógica para límite de tiempo (sin cambios, ya era correcta)
+                    # Lógica para límite de tiempo
                     if not exit_triggered and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
                         elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
                         if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
-                            exit_triggered, exit_reason, accion_final = True, f"Límite de tiempo ({operacion.tiempo_maximo_min} min)", operacion.accion_por_limite_tiempo
+                            exit_triggered = True
+                            exit_reason = f"Límite de tiempo de operación ({operacion.tiempo_maximo_min} min) alcanzado"
+                            accion_final = operacion.accion_por_limite_tiempo
                     
+                    # --- FIN DE LA SOLUCIÓN DEFINITIVA ---
+
+                    # 3.3 EJECUCIÓN: Si cualquier condición de salida se cumplió, se actúa.
                     if exit_triggered:
                         log_msg = f"CONDICIÓN DE SALIDA ALCANZADA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        if accion_final == 'PAUSAR': self._om_api.pausar_operacion(side, reason=exit_reason)
-                        elif accion_final == 'DETENER': self._om_api.detener_operacion(side, True, reason=exit_reason)
-                        continue
-        
+                        if accion_final == 'PAUSAR': 
+                            self._om_api.pausar_operacion(side, reason=exit_reason)
+                        elif accion_final == 'DETENER': 
+                            self._om_api.detener_operacion(side, True, reason=exit_reason)
+                        continue      
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
