@@ -161,23 +161,22 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
     print("└" + "─" * (box_width - 2) + "┘")
 
 
+# Reemplaza la función _show_main_config_menu completa en core/menu/screens/_session_config_editor.py
+
 def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
     """Muestra el menú principal agrupado y gestiona la navegación a submenús."""
+    from .._helpers import show_help_popup # <-- Importación añadida
     changed_keys = {}
 
     while True:
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-        # Se añade clear_screen() al inicio del bucle para asegurar que la pantalla
-        # se redibuje de forma limpia en cada iteración, especialmente al volver
-        # de un submenú de edición.
         clear_screen()
-        # --- FIN DE LA MODIFICACIÓN ---
         
         print_tui_header("Editor de Configuración de Sesión")
         
         box_width = min(_get_terminal_width() - 2, 90)
         _display_config_box(temp_cfg, box_width)
 
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Editar Parámetros de Ticker",
             "[2] Editar Parámetros de Análisis Técnico (TA)",
@@ -185,9 +184,11 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
             "[4] Editar Parámetros de Profit",
             "[5] Editar Parámetros de Riesgo",
             None,
+            "[h] Ayuda", # Botón de ayuda añadido
             "[s] Guardar Cambios y Volver",
             "[c] Cancelar (Descartar Cambios)"
         ]
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -214,7 +215,12 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                 if 'RISK' not in temp_cfg: temp_cfg['RISK'] = {}
                 _edit_risk_submenu(temp_cfg['RISK'], changed_keys)
             
-            elif choice == 6:
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 6: # Índice de Ayuda
+                show_help_popup('session_config_editor')
+            # --- FIN DE LA MODIFICACIÓN ---
+
+            elif choice == 7: # Índice de Guardar
                 if changed_keys:
                     print("\nCambios guardados."); time.sleep(2)
                     return True, changed_keys
@@ -222,9 +228,8 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                     print("\nNo se realizaron cambios."); time.sleep(1.5)
                     return False, {}
             
-            elif choice == 7 or choice is None:
+            elif choice == 8 or choice is None: # Índice de Cancelar
                 if changed_keys:
-                    # Este menú de confirmación debe limpiar la pantalla para ser el foco
                     confirm_options = MENU_STYLE.copy()
                     confirm_options['clear_screen'] = True
                     if TerminalMenu(["[1] Sí, descartar cambios", "[2] No, seguir editando"], title="\nDescartar cambios no guardados?", **confirm_options).show() == 0:
@@ -236,7 +241,6 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
 
         except UserInputCancelled:
             print("\n\nEdición cancelada."); time.sleep(1)
-
 # --- Submenús de edición ---
 def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict):
     while True:

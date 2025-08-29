@@ -18,16 +18,19 @@ from ...._helpers import (
 from core.strategy.entities import Operacion
 from ._submenus_risk import get_action_menu
 
+# Reemplaza la función _edit_exit_conditions_submenu completa en core/menu/screens/operation_manager/wizard_setup/_submenus_exit.py
+
 def _edit_exit_conditions_submenu(temp_op: Operacion):
     """
     Submenú para gestionar las condiciones de salida de la operación con una UI simplificada.
     """
+    from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
+    
     while True:
         clear_screen()
         print_tui_header("Editor de Condiciones de Salida")
 
-        # --- Obtener y formatear el estado actual de las condiciones ---
         above_cond = temp_op.cond_salida_above
         below_cond = temp_op.cond_salida_below
         
@@ -42,7 +45,7 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         print(f"  - Límite de Duración: {time_str}")
         print(f"  - Límite de Trades: {trades_str}")
 
-        # --- Crear menú con opciones fijas ---
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Editar Condición 'Precio SUPERIOR a'",
             f"[2] Editar Condición 'Precio INFERIOR a'",
@@ -50,6 +53,7 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
             "[4] Editar Límite de Trades",
             None,
             "[d] Desactivar TODAS las condiciones de salida",
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver al menú anterior"
         ]
 
@@ -57,7 +61,8 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         menu_options['clear_screen'] = False
         choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
 
-        if choice is None or choice == 6: break
+        if choice is None or choice == 7: break # El índice de "Volver" ahora es 7
+        # --- FIN DE LA MODIFICACIÓN ---
         
         try:
             if choice == 0:
@@ -94,7 +99,7 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
                         temp_op.accion_por_limite_trades = get_action_menu("Acción al alcanzar el máximo de trades", temp_op.accion_por_limite_trades)
                     params_changed_in_submenu = True
 
-            elif choice == 5: # Desactivar todas
+            elif choice == 5:
                 if temp_op.cond_salida_above or temp_op.cond_salida_below or temp_op.tiempo_maximo_min or temp_op.max_comercios:
                     temp_op.cond_salida_above = None
                     temp_op.cond_salida_below = None
@@ -102,6 +107,11 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
                     temp_op.max_comercios = None
                     params_changed_in_submenu = True
                     print("\nTodas las condiciones de salida han sido desactivadas."); time.sleep(1.5)
+
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 6: # Índice de Ayuda
+                show_help_popup('wizard_exit_conditions')
+            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)

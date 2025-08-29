@@ -105,6 +105,8 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
 
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_main.py
 
+# Reemplaza la función _show_single_operation_view completa en core/menu/screens/operation_manager/_main.py
+
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
@@ -172,18 +174,9 @@ def _show_single_operation_view(side: str):
                 menu_items.append("[4] Detener Operación (Cierre Forzoso de Posiciones)")
                 actions.append("stop")
 
-            # --- INICIO DE LA SOLUCIÓN ---
-            # Se elimina el separador visual que causaba la línea no deseada.
             if current_state == 'EN_ESPERA':
-                # menu_items.insert(2, "[ ] ---")                              # <-- LÍNEA ORIGINAL COMENTADA
-                # actions.insert(2, None)                                     # <-- LÍNEA ORIGINAL COMENTADA
-                # menu_items.insert(3, "[*] Forzar Inicio (Activar Manualmente)") # <-- LÍNEA ORIGINAL COMENTADA
-                # actions.insert(3, "force_start")                              # <-- LÍNEA ORIGINAL COMENTADA
-
-                # Ahora insertamos "Forzar Inicio" en la posición 2, directamente después de "Pausar".
                 menu_items.insert(2, "[*] Forzar Inicio (Activar Manualmente)")
                 actions.insert(2, "force_start")
-            # --- FIN DE LA SOLUCIÓN ---
 
             if current_state == 'DETENIENDO':
                 print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
@@ -191,25 +184,45 @@ def _show_single_operation_view(side: str):
                 time.sleep(2)
                 continue
             
-            menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # La lógica para construir el menú se mueve aquí para que sea más clara.
+            # Tu código original para esto era un poco complejo, lo he simplificado
+            # manteniendo exactamente el mismo resultado final.
+
+            menu_items.extend([
+                None,
+                "[r] Refrescar",
+                "[h] Ayuda", # Botón de ayuda añadido
+                "[b] Volver"
+            ])
             
             menu_options = MENU_STYLE.copy()
             
-            final_menu_items = [item for item in menu_items if item is not None]
-            final_actions = [action for action in actions if action is not None]
+            # El bucle principal del menú
+            # Elige el ítem y mapea a la acción correcta
+            final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
             
+            # Se crea un mapa de acciones basado en la posición en el menú final
+            # para evitar errores de índice.
+            action_map = {}
+            action_idx = 0
+            for item in menu_items:
+                if item is None or item.startswith("[ ]"):
+                    continue
+                
+                if "[r]" in item: action_map[action_idx] = "refresh"
+                elif "[h]" in item: action_map[action_idx] = "help"
+                elif "[b]" in item: action_map[action_idx] = "back"
+                else:
+                    if action_idx < len(actions):
+                         action_map[action_idx] = actions[action_idx]
+                action_idx += 1
+
             main_menu = TerminalMenu(final_menu_items, title="\nAcciones:", **menu_options)
             choice_index = main_menu.show()
-            
-            action = final_actions[choice_index] if choice_index is not None and choice_index < len(final_actions) else None
-            
-            if choice_index is not None and "Volver" in final_menu_items[choice_index]:
-                action = "back"
-            elif choice_index is not None and "Refrescar" in final_menu_items[choice_index]:
-                action = "refresh"
-            elif choice_index is not None and "Ayuda" in final_menu_items[choice_index]:
-                action = "help"
-            
+            action = action_map.get(choice_index)
+            # --- FIN DE LA MODIFICACIÓN ---
+
             if action == "start_new": _wizards.operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": _wizards.operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "manual_manage": manual_position_manager.show_manual_position_manager_screen(side)

@@ -97,34 +97,28 @@ def show_general_config_editor_screen(config_module: Any) -> bool:
     # Devolvemos False porque no hay un "guardado" final, los cambios ya están aplicados.
     return False
 
+# Reemplaza la función _show_general_config_menu completa en core/menu/screens/_general_config_editor.py
+
 def _show_general_config_menu(config_module: Any):
     """Muestra el menú interactivo para editar la configuración general."""
-    while True:
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-        # Se añade clear_screen() al inicio del bucle para asegurar que la pantalla
-        # se redibuje de forma limpia en cada iteración, especialmente después de
-        # que una ventana de get_input() o un submenú se haya cerrado.
-        clear_screen()
-        # --- FIN DE LA MODIFICACIÓN ---
+    from .._helpers import show_help_popup # <-- Importación añadida
 
+    while True:
+        clear_screen()
         print_tui_header("Editor de Configuración General")
 
-        # Obtener valores actuales
         modo_actual = "Paper Trading" if config_module.BOT_CONFIG["PAPER_TRADING_MODE"] else "Live Trading"
         testnet_actual = "ON" if config_module.BOT_CONFIG["UNIVERSAL_TESTNET_MODE"] else "OFF"
         
-        # Calcular ancho dinámico
         terminal_width = _get_terminal_width()
-        box_width = min(terminal_width - 2, 80)  # Máximo 80, mínimo terminal_width - 2
+        box_width = min(terminal_width - 2, 80)
         
-        # Asegurar que el ancho sea al menos 30 para que sea funcional
         if box_width < 30:
             box_width = 30
 
         print("\nValores Actuales:")
         print("┌" + "─" * (box_width - 2) + "┐")
         
-        # Preparar datos de configuración
         config_items = [
             ("Exchange", config_module.BOT_CONFIG['EXCHANGE_NAME'].upper()),
             ("Modo", modo_actual),
@@ -132,9 +126,7 @@ def _show_general_config_menu(config_module: Any):
             ("Símbolo Ticker", config_module.BOT_CONFIG['TICKER']['SYMBOL'])
         ]
         
-        # Calcular ancho máximo para las claves
-        max_key_len = max(len(item[0]) for item in config_items)
-        max_key_len = min(max_key_len, box_width - 15)  # Limitar según espacio disponible
+        max_key_len = min(max(len(item[0]) for item in config_items), box_width - 15)
         
         for key, value in config_items:
             content = f"{key:<{max_key_len}}: {value}"
@@ -142,15 +134,18 @@ def _show_general_config_menu(config_module: Any):
         
         print("└" + "─" * (box_width - 2) + "┘")
 
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Exchange", 
             "[2] Modo", 
             "[3] Testnet",
             "[4] Símbolo del Ticker",
             None,
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver al Menú Principal"
         ]
-        action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 3: 'ticker', 5: 'back'}
+        action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 3: 'ticker', 5: 'help', 6: 'back'}
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -192,9 +187,14 @@ def _show_general_config_menu(config_module: Any):
                 
                 print(f"\nResultado: {message}")
                 time.sleep(2.5)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif action == 'help':
+                show_help_popup('general_config_editor')
+            # --- FIN DE LA MODIFICACIÓN ---
                 
             elif action == 'back' or action is None:
-                return # Salimos del bucle
+                return
         
         except UserInputCancelled:
             print("\n\nEdición cancelada."); time.sleep(1)

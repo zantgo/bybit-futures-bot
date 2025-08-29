@@ -16,17 +16,19 @@ from ...._helpers import (
     UserInputCancelled,
 )
 from core.strategy.entities import Operacion
+# Reemplaza la función _edit_entry_conditions_submenu completa en core/menu/screens/operation_manager/wizard_setup/_submenus_entry.py
 
 def _edit_entry_conditions_submenu(temp_op: Operacion):
     """
     Submenú para gestionar las condiciones de entrada de la operación con una UI simplificada.
     """
+    from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
+    
     while True:
         clear_screen()
         print_tui_header("Editor de Condiciones de Entrada")
 
-        # --- Obtener y formatear el estado actual de las condiciones ---
         above_val = temp_op.cond_entrada_above
         below_val = temp_op.cond_entrada_below
         timer_val = temp_op.tiempo_espera_minutos
@@ -36,7 +38,6 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         timer_str = f"{timer_val} min" if timer_val is not None else "Desactivado"
 
         print("\nCondiciones Actuales (Se activará con CUALQUIERA que se cumpla):")
-        # --- Mostrar estado de forma clara ---
         if all(v is None for v in [above_val, below_val, timer_val]):
             print("  - Inmediata (Market)")
         else:
@@ -44,13 +45,14 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
             print(f"  - Precio INFERIOR a: {below_str}")
             print(f"  - Temporizador:      {timer_str}")
 
-        # --- Crear menú con opciones fijas ---
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Editar Condición 'Precio SUPERIOR a'",
             f"[2] Editar Condición 'Precio INFERIOR a'",
             f"[3] Editar Temporizador",
             None,
             "[d] Desactivar TODAS las condiciones (Activar en Market)",
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver al menú anterior"
         ]
 
@@ -58,8 +60,9 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         menu_options['clear_screen'] = False
         choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
 
-        if choice is None or choice == 5:
+        if choice is None or choice == 6: # El índice de "Volver" ahora es 6
             break
+        # --- FIN DE LA MODIFICACIÓN ---
 
         try:
             if choice == 0:
@@ -80,13 +83,18 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
                     temp_op.tiempo_espera_minutos = new_val
                     params_changed_in_submenu = True
             
-            elif choice == 4: # Índice de "Desactivar TODAS"
+            elif choice == 4:
                 if temp_op.cond_entrada_above is not None or temp_op.cond_entrada_below is not None or temp_op.tiempo_espera_minutos is not None:
                     temp_op.cond_entrada_above = None
                     temp_op.cond_entrada_below = None
                     temp_op.tiempo_espera_minutos = None
                     params_changed_in_submenu = True
                     print("\nTodas las condiciones de entrada han sido desactivadas."); time.sleep(1.5)
+
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 5: # Índice de Ayuda
+                show_help_popup('wizard_entry_conditions')
+            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición cancelada."); time.sleep(1)

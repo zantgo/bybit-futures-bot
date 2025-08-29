@@ -325,9 +325,13 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     _render_operations_status_block(summary, box_width)
 
 # Reemplaza la función show_dashboard_screen completa en _dashboard.py
+# Reemplaza la función show_dashboard_screen completa en core/menu/screens/_dashboard.py
+
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
-    
+    # Aseguramos que todas las dependencias necesarias, incluida la de ayuda, estén importadas
+    from .. import _helpers as helpers_module
+
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module or not sm_api or not session_manager:
         print("ERROR CRÍTICO: Dependencias del Dashboard no disponibles.")
@@ -370,6 +374,7 @@ def show_dashboard_screen(session_manager: Any):
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
 
+        # La estructura del menú ya es correcta y no necesita cambios.
         menu_items = [
             "[1] Gestionar Operación LONG",
             "[2] Gestionar Operación SHORT",
@@ -409,16 +414,13 @@ def show_dashboard_screen(session_manager: Any):
             time.sleep(0.1)
             continue
         elif action == 'help':
+            # La llamada a la ayuda ya es correcta.
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
-            # --- INICIO DE LA SOLUCIÓN ---
-            # Borramos la pantalla manualmente ANTES de mostrar el menú de confirmación.
             clear_screen()
             
-            # Le decimos a simple_term_menu que NO borre la pantalla.
             confirm_menu_options = helpers_module.MENU_STYLE.copy()
-            confirm_menu_options['clear_screen'] = False # <-- CORRECCIÓN CLAVE
-            # --- FIN DE LA SOLUCIÓN ---
+            confirm_menu_options['clear_screen'] = False
             confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **confirm_menu_options)
             if confirm_menu.show() == 0:
                 break

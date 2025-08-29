@@ -23,11 +23,14 @@ except ImportError:
     om_api = None
     pm_api = None
 
+# Reemplaza la función show_manual_position_manager_screen completa en core/menu/screens/operation_manager/manual_position_manager/_main.py
 
 def show_manual_position_manager_screen(side: str):
     """
     Muestra la pantalla para la gestión manual de apertura y cierre de posiciones.
     """
+    from ...._helpers import show_help_popup # Importar la función de ayuda
+
     if not all([TerminalMenu, om_api, pm_api]):
         print("Error: Dependencias críticas para el gestor manual no disponibles.")
         time.sleep(3)
@@ -51,9 +54,7 @@ def show_manual_position_manager_screen(side: str):
         has_pending = operacion.posiciones_pendientes_count > 0
         has_open = operacion.posiciones_abiertas_count > 0
 
-        # --- INICIO DE LA MODIFICACIÓN (Corrección del Bucle Infinito) ---
-        
-        # 1. Construir las listas de ítems visibles y acciones en paralelo
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = []
         actions = []
         
@@ -69,23 +70,16 @@ def show_manual_position_manager_screen(side: str):
             menu_items.append(f"[*] CIERRE DE PÁNICO (Cerrar TODAS las {operacion.posiciones_abiertas_count} posiciones)")
             actions.append('panic_close')
         
-        # Añadir opciones estáticas
         menu_items.extend([
-            None, # Separador visual
+            None,
             "[r] Refrescar",
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver al Panel de Operación"
         ])
-        actions.extend([None, 'refresh', 'back'])
+        actions.extend([None, 'refresh', 'help', 'back'])
 
-        # 2. Filtrar los items no seleccionables (placeholders) antes de mostrar el menú
-        #    y construir el mapa de acciones solo con las acciones válidas
-        final_menu_items = []
-        final_actions = []
-        for i, item in enumerate(menu_items):
-            # No añadir placeholders como `None` o items deshabilitados al menú final
-            if item is not None and not item.startswith("[ ]"):
-                final_menu_items.append(item)
-                final_actions.append(actions[i])
+        final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
+        final_actions = [action for action in actions if action is not None]
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -96,9 +90,7 @@ def show_manual_position_manager_screen(side: str):
         )
         choice_index = menu.show()
         
-        # 3. Obtener la acción directamente de la lista filtrada de acciones
         action = final_actions[choice_index] if choice_index is not None and choice_index < len(final_actions) else None
-        
         # --- FIN DE LA MODIFICACIÓN ---
 
         if action == 'open_next':
@@ -113,5 +105,10 @@ def show_manual_position_manager_screen(side: str):
         elif action == 'refresh':
             continue
             
-        elif action == 'back' or action is None: # Si el usuario presiona ESC, action será None
+        # --- INICIO DE LA MODIFICACIÓN ---
+        elif action == 'help':
+            show_help_popup('position_viewer')
+        # --- FIN DE LA MODIFICACIÓN ---
+            
+        elif action == 'back' or action is None:
             break

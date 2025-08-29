@@ -33,7 +33,10 @@ def get_action_menu(prompt: str, current_action: str) -> str:
     if choice == 1: return 'DETENER'
     return current_action
 
+# Reemplaza la función _edit_operation_risk_submenu completa en core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
+
 def _edit_operation_risk_submenu(temp_op: Operacion):
+    from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
     
     while True:
@@ -51,21 +54,29 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
              tsl_roi_str = f"Activación a +{temp_op.tsl_roi_activacion_pct}%, Distancia {temp_op.tsl_roi_distancia_pct}%"
 
         risk_mode_title = "\nSelecciona una opción para editar:"
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        menu_items = [
+            f"[1] Límite SL/TP por ROI ({sl_roi_str})", 
+            f"[2] Límite TSL por ROI ({tsl_roi_str})",
+            None,
+            f"[3] Acción al alcanzar SL/TP por ROI ({temp_op.accion_por_sl_tp_roi})",
+            f"[4] Acción al alcanzar TSL por ROI ({temp_op.accion_por_tsl_roi})",
+            None,
+            "[h] Ayuda", # Botón de ayuda añadido
+            "[b] Volver al menú anterior"
+        ]
+        
         risk_mode_menu = TerminalMenu(
-            [f"[1] Límite SL/TP por ROI ({sl_roi_str})", 
-             f"[2] Límite TSL por ROI ({tsl_roi_str})",
-             None,
-             f"[3] Acción al alcanzar SL/TP por ROI ({temp_op.accion_por_sl_tp_roi})",
-             f"[4] Acción al alcanzar TSL por ROI ({temp_op.accion_por_tsl_roi})",
-             None, 
-             "[b] Volver al menú anterior"],
+            menu_items,
             title=risk_mode_title,
             **MENU_STYLE
         )
         choice = risk_mode_menu.show()
 
-        if choice is None or choice == 6:
+        if choice is None or choice == 7: # El índice de "Volver" ahora es 7
             break
+        # --- FIN DE LA MODIFICACIÓN ---
 
         try:
             if choice == 0:
@@ -96,18 +107,23 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                     if temp_op.tsl_roi_activacion_pct is not None:
                         temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
                         params_changed_in_submenu = True
-                
-            elif choice == 3:
+            
+            elif choice == 3: # Índice de "Acción SL/TP"
                 new_action = get_action_menu("Acción al alcanzar SL/TP por ROI", temp_op.accion_por_sl_tp_roi)
                 if new_action != temp_op.accion_por_sl_tp_roi:
                     temp_op.accion_por_sl_tp_roi = new_action
                     params_changed_in_submenu = True
 
-            elif choice == 4:
+            elif choice == 4: # Índice de "Acción TSL"
                 new_action = get_action_menu("Acción al alcanzar TSL por ROI", temp_op.accion_por_tsl_roi)
                 if new_action != temp_op.accion_por_tsl_roi:
                     temp_op.accion_por_tsl_roi = new_action
                     params_changed_in_submenu = True
+
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 6: # Índice de Ayuda
+                show_help_popup('wizard_risk_operation')
+            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición cancelada."); time.sleep(1)

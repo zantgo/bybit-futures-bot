@@ -164,9 +164,12 @@ def _run_position_test(bot_controller: Any):
 
 # --- Lógica Principal de la Pantalla ---
 
+# Reemplaza la función show_welcome_screen completa en core/menu/screens/_welcome.py
+
 def show_welcome_screen(bot_controller: Any):
     from ._general_config_editor import show_general_config_editor_screen
-    
+    from .._helpers import show_help_popup # <-- Importación añadida
+
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module:
         print("ERROR CRÍTICO: Dependencias no disponibles."); time.sleep(1); return
@@ -186,15 +189,10 @@ def show_welcome_screen(bot_controller: Any):
 
     # --- PASO 2: BUCLE PRINCIPAL DEL MENÚ ---
     while True:
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-        # Se añade clear_screen() al inicio del bucle para asegurar que la pantalla
-        # de bienvenida siempre se redibuje de forma limpia, especialmente después
-        # de volver de otras pantallas como el editor de configuración o el log viewer.
         clear_screen()
-        # --- FIN DE LA MODIFICACIÓN ---
-        
         _display_welcome_panel(bot_controller)
         
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Iniciar Sesión de Trading",
             None,
@@ -204,13 +202,15 @@ def show_welcome_screen(bot_controller: Any):
             "[4] Configuración General",
             "[5] Ver Logs de la Aplicación",
             None,
+            "[h] Ayuda", # Botón de Ayuda añadido
             "[6] Salir del Bot"
         ]
         
         action_map = {
             0: 'start_session', 2: 'test_transfers', 3: 'test_positions',
-            5: 'edit_general_config', 6: 'view_logs', 8: 'exit'
+            5: 'edit_general_config', 6: 'view_logs', 8: 'help', 9: 'exit'
         }
+        # --- FIN DE LA MODIFICACIÓN ---
         
         welcome_menu_options = MENU_STYLE.copy()
         welcome_menu_options['clear_screen'] = False
@@ -233,8 +233,13 @@ def show_welcome_screen(bot_controller: Any):
         elif choice == 'test_positions': _run_position_test(bot_controller)
         elif choice == 'edit_general_config': show_general_config_editor_screen(config_module)
         elif choice == 'view_logs': _log_viewer.show_log_viewer()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        elif choice == 'help':
+            show_help_popup('welcome_screen')
+        # --- FIN DE LA MODIFICACIÓN ---
         elif choice == 'exit' or choice is None:
-            # El menú de confirmación debe limpiar la pantalla para ser el foco
+            # La opción 'clear_screen' en True es necesaria aquí para que el
+            # menú de confirmación aparezca sobre una pantalla limpia.
             confirm_menu_options = MENU_STYLE.copy()
             confirm_menu_options['clear_screen'] = True
             confirm_menu = TerminalMenu(["[1] Sí, apagar el bot", "[2] No, continuar"], title="\n¿Confirmas apagar el bot?", **confirm_menu_options)

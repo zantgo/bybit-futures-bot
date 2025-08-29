@@ -35,24 +35,51 @@ except ImportError:
 
 
 # --- INICIO DE LA MODIFICACIÓN (Paso 3 del Plan - Simplificación del Editor) ---
+# Reemplaza la función show_position_editor_screen completa en core/menu/screens/operation_manager/position_editor/__init__.py
+
+import time
+import uuid
+import copy
+from typing import Any, Dict
+
+try:
+    from simple_term_menu import TerminalMenu
+except ImportError:
+    TerminalMenu = None
+
+from ...._helpers import (
+    clear_screen,
+    print_tui_header,
+    get_input,
+    MENU_STYLE,
+    UserInputCancelled,
+    show_help_popup # <-- Importación añadida
+)
+
+try:
+    from core.strategy.entities import Operacion, LogicalPosition
+    from core.strategy.pm import api as pm_api
+    from core.strategy.om import api as om_api
+    from . import _calculations as calc
+    from . import _displayers as disp
+except ImportError:
+    pm_api = None
+    om_api = None
+    calc = None
+    disp = None
+    class Operacion: pass
+    class LogicalPosition: pass
+
 def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
     """
     Muestra la pantalla interactiva para configurar la lista de posiciones PENDIENTES
     y visualizar el impacto en el riesgo en tiempo real.
-
-    Args:
-        operacion (Operacion): El objeto de operación que se está editando.
-        side (str): El lado de la operación ('long' o 'short').
-
-    Returns:
-        bool: True si se realizaron cambios en la lista de posiciones, False en caso contrario.
     """
     if not all([TerminalMenu, pm_api, om_api, calc, disp]):
         print("Error: Dependencias críticas para el editor de posiciones no están disponibles.")
         time.sleep(3)
         return False
 
-    # Guardamos el estado original para poder cancelar los cambios
     original_positions_state = copy.deepcopy(operacion.posiciones)
     params_changed = False
     
@@ -74,18 +101,20 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
         
         has_pending = any(p.estado == 'PENDIENTE' for p in operacion.posiciones)
         
-        # Menú simplificado enfocado solo en la configuración
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Añadir nueva posición PENDIENTE",
             "[2] Modificar capital de TODAS las PENDIENTES",
             "[3] Eliminar la última PENDIENTE",
             None,
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver al Asistente (Guardar Cambios)"
         ]
 
         if not has_pending:
             menu_items[1] = "[2] Modificar capital... (No hay posiciones PENDIENTES)"
             menu_items[2] = "[3] Eliminar última... (No hay posiciones PENDIENTES)"
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -113,7 +142,6 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
 
             elif choice == 2:
                 if not has_pending: continue
-                # Encontrar el índice de la última posición pendiente
                 last_pending_index = -1
                 for i in range(len(operacion.posiciones) - 1, -1, -1):
                     if operacion.posiciones[i].estado == 'PENDIENTE':
@@ -125,16 +153,19 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
                     print("\nÚltima posición PENDIENTE eliminada."); time.sleep(1.5)
                     params_changed = True
 
-            elif choice == 4 or choice is None:
-                # Si el usuario elige volver, preguntamos si quiere descartar si hubo cambios
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 4: # Índice de Ayuda
+                show_help_popup('wizard_position_editor')
+            # --- FIN DE LA MODIFICACIÓN ---
+            
+            elif choice == 5 or choice is None: # Índice de Volver
                 if params_changed:
                     cancel_menu = TerminalMenu(["[1] Guardar y Volver", "[2] Descartar Cambios y Volver"], title="\nHay cambios sin guardar. ¿Qué deseas hacer?").show()
-                    if cancel_menu == 1: # Descartar
+                    if cancel_menu == 1:
                         operacion.posiciones = original_positions_state
                         return False
-                return params_changed # Devuelve True si hubo cambios y se guardan, False si no hubo cambios
+                return params_changed
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
-
 # --- FIN DE LA MODIFICACIÓN ---

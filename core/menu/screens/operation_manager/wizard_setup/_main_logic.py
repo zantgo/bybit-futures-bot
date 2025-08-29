@@ -37,19 +37,29 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
+# Reemplaza la función _edit_strategy_global_submenu completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+
 def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
+    from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
+    
     while True:
         clear_screen(); print_tui_header("Editando Estrategia Global")
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Apalancamiento ({temp_op.apalancamiento:.1f}x)",
             f"[2] Distancia de Promediación ({temp_op.averaging_distance_pct:.2f}%)",
             f"[3] Reinversión Automática ({'Activada' if temp_op.auto_reinvest_enabled else 'Desactivada'})",
             None,
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver"
         ]
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
-        if choice is None or choice == 4: break
+        
+        if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         try:
             if choice == 0:
                 new_val = get_input("Nuevo Apalancamiento", float, temp_op.apalancamiento, min_val=1.0)
@@ -57,55 +67,75 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
                     temp_op.apalancamiento = new_val
                     params_changed_in_submenu = True
                     
-                    # --- INICIO DE LA SOLUCIÓN DEL BUG ---
-                    # Al cambiar el apalancamiento, debemos recalcular el valor nominal
-                    # de TODAS las posiciones existentes en la operación temporal.
                     for pos in temp_op.posiciones:
                         pos.valor_nominal = pos.capital_asignado * new_val
-                    # --- FIN DE LA SOLUCIÓN DEL BUG ---
                     
             elif choice == 1:
                 new_val = get_input("Nueva Distancia de Promediación (%)", float, temp_op.averaging_distance_pct, min_val=0.01)
                 if new_val != temp_op.averaging_distance_pct: temp_op.averaging_distance_pct = new_val; params_changed_in_submenu = True
+            
             elif choice == 2:
                 reinvest_choice = TerminalMenu(["[1] Activar", "[2] Desactivar"], title="\n¿Activar Reinversión Automática?").show()
                 if reinvest_choice is not None:
                     new_val = reinvest_choice == 0
                     if new_val != temp_op.auto_reinvest_enabled: temp_op.auto_reinvest_enabled = new_val; params_changed_in_submenu = True
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 4: # Índice de Ayuda
+                show_help_popup('wizard_strategy_global')
+            # --- FIN DE LA MODIFICACIÓN ---
+
         except UserInputCancelled: continue
+        
     return params_changed_in_submenu
 
+# Reemplaza la función _edit_individual_risk_submenu completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
 
 def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
+    from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
+    
     while True:
         clear_screen(); print_tui_header("Editando Riesgo por Posición Individual")
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] SL Individual ({temp_op.sl_posicion_individual_pct or 'Desactivado'}%)",
             f"[2] Activación TSL ({temp_op.tsl_activacion_pct or 'Desactivado'}%)",
             f"[3] Distancia TSL ({temp_op.tsl_distancia_pct or 'N/A'}%)",
             None,
+            "[h] Ayuda", # Botón de ayuda añadido
             "[b] Volver"
         ]
         if temp_op.tsl_activacion_pct is None:
             menu_items[2] = "[3] Distancia TSL (N/A - Activa TSL primero)"
 
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
-        if choice is None or choice == 4: break
+        if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         try:
             if choice == 0:
                 new_val = get_input("Nuevo SL Individual (%)", float, temp_op.sl_posicion_individual_pct, min_val=0.0, is_optional=True)
                 if new_val != temp_op.sl_posicion_individual_pct: temp_op.sl_posicion_individual_pct = new_val; params_changed_in_submenu = True
+            
             elif choice == 1:
                 new_val = get_input("Nueva Activación TSL (%)", float, temp_op.tsl_activacion_pct, min_val=0.0, is_optional=True)
                 if new_val != temp_op.tsl_activacion_pct: temp_op.tsl_activacion_pct = new_val; params_changed_in_submenu = True
                 if temp_op.tsl_activacion_pct is None: temp_op.tsl_distancia_pct = None
+            
             elif choice == 2 and temp_op.tsl_activacion_pct is not None:
                 new_val = get_input("Nueva Distancia TSL (%)", float, temp_op.tsl_distancia_pct, min_val=0.01)
                 if new_val != temp_op.tsl_distancia_pct: temp_op.tsl_distancia_pct = new_val; params_changed_in_submenu = True
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 4: # Índice de Ayuda
+                show_help_popup('wizard_risk_individual')
+            # --- FIN DE LA MODIFICACIÓN ---
+            
         except UserInputCancelled: continue
+        
     return params_changed_in_submenu
-
 
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     action = "Modificando" if is_modification else "Creando Nueva"
@@ -190,7 +220,10 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
     
+# Reemplaza la función operation_setup_wizard completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
+    from ...._helpers import show_help_popup # <-- Importación añadida
     config_module = _deps.get("config_module")
     if not config_module:
         print("ERROR CRÍTICO: Módulo de configuración no encontrado."); time.sleep(3); return
@@ -243,8 +276,22 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         print_tui_header(f"Asistente de Operación {side.upper()}")
         _display_setup_box(temp_op, _get_terminal_width(), is_modification)
 
-        menu_items = [ "[1] Gestionar Lista de Posiciones y Simular Riesgo", "[2] Editar Estrategia Global", "[3] Editar Riesgo por Posición Individual", "[4] Editar Gestión de Riesgo de Operación", "[5] Editar Condiciones de Entrada", "[6] Editar Condiciones de Salida", None, "[s] Guardar Cambios", "[c] Cancelar y Volver" ]
-        if is_modification and temp_op.estado == 'ACTIVA': menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
+        # --- INICIO DE LA MODIFICACIÓN ---
+        menu_items = [
+            "[1] Gestionar Lista de Posiciones y Simular Riesgo",
+            "[2] Editar Estrategia Global",
+            "[3] Editar Riesgo por Posición Individual",
+            "[4] Editar Gestión de Riesgo de Operación",
+            "[5] Editar Condiciones de Entrada",
+            "[6] Editar Condiciones de Salida",
+            None,
+            "[h] Ayuda", # Botón de ayuda añadido
+            "[s] Guardar Cambios",
+            "[c] Cancelar y Volver"
+        ]
+        if is_modification and temp_op.estado == 'ACTIVA':
+            menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
+        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
         menu = TerminalMenu(menu_items, title="\nSelecciona una categoría para editar:", **menu_options)
@@ -266,7 +313,13 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 if _submenus_entry._edit_entry_conditions_submenu(temp_op): params_changed = True
             elif choice == 5:
                 if _submenus_exit._edit_exit_conditions_submenu(temp_op): params_changed = True
-            elif choice == 7:
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif choice == 7: # Índice de Ayuda
+                show_help_popup('wizard_main')
+            # --- FIN DE LA MODIFICACIÓN ---
+            
+            elif choice == 8: # Índice de Guardar
                 if not params_changed and is_modification:
                     print("\nNo se realizaron cambios."); time.sleep(1.5); break
                 clear_screen(); print_tui_header("Confirmar Cambios")
@@ -274,7 +327,8 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 if TerminalMenu(["[1] Sí, guardar y aplicar", "[2] No, seguir editando"], title="\n¿Confirmas estos parámetros?").show() == 0:
                     success, msg = om_api.create_or_update_operation(side, temp_op.__dict__)
                     print(f"\n{msg}"); time.sleep(2.5); break
-            elif choice == 8 or choice is None:
+            
+            elif choice == 9 or choice is None: # Índice de Cancelar
                 if params_changed:
                     if TerminalMenu(["[1] Sí, descartar", "[2] No, seguir editando"], title="\n¿Descartar cambios?").show() == 0:
                         print("\nCambios descartados."); time.sleep(1.5); break
