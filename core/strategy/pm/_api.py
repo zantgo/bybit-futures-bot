@@ -76,3 +76,12 @@ def sync_physical_positions(side: str):
     """
     if _pm_instance:
         _pm_instance.sync_physical_positions(side)
+        
+
+def manual_open_next_pending_position(side: str) -> Tuple[bool, str]:
+    """
+    Delega la llamada para abrir manualmente la siguiente posición pendiente.
+    """
+    if not _pm_instance:
+        return False, "PM no instanciado"
+    return _pm_instance.manual_open_next_pending_position(side)

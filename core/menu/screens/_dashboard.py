@@ -324,7 +324,7 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     _render_signal_status_block(summary, config_module, box_width)
     _render_operations_status_block(summary, box_width)
 
-
+# Reemplaza la función show_dashboard_screen completa en _dashboard.py
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
     
@@ -353,12 +353,7 @@ def show_dashboard_screen(session_manager: Any):
         time.sleep(0.2)
 
     while True:
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-        # Se añade clear_screen() al inicio del bucle para asegurar que cada
-        # "frame" del dashboard se dibuje en una pantalla limpia, eliminando
-        # artefactos visuales de iteraciones anteriores o pantallas previas.
         clear_screen()
-        # --- FIN DE LA MODIFICACIÓN ---
 
         error_message = None
         summary = {}
@@ -416,9 +411,14 @@ def show_dashboard_screen(session_manager: Any):
         elif action == 'help':
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
-            # El menú de confirmación debe limpiar la pantalla para ser el foco principal
+            # --- INICIO DE LA SOLUCIÓN ---
+            # Borramos la pantalla manualmente ANTES de mostrar el menú de confirmación.
+            clear_screen()
+            
+            # Le decimos a simple_term_menu que NO borre la pantalla.
             confirm_menu_options = helpers_module.MENU_STYLE.copy()
-            confirm_menu_options['clear_screen'] = True
+            confirm_menu_options['clear_screen'] = False # <-- CORRECCIÓN CLAVE
+            # --- FIN DE LA SOLUCIÓN ---
             confirm_menu = TerminalMenu(["[1] Sí, finalizar sesión", "[2] No, continuar"], title="¿Confirmas finalizar la sesión actual?", **confirm_menu_options)
             if confirm_menu.show() == 0:
                 break

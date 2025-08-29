@@ -187,6 +187,12 @@ class _PrivateLogic:
             return {'success': False, 'message': 'Índice o executor no válido'}
 
         pos_to_close = op_before.posiciones[index]
+        # --- INICIO DE LA CORRECCIÓN DEL BUG: RESETEO DE POSICIÓN ---
+        # Guardamos el ID de la posición antes de cualquier modificación. Este ID es
+        # inmutable y nos servirá para encontrar y resetear el objeto correcto
+        # después de que la operación se actualice.
+        pos_id_to_reset = pos_to_close.id
+
         result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
 
         if result and result.get('success', False):
@@ -198,48 +204,63 @@ class _PrivateLogic:
             self._om_api.actualizar_total_reinvertido(side, reinvest_amount)
             self._om_api.actualizar_comisiones_totales(side, result.get('commission_usdt', 0.0))
             
-            # --- INICIO DE LA MODIFICACIÓN (LÓGICA DE REINVERSIÓN CORREGIDA) ---
-            op_after = self._om_api.get_operation_by_side(side)
-            # Si hay ganancias para reinvertir, las acumulamos en el "bote" del OperationManager.
-            if op_after.auto_reinvest_enabled and reinvest_amount > 0:
-                self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
-            # --- FIN DE LA MODIFICACIÓN ---
+            op_after_updates = self._om_api.get_operation_by_side(side)
             
-            pos_to_reset = next((p for p in op_after.posiciones if p.id == pos_to_close.id), None)
-            if pos_to_reset:
-                # --- LÓGICA DE REINVERSIÓN DIRECTA ELIMINADA DE AQUÍ ---
-                pos_to_reset.estado = 'PENDIENTE'
-                pos_to_reset.entry_timestamp = None
-                pos_to_reset.entry_price = None
-                pos_to_reset.size_contracts = None
-                pos_to_reset.stop_loss_price = None
-                pos_to_reset.est_liq_price = None
-                pos_to_reset.ts_is_active = False
-                pos_to_reset.ts_peak_price = None
-                pos_to_reset.ts_stop_price = None
-                pos_to_reset.api_order_id = None
-                pos_to_reset.api_avg_fill_price = None
-                pos_to_reset.api_filled_qty = None
+            if op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
+                self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
+            
+            # --- LÓGICA DE RESETEO EXPLÍCITO DE LA POSICIÓN CERRADA ---
+            # La lógica anterior era implícita y propensa a errores. Ahora, explícitamente
+            # encontramos la posición que se cerró y la devolvemos a su estado PENDIENTE.
+            
+            # CÓDIGO ANTERIOR COMENTADO (implícito y menos robusto)
+            # pos_to_reset = next((p for p in op_after.posiciones if p.id == pos_to_close.id), None)
+            # if pos_to_reset:
+            #     # La lógica de reseteo estaba aquí, pero era menos clara
+            #     # sobre qué objeto se estaba modificando y en qué momento.
+            
+            # NUEVA LÓGICA
+            pos_to_reset_in_list = next((p for p in op_after_updates.posiciones if p.id == pos_id_to_reset), None)
+            
+            if pos_to_reset_in_list:
+                self._memory_logger.log(f"Reseteando posición ID ...{str(pos_id_to_reset)[-6:]} a estado PENDIENTE.", "INFO")
+                # Restauramos la posición a su estado original para que pueda ser reutilizada.
+                pos_to_reset_in_list.estado = 'PENDIENTE'
+                # Limpiamos todos los datos relacionados con el trade anterior.
+                pos_to_reset_in_list.entry_timestamp = None
+                pos_to_reset_in_list.entry_price = None
+                pos_to_reset_in_list.margin_usdt = None # El margen se recalcula en la reinversión si aplica.
+                pos_to_reset_in_list.size_contracts = None
+                pos_to_reset_in_list.stop_loss_price = None
+                pos_to_reset_in_list.est_liq_price = None
+                pos_to_reset_in_list.ts_is_active = False
+                pos_to_reset_in_list.ts_peak_price = None
+                pos_to_reset_in_list.ts_stop_price = None
+                pos_to_reset_in_list.api_order_id = None
+                pos_to_reset_in_list.api_avg_fill_price = None
+                pos_to_reset_in_list.api_filled_qty = None
+            else:
+                self._memory_logger.log(f"ADVERTENCIA [Close]: No se encontró la posición con ID ...{str(pos_id_to_reset)[-6:]} para resetearla. Esto no debería ocurrir.", "WARN")
 
             params = {
-                'posiciones': op_after.posiciones,
-                'comercios_cerrados_contador': op_after.comercios_cerrados_contador + 1,
+                'posiciones': op_after_updates.posiciones,
+                'comercios_cerrados_contador': op_after_updates.comercios_cerrados_contador + 1,
             }
-            if hasattr(op_after, 'profit_balance_acumulado') and transfer_amount > 0:
-                params['profit_balance_acumulado'] = op_after.profit_balance_acumulado + transfer_amount
+            if hasattr(op_after_updates, 'profit_balance_acumulado') and transfer_amount > 0:
+                params['profit_balance_acumulado'] = op_after_updates.profit_balance_acumulado + transfer_amount
             
             self._om_api.create_or_update_operation(side, params)
             
-            # --- INICIO DE LA MODIFICACIÓN (LLAMADA A DISTRIBUCIÓN) ---
-            # Después de que la posición se ha reseteado, llamamos a la distribución.
-            if op_after.auto_reinvest_enabled and reinvest_amount > 0:
+            # --- FIN DE LA CORRECCIÓN ---
+
+            # La lógica de distribución se llama después de que la operación ha sido actualizada
+            if op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
                 self._om_api.distribuir_reinvestable_profits(side)
-            # --- FIN DE LA MODIFICACIÓN ---
 
             if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
                 # Volvemos a obtener la operación por si la distribución la modificó
                 op_final = self._om_api.get_operation_by_side(side)
-                if op_final: # Añadimos una comprobación por si acaso
+                if op_final:
                     self._position_state.sync_positions_from_operation(op_final)
             
             if side == 'long':
@@ -252,5 +273,70 @@ class _PrivateLogic:
                 _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
             
             self._om_api.revisar_y_transicionar_a_detenida(side)
+        
+        return result
+    
+
+    def _manual_open_position(self, side: str, entry_price: float, timestamp: datetime.datetime) -> dict:
+        """
+        Lógica interna para abrir una posición manualmente. Es casi idéntica a
+        _open_logical_position pero sin la validación de `_can_open_new_position`.
+        Devuelve el diccionario de resultado del ejecutor.
+        """
+        operacion = self._om_api.get_operation_by_side(side)
+        if not operacion:
+            return {'success': False, 'message': f"Operación para el lado {side.upper()} no encontrada."}
+
+        # Encontrar la primera posición pendiente en la lista
+        pending_position = next((pos for pos in operacion.posiciones if pos.estado == 'PENDIENTE'), None)
+        
+        if not pending_position:
+            return {'success': False, 'message': "No se encontró ninguna posición pendiente para abrir manualmente."}
+
+        margin_to_use = pending_position.capital_asignado
+        
+        if margin_to_use < 1.0:
+            msg = f"Apertura omitida ({side.upper()}): Capital asignado ({margin_to_use:.4f} USDT) es menor al umbral mínimo."
+            self._memory_logger.log(msg, level="WARN")
+            return {'success': False, 'message': msg}
+
+        # Llamar al ejecutor con los parámetros de la operación actual
+        result = self._executor.execute_open(
+            side=side, entry_price=entry_price, timestamp=timestamp, 
+            margin_to_use=margin_to_use, 
+            sl_pct=operacion.sl_posicion_individual_pct,
+            tsl_activation_pct=operacion.tsl_activacion_pct,
+            tsl_distance_pct=operacion.tsl_distancia_pct
+        )
+
+        # Si la apertura fue exitosa, actualizar el estado de la operación
+        if result and result.get('success'):
+            new_pos_data = result.get('logical_position_object')
+            if new_pos_data:
+                op_to_update = self._om_api.get_operation_by_side(side)
+                
+                pos_to_update_in_list = next((p for p in op_to_update.posiciones if p.id == pending_position.id), None)
+                
+                if pos_to_update_in_list:
+                    # Actualizar todos los campos de la posición lógica que cambió de estado
+                    pos_to_update_in_list.estado = 'ABIERTA'
+                    pos_to_update_in_list.entry_timestamp = new_pos_data.entry_timestamp
+                    pos_to_update_in_list.entry_price = new_pos_data.entry_price
+                    pos_to_update_in_list.margin_usdt = new_pos_data.margin_usdt
+                    pos_to_update_in_list.size_contracts = new_pos_data.size_contracts
+                    pos_to_update_in_list.stop_loss_price = new_pos_data.stop_loss_price
+                    pos_to_update_in_list.est_liq_price = new_pos_data.est_liq_price
+                    pos_to_update_in_list.api_order_id = new_pos_data.api_order_id
+                    pos_to_update_in_list.api_avg_fill_price = new_pos_data.api_avg_fill_price
+                    pos_to_update_in_list.api_filled_qty = new_pos_data.api_filled_qty
+                    pos_to_update_in_list.tsl_activation_pct_at_open = new_pos_data.tsl_activation_pct_at_open
+                    pos_to_update_in_list.tsl_distance_pct_at_open = new_pos_data.tsl_distance_pct_at_open
+                
+                    # Guardar el estado actualizado de la lista de posiciones
+                    self._om_api.create_or_update_operation(side, {'posiciones': op_to_update.posiciones})
+
+                    # Sincronizar el estado interno del PositionState si existe
+                    if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
+                        self._position_state.sync_positions_from_operation(op_to_update)
         
         return result

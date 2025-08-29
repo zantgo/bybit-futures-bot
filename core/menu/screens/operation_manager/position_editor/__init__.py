@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/menu/screens/operation_manager/position_editor/__init__.py
+# core/menu/screens/operation_manager/position_editor/__init__.py
 
 import time
 import uuid
@@ -34,13 +34,10 @@ except ImportError:
     class LogicalPosition: pass
 
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
+# --- INICIO DE LA MODIFICACIÓN (Paso 3 del Plan - Simplificación del Editor) ---
 def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
     """
-    Muestra la pantalla interactiva para gestionar la lista de posiciones
+    Muestra la pantalla interactiva para configurar la lista de posiciones PENDIENTES
     y visualizar el impacto en el riesgo en tiempo real.
 
     Args:
@@ -55,17 +52,13 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
         time.sleep(3)
         return False
 
+    # Guardamos el estado original para poder cancelar los cambios
     original_positions_state = copy.deepcopy(operacion.posiciones)
     params_changed = False
     
     while True:
         clear_screen()
-        
-        # --- INICIO DE LA CORRECCIÓN: Corregir el nombre de la función ---
-        # Original: print_t_ui_header(...)
-        # Corregido:
         print_tui_header(f"Editor de Posiciones y Riesgo - {side.upper()}")
-        # --- FIN DE LA CORRECCIÓN ---
         
         current_price = pm_api.get_current_market_price() or 0.0
 
@@ -77,32 +70,26 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
 
         disp.display_positions_table(operacion, current_price, side)
         disp.display_strategy_parameters(operacion)
-        
         disp.display_risk_panel(risk_metrics, current_price, side, operacion=operacion)
         
-        has_pending = operacion.posiciones_pendientes_count > 0
-        has_open = operacion.posiciones_abiertas_count > 0
+        has_pending = any(p.estado == 'PENDIENTE' for p in operacion.posiciones)
         
+        # Menú simplificado enfocado solo en la configuración
         menu_items = [
             "[1] Añadir nueva posición PENDIENTE",
             "[2] Modificar capital de TODAS las PENDIENTES",
             "[3] Eliminar la última PENDIENTE",
             None,
-            "[4] Cerrar posición ABIERTA específica",
-            None,
-            "[s] Guardar Cambios y Volver",
-            "[c] Cancelar y Volver (Descartar Cambios)"
+            "[b] Volver al Asistente (Guardar Cambios)"
         ]
 
         if not has_pending:
             menu_items[1] = "[2] Modificar capital... (No hay posiciones PENDIENTES)"
             menu_items[2] = "[3] Eliminar última... (No hay posiciones PENDIENTES)"
-        if not has_open:
-            menu_items[4] = "[4] Cerrar posición... (No hay posiciones ABIERTAS)"
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
-        menu = TerminalMenu(menu_items, title="\nAcciones:", **menu_options)
+        menu = TerminalMenu(menu_items, title="\nAcciones de Configuración:", **menu_options)
         choice = menu.show()
 
         try:
@@ -126,45 +113,28 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
 
             elif choice == 2:
                 if not has_pending: continue
+                # Encontrar el índice de la última posición pendiente
                 last_pending_index = -1
                 for i in range(len(operacion.posiciones) - 1, -1, -1):
                     if operacion.posiciones[i].estado == 'PENDIENTE':
                         last_pending_index = i
                         break
+                
                 if last_pending_index != -1:
                     operacion.posiciones.pop(last_pending_index)
                     print("\nÚltima posición PENDIENTE eliminada."); time.sleep(1.5)
                     params_changed = True
 
-            elif choice == 4:
-                if not has_open: continue
-                open_positions = operacion.posiciones_abiertas
-                submenu_items = [f"Cerrar ID: ...{p.id[-6:]}" for p in open_positions] + ["[c] Cancelar"]
-                
-                close_menu = TerminalMenu(submenu_items, title="Selecciona la posición ABIERTA a cerrar:", **MENU_STYLE)
-                idx_to_close = close_menu.show()
-                
-                if idx_to_close is not None and idx_to_close < len(open_positions):
-                    success, msg = pm_api.manual_close_logical_position_by_index(side, idx_to_close)
-                    print(f"\nResultado: {msg}"); time.sleep(2.5)
-                    if success:
-                        temp_op_refreshed = om_api.get_operation_by_side(side)
-                        if temp_op_refreshed:
-                            operacion.posiciones = temp_op_refreshed.posiciones
-                        params_changed = True
-
-            elif choice == 6:
-                return params_changed
-
-            elif choice == 7 or choice is None:
-                operacion.posiciones = original_positions_state
-                print("\nCambios descartados.")
-                time.sleep(1.5)
-                return False
+            elif choice == 4 or choice is None:
+                # Si el usuario elige volver, preguntamos si quiere descartar si hubo cambios
+                if params_changed:
+                    cancel_menu = TerminalMenu(["[1] Guardar y Volver", "[2] Descartar Cambios y Volver"], title="\nHay cambios sin guardar. ¿Qué deseas hacer?").show()
+                    if cancel_menu == 1: # Descartar
+                        operacion.posiciones = original_positions_state
+                        return False
+                return params_changed # Devuelve True si hubo cambios y se guardan, False si no hubo cambios
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
 
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
+# --- FIN DE LA MODIFICACIÓN ---

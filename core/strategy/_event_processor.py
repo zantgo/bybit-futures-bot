@@ -86,6 +86,8 @@ class EventProcessor:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
 
+    # Reemplaza la función process_event completa en core/strategy/_event_processor.py
+
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
         Orquesta el flujo de trabajo completo para procesar un único evento de precio.
@@ -107,7 +109,11 @@ class EventProcessor:
         try:
             # 1. Heartbeat de Sincronización Proactiva
             for side in ['long', 'short']:
+                # --- INICIO DE LA SOLUCIÓN: Corregir la llamada ---
+                # La llamada debe ser a la fachada de la API (_pm_api) que a su vez
+                # llama a la instancia. Esto respeta la arquitectura del bot.
                 self._pm_api.sync_physical_positions(side)
+                # --- FIN DE LA SOLUCIÓN ---
 
             # 2. Comprobar Triggers de la Operación (lógica predictiva de liquidación, SL/TP, etc.)
             self._check_operation_triggers(current_price)
@@ -127,7 +133,7 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-
+                
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick

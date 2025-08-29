@@ -6,7 +6,7 @@ mostrar (imprimir en la consola) secciones de información específicas, como
 los detalles de la operación, las estadísticas de capital o las tablas de posiciones.
 Estas funciones son "vistas puras": solo renderizan los datos que reciben.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import datetime
 import shutil
 import re
@@ -350,25 +350,41 @@ def _display_operation_conditions(operacion: Operacion):
         # --- Condición de Entrada ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mCondición de Entrada\033[0m", box_width, 'center'))
-
-        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
-        # Se reemplaza la lógica que usaba 'condiciones_entrada' por la que usa los nuevos atributos.
-        # if not operacion.condiciones_entrada and not operacion.tiempo_espera_minutos: # <-- LÍNEA ORIGINAL COMENTADA
-        if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
-            entry_cond_str = "- Inmediata (Market)"
-        else:
-            entry_conds = []
-            if operacion.cond_entrada_above is not None:
-                entry_conds.append(f"Precio > {operacion.cond_entrada_above:.4f}")
-            if operacion.cond_entrada_below is not None:
-                entry_conds.append(f"Precio < {operacion.cond_entrada_below:.4f}")
-            if operacion.tiempo_espera_minutos:
-                entry_conds.append(f"Tras {operacion.tiempo_espera_minutos} min")
-            entry_cond_str = f"- {' O '.join(entry_conds)}"
         
-        print(_create_box_line(f"  {entry_cond_str}", box_width))
-        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
+        # --- CÓDIGO ORIGINAL COMENTADO: Usaba atributos antiguos y unía todas las condiciones en una sola línea confusa. ---
+        # # Se reemplaza la lógica que usaba 'condiciones_entrada' por la que usa los nuevos atributos.
+        # # if not operacion.condiciones_entrada and not operacion.tiempo_espera_minutos: # <-- LÍNEA ORIGINAL CON ATRIBUTO ANTIGUO
+        # if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
+        #     entry_cond_str = "- Inmediata (Market)"
+        # else:
+        #     entry_conds = []
+        #     if operacion.cond_entrada_above is not None:
+        #         entry_conds.append(f"Precio > {operacion.cond_entrada_above:.4f}")
+        #     if operacion.cond_entrada_below is not None:
+        #         entry_conds.append(f"Precio < {operacion.cond_entrada_below:.4f}")
+        #     if operacion.tiempo_espera_minutos:
+        #         entry_conds.append(f"Tras {operacion.tiempo_espera_minutos} min")
+        #     entry_cond_str = f"- {' O '.join(entry_conds)}"
+        # print(_create_box_line(f"  {entry_cond_str}", box_width))
+        # --- FIN DEL CÓDIGO COMENTADO ---
 
+        # --- INICIO DE LA LÓGICA CORREGIDA: Muestra cada condición de forma clara en su propia línea. ---
+        has_any_entry_condition = any([
+            operacion.cond_entrada_above is not None,
+            operacion.cond_entrada_below is not None,
+            operacion.tiempo_espera_minutos is not None
+        ])
+
+        if not has_any_entry_condition:
+            print(_create_box_line("  - Inmediata (Market)", box_width))
+        else:
+            if operacion.cond_entrada_above is not None:
+                print(_create_box_line(f"  - Activar si Precio > {operacion.cond_entrada_above:.4f}", box_width))
+            if operacion.cond_entrada_below is not None:
+                print(_create_box_line(f"  - Activar si Precio < {operacion.cond_entrada_below:.4f}", box_width))
+            if operacion.tiempo_espera_minutos:
+                print(_create_box_line(f"  - Activar tras esperar {operacion.tiempo_espera_minutos} minutos", box_width))
+        # --- FIN DE LA LÓGICA CORREGIDA ---
 
         # --- Gestión de Riesgo de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -400,20 +416,20 @@ def _display_operation_conditions(operacion: Operacion):
                 tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         print(_create_box_line(f"  - {tsl_roi_str}", box_width))
         
-        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
+        # --- CÓDIGO ORIGINAL COMENTADO: Usaba el atributo antiguo 'accion_por_riesgo_roi'. ---
         # Se reemplaza 'accion_por_riesgo_roi' por los nuevos atributos específicos
         # print(_create_box_line(f"  - Acción por Riesgo de ROI: {operacion.accion_por_riesgo_roi}", box_width)) # <-- LÍNEA ORIGINAL COMENTADA
+        # --- LÓGICA CORREGIDA: Usa los nuevos atributos para mayor granularidad. ---
         print(_create_box_line(f"  - Acción por SL/TP ROI: {operacion.accion_por_sl_tp_roi}", box_width))
         print(_create_box_line(f"  - Acción por TSL ROI: {operacion.accion_por_tsl_roi}", box_width))
-        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
 
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA CORRECCIÓN DEL AttributeERROR ---
-        # Se reemplaza la lógica que usaba 'condiciones_salida_precio' por la que usa los nuevos atributos.
+        # NOTA: La lógica de esta sección ya era correcta y usaba los atributos nuevos.
+        # Se mantiene sin cambios para preservar la funcionalidad.
         exit_limits = []
         if operacion.cond_salida_above:
             cond = operacion.cond_salida_above
@@ -422,7 +438,6 @@ def _display_operation_conditions(operacion: Operacion):
         if operacion.cond_salida_below:
             cond = operacion.cond_salida_below
             exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
-        # --- FIN DE LA CORRECCIÓN DEL AttributeERROR ---
         
         if operacion.tiempo_maximo_min is not None:
             exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")

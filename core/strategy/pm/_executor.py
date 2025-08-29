@@ -52,6 +52,7 @@ class PositionExecutor:
         
         memory_logger.log("[PositionExecutor] Inicializado.", level="INFO")
 
+    # Reemplaza la función execute_open completa en _executor.py
     def execute_open(self, side: str, entry_price: float, timestamp: datetime.datetime, margin_to_use: float, sl_pct: float, tsl_activation_pct: float, tsl_distance_pct: float) -> Dict[str, Any]:
         """Orquesta la apertura de una posición a través de la interfaz de exchange."""
         result = {'success': False, 'api_order_id': None, 'logical_position_object': None, 'message': 'Error no especificado'}
@@ -78,7 +79,7 @@ class PositionExecutor:
                         current_leverage = float(position_info.get('leverage', 0))
                         if abs(current_leverage - leverage) > 1e-9:
                             memory_logger.log(f"WARN [Executor]: Desincronización de apalancamiento detectada en '{account_name}'. "
-                                              f"Exchange: {current_leverage}x, Bot: {leverage}x. Corrigiendo...", level="WARN")
+                                            f"Exchange: {current_leverage}x, Bot: {leverage}x. Corrigiendo...", level="WARN")
                             
                             success = self._exchange.set_leverage(symbol=self._symbol, leverage=leverage, account_purpose=account_purpose)
                             if not success:
@@ -162,8 +163,16 @@ class PositionExecutor:
                     api_order_id = order_id_or_error
                     memory_logger.log(f"  -> ÉXITO EXCHANGE: Orden Market aceptada. OrderID: {api_order_id}")
                 else:
-                    result['message'] = f"Fallo en Exchange al colocar orden Market: {order_id_or_error}"
-                    memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
+                    # --- INICIO DE LA SOLUCIÓN: Manejo de error específico ---
+                    # Comprobamos si el mensaje de error indica fondos insuficientes
+                    if "ab not enough for new order" in order_id_or_error or "110007" in order_id_or_error:
+                        result['message'] = f"Fondos insuficientes en la cuenta '{account_purpose}' para abrir la posición."
+                        # Logueamos un WARN porque es un error operativo, no un crash.
+                        memory_logger.log(f"  -> ADVERTENCIA EXCHANGE: {result['message']}", level="WARN")
+                    else:
+                        result['message'] = f"Fallo en Exchange al colocar orden Market: {order_id_or_error}"
+                        memory_logger.log(f"  -> ERROR EXCHANGE: {result['message']}", level="ERROR")
+                    # --- FIN DE LA SOLUCIÓN ---
             except Exception as exec_err:
                 result['message'] = f"Excepción durante ejecución de orden: {exec_err}"
 

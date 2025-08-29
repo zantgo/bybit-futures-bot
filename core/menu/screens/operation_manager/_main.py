@@ -1,10 +1,7 @@
+# core/menu/screens/operation_manager/_main.py
+
 """
 Módulo Principal del Panel de Control de Operación.
-
-v9.3 (Corrección de UI en Detener Operación):
-- Se añade un bloque de renderizado para el nuevo estado 'DETENIENDO',
-  evitando que el menú de acciones desaparezca y proporcionando feedback
-  visual al usuario durante el proceso de cierre.
 """
 import time
 import datetime
@@ -16,11 +13,13 @@ try:
 except ImportError:
     TerminalMenu = None
 
-# Importar los submódulos de displayers y wizards que contienen las funciones auxiliares
 from . import _displayers
 from . import _wizards
+# --- INICIO DE LA MODIFICACIÓN (Paso 4 del Plan) ---
+# Importar el nuevo módulo del gestor manual
+from . import manual_position_manager
+# --- FIN DE LA MODIFICACIÓN ---
 
-# Importar helpers y entidades necesarios
 from ..._helpers import (
     clear_screen,
     print_tui_header,
@@ -30,22 +29,18 @@ from ..._helpers import (
 )
 
 try:
-    # Se corrige la importación para usar la entidad correcta desde su ubicación central
     from core.strategy.entities import Operacion
     import config as config_module
 except ImportError:
     class Operacion: pass
     config_module = None
 
-# --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
 def init(dependencies: Dict[str, Any]):
     """Recibe las dependencias inyectadas desde el __init__.py del módulo."""
     global _deps
     _deps = dependencies
-
-# --- LÓGICA DE LA PANTALLA PRINCIPAL ---
 
 def show_operation_manager_screen(side_filter: Optional[str] = None):
     """
@@ -63,11 +58,8 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
         return
 
     while True:
-        # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-        # Se añade clear_screen() al inicio del bucle del selector de operaciones.
+        # Añadir clear_screen para una transición limpia desde el dashboard
         clear_screen()
-        # --- FIN DE LA MODIFICACIÓN ---
-        
         print_tui_header("Panel de Control de Operaciones")
 
         try:
@@ -80,7 +72,7 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
                  continue
 
             def get_op_status_str(op: Operacion) -> str:
-                if op.estado == 'DETENIDA':
+                if not op or op.estado == 'DETENIDA':
                     return "Estado: DETENIDA"
                 return f"Tendencia: {op.tendencia} (Estado: {op.estado})"
 
@@ -91,7 +83,11 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
                 "[b] Volver al Dashboard"
             ]
             
-            selector_menu = TerminalMenu(menu_items, title="Selecciona qué operación deseas gestionar:", **MENU_STYLE)
+            # El menú principal sí debe limpiar la pantalla
+            menu_options = MENU_STYLE.copy()
+            menu_options['clear_screen'] = True
+            
+            selector_menu = TerminalMenu(menu_items, title="Selecciona qué operación deseas gestionar:", **menu_options)
             choice = selector_menu.show()
 
             if choice == 0:
@@ -100,8 +96,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
                 _show_single_operation_view('short')
             elif choice == 3 or choice is None:
                 break
-            else:
-                continue
         
         except Exception as e:
             print(f"\n\033[91mERROR CRÍTICO en el selector de operaciones: {e}\033[0m")
@@ -131,28 +125,19 @@ def _show_single_operation_view(side: str):
             summary = sm_api.get_session_summary()
             current_price = summary.get('current_market_price', 0.0)
             
-            ticker_symbol = "N/A"
-            if config_module and hasattr(config_module, 'BOT_CONFIG'):
-                 ticker_symbol = config_module.BOT_CONFIG.get("TICKER", {}).get("SYMBOL", "N/A")
-
             operation_status = operacion.estado if operacion.estado else "DESCONOCIDO"
             header_title = f"Panel de Operación {side.upper()}: {operation_status.upper()} @ {current_price:.4f} USDT"
             
             now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
             
-            # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-            # El clear_screen() se mantiene aquí, es correcto para el bucle
-            # de una vista detallada.
             clear_screen()
-            # --- FIN DE LA MODIFICACIÓN ---
-            
             print_tui_header(title=header_title, subtitle=now_str)
 
             if not summary or summary.get('error'):
                 error_msg = summary.get('error', 'No se pudo obtener el estado de la operación.')
                 print(f"\n\033[91mADVERTENCIA: {error_msg}\033[0m")
                 menu_items = ["[r] Reintentar", "[b] Volver"]
-                menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
+                menu_options = MENU_STYLE.copy()
                 choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
                 if choice == 0: continue
                 else: break
@@ -166,114 +151,78 @@ def _show_single_operation_view(side: str):
             actions = []
             current_state = operacion.estado
 
+            # --- INICIO DE LA MODIFICACIÓN (Paso 4 del Plan - Reestructuración del Menú) ---
             if current_state == 'DETENIDA':
                 menu_items.append("[1] Configurar e Iniciar Nueva Operación")
                 actions.append("start_new")
-            elif current_state == 'PAUSADA':
-                menu_items.append("[1] Reanudar Operación")
-                actions.append("resume")
-                menu_items.append("[2] Modificar Parámetros")
+            else: # Para todos los demás estados activos (ACTIVA, PAUSADA, EN_ESPERA)
+                menu_items.append("[1] Gestionar Posiciones Manualmente (Abrir/Cerrar)")
+                actions.append("manual_manage")
+                
+                if current_state == 'PAUSADA':
+                    menu_items.append("[2] Reanudar Operación")
+                    actions.append("resume")
+                elif current_state in ['ACTIVA', 'EN_ESPERA']:
+                    menu_items.append("[2] Pausar Operación")
+                    actions.append("pause")
+
+                menu_items.append("[3] Modificar Parámetros de la Operación")
                 actions.append("modify")
-                menu_items.append("[3] Detener Operación (Cierre Forzoso)")
+                menu_items.append("[4] Detener Operación (Cierre Forzoso de Posiciones)")
                 actions.append("stop")
-            elif current_state == 'EN_ESPERA':
-                menu_items.append("[1] Pausar Operación")
-                actions.append("pause")
-                menu_items.append("[2] Forzar Inicio (Activar Manualmente)")
-                actions.append("force_start")
-                menu_items.append("[3] Modificar Parámetros")
-                actions.append("modify")
-                menu_items.append("[4] Detener Operación (Cierre Forzoso)")
-                actions.append("stop")
-            elif current_state == 'ACTIVA':
-                menu_items.append("[1] Pausar Operación")
-                actions.append("pause")
-                menu_items.append("[2] Modificar Parámetros")
-                actions.append("modify")
-                menu_items.append("[3] Detener Operación (Cierre Forzoso)")
-                actions.append("stop")
-            elif current_state == 'DETENIENDO':
+
+            # La opción de forzar inicio solo aparece en EN_ESPERA
+            if current_state == 'EN_ESPERA':
+                # Insertar en la posición 2 del menú (después de Pausar)
+                menu_items.insert(2, "[ ] ---")
+                menu_items.insert(3, "[*] Forzar Inicio (Activar Manualmente)")
+                actions.insert(2, None)
+                actions.insert(3, "force_start")
+            # --- FIN DE LA MODIFICACIÓN ---
+
+            if current_state == 'DETENIENDO':
                 print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
                 print("   Cerrando posiciones y reseteando estado. La pantalla se refrescará automáticamente.")
                 time.sleep(2)
                 continue
-
-            open_positions_count = operacion.posiciones_abiertas_count
-            if open_positions_count > 0 and current_state not in ['DETENIDA', 'DETENIENDO']:
-                next_idx = len(menu_items)
-                menu_items.append(f"[{next_idx + 1}] CIERRE DE PÁNICO (Cerrar {open_positions_count} Posiciones)")
-                actions.append("panic_close")
-
+            
             menu_items.extend([None, "[r] Refrescar", "[h] Ayuda", "[b] Volver"])
-            actions.extend([None, "refresh", "help", "back"])
             
             menu_options = MENU_STYLE.copy()
-            menu_options['clear_screen'] = False
             
-            main_menu = TerminalMenu(
-                [item for item in menu_items if item is not None],
-                title="\nAcciones:", 
-                **menu_options
-            )
+            # Usamos list comprehension para filtrar los None y construir el menú y el mapa de acciones
+            final_menu_items = [item for item in menu_items if item is not None]
+            final_actions = [action for action in actions if action is not None]
+            
+            main_menu = TerminalMenu(final_menu_items, title="\nAcciones:", **menu_options)
             choice_index = main_menu.show()
             
-            action = None
-            if choice_index is not None:
-                selectable_actions = [act for act in actions if act is not None]
-                if choice_index < len(selectable_actions):
-                    action = selectable_actions[choice_index]
+            action = final_actions[choice_index] if choice_index is not None and choice_index < len(final_actions) else None
             
-            if action == "start_new": 
-                _wizards.operation_setup_wizard(om_api, side, is_modification=False)
-            elif action == "modify": 
-                _wizards.operation_setup_wizard(om_api, side, is_modification=True)
-            elif action == "pause":
-                om_api.pausar_operacion(side)
-                time.sleep(0.2)
-            elif action == "resume":
-                om_api.reanudar_operacion(side)
-                time.sleep(0.2)
+            if choice_index is not None and "Volver" in final_menu_items[choice_index]:
+                action = "back"
+            elif choice_index is not None and "Refrescar" in final_menu_items[choice_index]:
+                action = "refresh"
+            elif choice_index is not None and "Ayuda" in final_menu_items[choice_index]:
+                action = "help"
+            
+            if action == "start_new": _wizards.operation_setup_wizard(om_api, side, is_modification=False)
+            elif action == "modify": _wizards.operation_setup_wizard(om_api, side, is_modification=True)
+            elif action == "manual_manage": manual_position_manager.show_manual_position_manager_screen(side)
+            elif action == "pause": om_api.pausar_operacion(side); time.sleep(0.2)
+            elif action == "resume": om_api.reanudar_operacion(side); time.sleep(0.2)
             elif action == "force_start":
-                # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-                # Se asegura que el menú de confirmación limpie la pantalla.
-                confirm_options = MENU_STYLE.copy()
-                confirm_options['clear_screen'] = True
-                confirm_menu = TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?", **confirm_options)
-                if confirm_menu.show() == 0:
-                # --- FIN DE LA MODIFICACIÓN ---
-                    om_api.forzar_activacion_manual(side)
-                    time.sleep(0.2)
-            
+                if TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show() == 0:
+                    om_api.forzar_activacion_manual(side); time.sleep(0.2)
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
-                # --- INICIO DE LA MODIFICACIÓN (Objetivo: UI Consistente) ---
-                # Se asegura que el menú de confirmación limpie la pantalla.
-                confirm_options = MENU_STYLE.copy()
-                confirm_options['clear_screen'] = True
-                confirm_menu = TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title, **confirm_options)
-                # --- FIN DE LA MODIFICACIÓN ---
-                
-                if confirm_menu.show() == 0:
+                if TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title).show() == 0:
                     print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")
-                    try:
-                        success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
-                        if success:
-                            print(f"\033[92mÉXITO:\033[0m {message}")
-                        else:
-                            print(f"\033[91mERROR:\033[0m {message}")
-                    except Exception as e:
-                        print(f"\033[91mERROR CRÍTICO:\033[0m Excepción inesperada: {e}")
-                    
-                    time.sleep(2.5)
-
-            elif action == "panic_close": 
-                _wizards.force_close_all_wizard(pm_api, side)
-            elif action == "refresh": 
-                continue
-            elif action == "help": 
-                show_help_popup("auto_mode")
-            elif action == "back" or action is None:
-                break
+                    success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                    print(f"\nResultado: {'ÉXITO' if success else 'FALLO'} - {message}"); time.sleep(2.5)
+            elif action == "refresh": continue
+            elif action == "help": show_help_popup("auto_mode")
+            elif action == "back" or action is None: break
         
         except Exception as e:
             clear_screen()

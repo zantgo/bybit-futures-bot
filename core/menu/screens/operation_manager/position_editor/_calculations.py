@@ -1,5 +1,3 @@
-# Contenido completo y corregido para: core/menu/screens/operation_manager/position_editor/_calculations.py
-
 from typing import List, Dict, Optional
 import numpy as np
 
@@ -20,19 +18,12 @@ except ImportError:
 
 # --- Función de Cálculo Base ---
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-
 def calculate_avg_entry_and_liquidation(
     positions: List[LogicalPosition], 
     leverage: float, 
     side: str
 ) -> Dict[str, Optional[float]]:
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Importamos la función de cálculo de bajo nivel que YA está corregida
     from core.strategy.pm._calculations import calculate_liquidation_price
-    # --- FIN DE LA CORRECCIÓN ---
     
     if not positions:
         return {'avg_entry_price': None, 'liquidation_price': None}
@@ -48,19 +39,12 @@ def calculate_avg_entry_and_liquidation(
     if not avg_entry_price or avg_entry_price <= 0:
         return {'avg_entry_price': avg_entry_price, 'liquidation_price': None}
     
-    # --- INICIO DE LA CORRECCIÓN ---
-    # Ahora llamamos a la función central y corregida para el cálculo final
     liquidation_price = calculate_liquidation_price(side, avg_entry_price, leverage)
-    # --- FIN DE LA CORRECCIÓN ---
 
     return {
         'avg_entry_price': avg_entry_price,
         'liquidation_price': liquidation_price
     }
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================
 
 # --- Funciones de Simulación y Cobertura (Corregidas) ---
 
@@ -146,11 +130,9 @@ def simulate_max_positions(
     max_coverage_pct = abs(((start_price - final_price) / start_price) * 100)
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
+
 # ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
+# --- INICIO DEL CÓDIGO CORREGIDO (Función Única) ---
 # ==============================================================================
 
 def calculate_projected_risk_metrics(
@@ -168,14 +150,12 @@ def calculate_projected_risk_metrics(
     pending_positions = [p for p in all_positions if p.estado == 'PENDIENTE']
     
     # --- 1. Cálculo de Métricas ACTUALES (basado solo en posiciones abiertas) ---
-    # --- INICIO DE LA CORRECCIÓN: Recalcular tamaño y promedio para métricas actuales ---
     live_avg_price = None
     live_total_size = 0.0
     if open_positions:
         live_total_value = 0.0
         for pos in open_positions:
             if pos.entry_price is None or pos.entry_price <= 0: continue
-            # Recalcula el tamaño usando el apalancamiento actual de la operación
             size = utils.safe_division(pos.capital_asignado * leverage, pos.entry_price)
             if size > 0:
                 live_total_value += pos.entry_price * size
@@ -185,7 +165,6 @@ def calculate_projected_risk_metrics(
     live_liq_price = None
     if live_avg_price:
         live_liq_price = pm_calculations.calculate_liquidation_price(side, live_avg_price, leverage)
-    # --- FIN DE LA CORRECCIÓN ---
 
     # --- 2. Determinación del Punto de Partida para la Simulación ---
     start_price_for_simulation = current_market_price
@@ -200,7 +179,6 @@ def calculate_projected_risk_metrics(
     )
 
     # --- 4. Simulación de Agregados Proyectados (abiertas + pendientes) ---
-    # Se recalcula el tamaño de las posiciones abiertas con el apalancamiento actual
     sim_total_value = 0
     sim_total_size = 0
     if open_positions:
@@ -234,9 +212,18 @@ def calculate_projected_risk_metrics(
 
     # --- 5. Cálculo del Precio Objetivo de ROI Proyectado ---
     projected_roi_target_price = None
-    sl_roi_pct_target = operacion.sl_roi_pct
+    sl_roi_pct_target = None # Inicializar como None
+
+    # --- INICIO DE LA LÓGICA CORREGIDA ---
     if operacion.dynamic_roi_sl_enabled:
-        sl_roi_pct_target = None # El modo dinámico no se proyecta
+        # Si es dinámico, calculamos el objetivo AHORA, basado en el ROI actual.
+        realized_roi = operacion.realized_twrr_roi # Será 0.0 si no hay trades cerrados.
+        trail_pct = operacion.dynamic_roi_sl_trail_pct or 0.0
+        sl_roi_pct_target = realized_roi - trail_pct
+    else:
+        # Si es manual, simplemente usamos el valor configurado.
+        sl_roi_pct_target = operacion.sl_roi_pct
+    # --- FIN DE LA LÓGICA CORREGIDA ---
         
     if sl_roi_pct_target is not None:
         all_positions_dicts = [p.__dict__ for p in all_positions]
@@ -274,5 +261,5 @@ def calculate_projected_risk_metrics(
     return final_metrics
 
 # ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
+# --- FIN DEL CÓDIGO CORREGIDO ---
 # ==============================================================================

@@ -50,55 +50,88 @@ class _ApiActions:
         
         return success, message
 
+    # Reemplaza la función close_all_logical_positions completa en _api_actions.py
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
         """
         Cierra TODAS las posiciones lógicas de un lado.
         Ahora devuelve una tupla (bool, str) con el resultado.
         """
+        # --- INICIO DE LA SOLUCIÓN: Activar la bandera y usar try...finally ---
+        self._manual_close_in_progress = True
+        self._memory_logger.log(f"Bandera de cierre manual ACTIVADA para {side.upper()}.", "DEBUG")
+        try:
+        # --- FIN DE LA SOLUCIÓN ---
+            price = self.get_current_market_price()
+            if not price: 
+                msg = f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}."
+                self._memory_logger.log(msg, level="ERROR")
+                return False, msg
+            
+            operacion = self._om_api.get_operation_by_side(side)
+            
+            if not operacion:
+                msg = f"CIERRE TOTAL FALLIDO: No se encontró la operación para el lado {side.upper()}."
+                self._memory_logger.log(msg, level="ERROR")
+                return False, msg
+            
+            all_positions = operacion.posiciones
+            indices_to_close = [i for i, p in enumerate(all_positions) if p.estado == 'ABIERTA']
+            
+            count = len(indices_to_close)
+            
+            if count == 0:
+                return True, f"No hay posiciones {side.upper()} para cerrar."
+            
+            self._memory_logger.log(f"Iniciando cierre de {count} posiciones del lado {side.upper()}...", "INFO")
+            
+            success_count = 0
+            for index_to_close in sorted(indices_to_close, reverse=True):
+                result = self._close_logical_position(side, index_to_close, price, datetime.datetime.now(timezone.utc), reason)
+                if result and result.get('success', False):
+                    success_count += 1
+            
+            if success_count == count:
+                return True, f"Éxito: Se enviaron órdenes de cierre para las {count} posiciones {side.upper()}."
+            else:
+                msg = f"Advertencia: Solo se pudieron cerrar {success_count} de {count} posiciones {side.upper()}."
+                self._memory_logger.log(msg, level="WARN")
+                return False, msg
+        # --- INICIO DE LA SOLUCIÓN: Bloque finally para desactivar la bandera ---
+        finally:
+            self._manual_close_in_progress = False
+            self._memory_logger.log(f"Bandera de cierre manual DESACTIVADA para {side.upper()}.", "DEBUG")
+        # --- FIN DE LA SOLUCIÓN ---
+        
+    def manual_open_next_pending_position(self, side: str) -> Tuple[bool, str]:
+        """
+        Abre manualmente la primera posición lógica PENDIENTE de una operación,
+        ignorando la condición de distancia de promediación.
+        """
         price = self.get_current_market_price()
-        if not price: 
-            msg = f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}."
-            self._memory_logger.log(msg, level="ERROR")
-            return False, msg
-        
+        if not price:
+            return False, "No se pudo obtener el precio de mercado actual para la apertura."
+            
         operacion = self._om_api.get_operation_by_side(side)
-        
         if not operacion:
-            msg = f"CIERRE TOTAL FALLIDO: No se encontró la operación para el lado {side.upper()}."
-            self._memory_logger.log(msg, level="ERROR")
-            return False, msg
+            return False, f"No se encontró la operación para el lado {side.upper()}."
+
+        if operacion.estado not in ['ACTIVA', 'PAUSADA']:
+            return False, f"La apertura manual solo es posible si la operación está ACTIVA o PAUSADA. Estado actual: {operacion.estado}"
+
+        # Llamar a la nueva función de lógica privada (que crearemos en el siguiente paso)
+        # El método _manual_open_position se encargará de toda la lógica y ejecución.
+        result = self._manual_open_position(
+            side=side,
+            entry_price=price,
+            timestamp=datetime.datetime.now(timezone.utc)
+        )
         
-        # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-        # La lógica anterior creaba un diccionario {'pos': objeto, 'index': int}, lo cual causaba el error.
-        # La nueva lógica, similar a la de _workflow.py, trabaja directamente con los índices.
+        # Procesar la respuesta del ejecutor
+        success = result and result.get('success', False)
+        message = result.get('message', 'Fallo al enviar la orden de apertura.')
         
-        all_positions = operacion.posiciones
-        # 1. Obtenemos una lista de los índices de las posiciones que están abiertas.
-        indices_to_close = [i for i, p in enumerate(all_positions) if p.estado == 'ABIERTA']
-        
-        count = len(indices_to_close)
-        # --- FIN DE LA MODIFICACIÓN ---
-        
-        if count == 0:
-            return True, f"No hay posiciones {side.upper()} para cerrar."
-        
-        self._memory_logger.log(f"Iniciando cierre de {count} posiciones del lado {side.upper()}...", "INFO")
-        
-        success_count = 0
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # 2. Iteramos sobre los índices en orden inverso para evitar problemas al modificar la lista.
-        #    La llamada a _close_logical_position ahora es directa y correcta.
-        # for pos_info in sorted(positions_to_close_with_indices, key=lambda x: x['original_index'], reverse=True): # <-- LÍNEA ORIGINAL
-        for index_to_close in sorted(indices_to_close, reverse=True):
-            # index_to_close = pos_info['original_index'] # <-- LÍNEA ORIGINAL
-            result = self._close_logical_position(side, index_to_close, price, datetime.datetime.now(timezone.utc), reason)
-            if result and result.get('success', False):
-                success_count += 1
-        # --- FIN DE LA MODIFICACIÓN ---
-        
-        if success_count == count:
-            return True, f"Éxito: Se enviaron órdenes de cierre para las {count} posiciones {side.upper()}."
-        else:
-            msg = f"Advertencia: Solo se pudieron cerrar {success_count} de {count} posiciones {side.upper()}."
-            self._memory_logger.log(msg, level="WARN")
-            return False, msg
+        if not success and 'message' not in result:
+             # Si no hay mensaje específico, ponemos uno genérico
+             message = result.get('error', message)
+
+        return success, message
