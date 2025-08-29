@@ -139,35 +139,46 @@ class OperationManager:
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                 
-                # --- INICIO DE LA SOLUCIÓN DEL BUG CRÍTICO ---
-                # Si la operación está en proceso de detención, no permitimos que ninguna
-                # lógica la reactive. Se delega la transición final a DETENIDA a la función
-                # 'revisar_y_transicionar_a_detenida'.
                 if estado_original == 'DETENIENDO':
                     return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
-                # --- FIN DE LA SOLUCIÓN DEL BUG CRÍTICO ---
 
+                # --- INICIO DE LA LÓGICA DE TRANSICIÓN DE ESTADO CORREGIDA Y ROBUSTA ---
                 estado_nuevo = target_op.estado
-                
+
+                # Determina si la configuración actual es para una entrada a mercado o condicional.
                 is_market_entry = all(v is None for v in [
                     target_op.cond_entrada_above,
                     target_op.cond_entrada_below,
                     target_op.tiempo_espera_minutos
                 ])
                 
-                if is_market_entry:
-                    if estado_original != 'ACTIVA':
+                # Caso 1: La operación está DETENIDA y se está configurando por primera vez.
+                if estado_original == 'DETENIDA':
+                    if is_market_entry:
                         estado_nuevo = 'ACTIVA'
-                        target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
+                        target_op.estado_razon = "Operación iniciada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
                         if not target_op.tiempo_inicio_ejecucion:
                             target_op.tiempo_inicio_ejecucion = now
-                elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
+                    else: # Si tiene cualquier condición de entrada, pasa a EN_ESPERA.
+                        estado_nuevo = 'EN_ESPERA'
+                        target_op.estado_razon = "Operación en espera de condición de entrada."
+                        if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
+                            target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+                
+                # Caso 2: La operación está PAUSADA y el usuario AÑADE una nueva condición de entrada.
+                # Esto es una acción explícita para "re-armar" la operación.
+                elif estado_original == 'PAUSADA' and any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']):
                     estado_nuevo = 'EN_ESPERA'
-                    target_op.estado_razon = "Operación en espera de nueva condición de entrada."
+                    target_op.estado_razon = "Operación re-armada, en espera de nueva condición de entrada."
                     if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+
+                # Si no se cumple ninguna de estas condiciones explícitas de transición, el estado no se cambia.
+                # Esto previene la "resurrección" automática de un estado PAUSADO.
+                
+                # --- FIN DE LA LÓGICA DE TRANSICIÓN DE ESTADO CORREGIDA Y ROBUSTA ---
 
                 if estado_nuevo != estado_original:
                     self._memory_logger.log(
