@@ -1,4 +1,4 @@
-# core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+# ./core/menu/screens/operation_manager/wizard_setup/_main_logic.py
 
 import time
 import uuid
@@ -53,7 +53,17 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
         try:
             if choice == 0:
                 new_val = get_input("Nuevo Apalancamiento", float, temp_op.apalancamiento, min_val=1.0)
-                if new_val != temp_op.apalancamiento: temp_op.apalancamiento = new_val; params_changed_in_submenu = True
+                if new_val != temp_op.apalancamiento:
+                    temp_op.apalancamiento = new_val
+                    params_changed_in_submenu = True
+                    
+                    # --- INICIO DE LA SOLUCIÓN DEL BUG ---
+                    # Al cambiar el apalancamiento, debemos recalcular el valor nominal
+                    # de TODAS las posiciones existentes en la operación temporal.
+                    for pos in temp_op.posiciones:
+                        pos.valor_nominal = pos.capital_asignado * new_val
+                    # --- FIN DE LA SOLUCIÓN DEL BUG ---
+                    
             elif choice == 1:
                 new_val = get_input("Nueva Distancia de Promediación (%)", float, temp_op.averaging_distance_pct, min_val=0.01)
                 if new_val != temp_op.averaging_distance_pct: temp_op.averaging_distance_pct = new_val; params_changed_in_submenu = True
@@ -141,11 +151,10 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     max_key = max(len(k) for k in op_risk_data.keys()) if op_risk_data else 0
     for label, value in op_risk_data.items(): _print_line(label, value, max_key)
     
-    # --- INICIO DE LA MODIFICACIÓN (Visualización ordenada) ---
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Entrada")
     
-    max_key_entry = len("Precio SUPERIOR a") # Longitud de la clave más larga para alinear
+    max_key_entry = len("Precio SUPERIOR a")
     if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
         _print_line("Modo de Entrada", "Inmediata (Market)", max_key_entry)
     else:
@@ -178,7 +187,6 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         
     if not has_exit_cond:
         _print_line("Límites de Salida", "Ninguno configurado", max_key_exit)
-    # --- FIN DE LA MODIFICACIÓN ---
 
     print("└" + "─" * (box_width - 2) + "┘")
     
@@ -206,7 +214,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         else: temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
         if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
         
-        # Inicializar nuevos atributos
         temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
         temp_op.accion_por_tsl_roi = 'PAUSAR'
 
