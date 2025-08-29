@@ -102,11 +102,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             press_enter_to_continue()
             break
 
-
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_main.py
-
-# Reemplaza la función _show_single_operation_view completa en core/menu/screens/operation_manager/_main.py
-
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
@@ -169,14 +164,14 @@ def _show_single_operation_view(side: str):
                     menu_items.append("[2] Pausar Operación")
                     actions.append("pause")
 
+                if current_state == 'EN_ESPERA':
+                    menu_items.append("[*] Forzar Inicio (Activar Manualmente)")
+                    actions.append("force_start")
+
                 menu_items.append("[3] Modificar Parámetros de la Operación")
                 actions.append("modify")
                 menu_items.append("[4] Detener Operación (Cierre Forzoso de Posiciones)")
                 actions.append("stop")
-
-            if current_state == 'EN_ESPERA':
-                menu_items.insert(2, "[*] Forzar Inicio (Activar Manualmente)")
-                actions.insert(2, "force_start")
 
             if current_state == 'DETENIENDO':
                 print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
@@ -184,44 +179,29 @@ def _show_single_operation_view(side: str):
                 time.sleep(2)
                 continue
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # La lógica para construir el menú se mueve aquí para que sea más clara.
-            # Tu código original para esto era un poco complejo, lo he simplificado
-            # manteniendo exactamente el mismo resultado final.
-
-            menu_items.extend([
+            # --- INICIO DE LA LÓGICA CORREGIDA Y SIMPLIFICADA ---
+            # Se construye el menú final y un mapa de acciones paralelo.
+            
+            final_menu_items = list(menu_items) # Copia de los items dinámicos
+            final_actions = list(actions)       # Copia de las acciones dinámicas
+            
+            # Añadir las opciones estáticas
+            final_menu_items.extend([
                 None,
                 "[r] Refrescar",
-                "[h] Ayuda", # Botón de ayuda añadido
+                "[h] Ayuda",
                 "[b] Volver"
             ])
+            final_actions.extend([None, "refresh", "help", "back"])
             
             menu_options = MENU_STYLE.copy()
             
-            # El bucle principal del menú
-            # Elige el ítem y mapea a la acción correcta
-            final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
-            
-            # Se crea un mapa de acciones basado en la posición en el menú final
-            # para evitar errores de índice.
-            action_map = {}
-            action_idx = 0
-            for item in menu_items:
-                if item is None or item.startswith("[ ]"):
-                    continue
-                
-                if "[r]" in item: action_map[action_idx] = "refresh"
-                elif "[h]" in item: action_map[action_idx] = "help"
-                elif "[b]" in item: action_map[action_idx] = "back"
-                else:
-                    if action_idx < len(actions):
-                         action_map[action_idx] = actions[action_idx]
-                action_idx += 1
-
             main_menu = TerminalMenu(final_menu_items, title="\nAcciones:", **menu_options)
             choice_index = main_menu.show()
-            action = action_map.get(choice_index)
-            # --- FIN DE LA MODIFICACIÓN ---
+            
+            # Obtener la acción directamente de la lista de acciones usando el índice
+            action = final_actions[choice_index] if choice_index is not None else None
+            # --- FIN DE LA LÓGICA CORREGIDA Y SIMPLIFICADA ---
 
             if action == "start_new": _wizards.operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": _wizards.operation_setup_wizard(om_api, side, is_modification=True)

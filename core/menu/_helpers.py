@@ -96,6 +96,25 @@ HELP_TEXTS = {
         - Detener Operación: Cierra todas las posiciones y resetea la estrategia.
     """),
 
+    "position_viewer": textwrap.dedent("""
+        AYUDA: GESTOR MANUAL DE POSICIONES
+
+        Esta pantalla te permite intervenir directamente en el mercado, saltándote
+        temporalmente la lógica automática de la estrategia. Es tu "panel de
+        control de emergencia".
+
+        Funcionalidades Clave:
+        - Abrir Siguiente Posición Pendiente: Ejecuta una orden de mercado para
+          la primera posición en la lista de "Pendientes". Esta acción IGNORA
+          la regla de "distancia de promediación". Es útil si quieres añadir
+          exposición al mercado de inmediato sin esperar a la señal del bot.
+        - Cerrar Última Posición Abierta: Cierra la posición abierta más reciente
+          a precio de mercado.
+        - CIERRE DE PÁNICO: Cierra TODAS las posiciones abiertas para este lado
+          de la operación. Es una medida de emergencia para salir completamente
+          del mercado en este lado, por ejemplo, ante noticias inesperadas.
+    """),
+
     "wizard_main": textwrap.dedent("""
         AYUDA: ASISTENTE DE CONFIGURACIÓN DE OPERACIÓN
 

@@ -54,7 +54,6 @@ def show_manual_position_manager_screen(side: str):
         has_pending = operacion.posiciones_pendientes_count > 0
         has_open = operacion.posiciones_abiertas_count > 0
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = []
         actions = []
         
@@ -70,29 +69,39 @@ def show_manual_position_manager_screen(side: str):
             menu_items.append(f"[*] CIERRE DE PÁNICO (Cerrar TODAS las {operacion.posiciones_abiertas_count} posiciones)")
             actions.append('panic_close')
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añade un separador 'None' a ambas listas para mantener la alineación
+        # y generar el espacio en el menú.
         menu_items.extend([
-            None,
+            None, # Separador visual añadido
             "[r] Refrescar",
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver al Panel de Operación"
         ])
-        actions.extend([None, 'refresh', 'help', 'back'])
+        actions.extend([
+            None, # Acción correspondiente al separador
+            'refresh', 
+            'help', 
+            'back'
+        ])
+        # --- FIN DE LA MODIFICACIÓN ---
 
+        # Esta parte del código ya maneja correctamente la lista con 'None'
         final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
         final_actions = [action for action in actions if action is not None]
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
         menu = TerminalMenu(
-            final_menu_items,
+            menu_items, # Usamos la lista original que contiene el None
             title="\nAcciones de Gestión Manual:",
             **menu_options
         )
         choice_index = menu.show()
         
-        action = final_actions[choice_index] if choice_index is not None and choice_index < len(final_actions) else None
-        # --- FIN DE LA MODIFICACIÓN ---
-
+        # Mapeo directo usando el índice sobre la lista original de acciones
+        action = actions[choice_index] if choice_index is not None else None
+        
         if action == 'open_next':
             _actions._open_next_pending(side)
         
@@ -105,10 +114,8 @@ def show_manual_position_manager_screen(side: str):
         elif action == 'refresh':
             continue
             
-        # --- INICIO DE LA MODIFICACIÓN ---
         elif action == 'help':
             show_help_popup('position_viewer')
-        # --- FIN DE LA MODIFICACIÓN ---
             
         elif action == 'back' or action is None:
             break
