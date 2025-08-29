@@ -103,6 +103,8 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             break
 
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_main.py
+
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
@@ -151,11 +153,10 @@ def _show_single_operation_view(side: str):
             actions = []
             current_state = operacion.estado
 
-            # --- INICIO DE LA MODIFICACIÓN (Paso 4 del Plan - Reestructuración del Menú) ---
             if current_state == 'DETENIDA':
                 menu_items.append("[1] Configurar e Iniciar Nueva Operación")
                 actions.append("start_new")
-            else: # Para todos los demás estados activos (ACTIVA, PAUSADA, EN_ESPERA)
+            else:
                 menu_items.append("[1] Gestionar Posiciones Manualmente (Abrir/Cerrar)")
                 actions.append("manual_manage")
                 
@@ -171,14 +172,18 @@ def _show_single_operation_view(side: str):
                 menu_items.append("[4] Detener Operación (Cierre Forzoso de Posiciones)")
                 actions.append("stop")
 
-            # La opción de forzar inicio solo aparece en EN_ESPERA
+            # --- INICIO DE LA SOLUCIÓN ---
+            # Se elimina el separador visual que causaba la línea no deseada.
             if current_state == 'EN_ESPERA':
-                # Insertar en la posición 2 del menú (después de Pausar)
-                menu_items.insert(2, "[ ] ---")
-                menu_items.insert(3, "[*] Forzar Inicio (Activar Manualmente)")
-                actions.insert(2, None)
-                actions.insert(3, "force_start")
-            # --- FIN DE LA MODIFICACIÓN ---
+                # menu_items.insert(2, "[ ] ---")                              # <-- LÍNEA ORIGINAL COMENTADA
+                # actions.insert(2, None)                                     # <-- LÍNEA ORIGINAL COMENTADA
+                # menu_items.insert(3, "[*] Forzar Inicio (Activar Manualmente)") # <-- LÍNEA ORIGINAL COMENTADA
+                # actions.insert(3, "force_start")                              # <-- LÍNEA ORIGINAL COMENTADA
+
+                # Ahora insertamos "Forzar Inicio" en la posición 2, directamente después de "Pausar".
+                menu_items.insert(2, "[*] Forzar Inicio (Activar Manualmente)")
+                actions.insert(2, "force_start")
+            # --- FIN DE LA SOLUCIÓN ---
 
             if current_state == 'DETENIENDO':
                 print("\n\033[93m⏳  ...DETENIENDO OPERACIÓN...\033[0m")
@@ -190,7 +195,6 @@ def _show_single_operation_view(side: str):
             
             menu_options = MENU_STYLE.copy()
             
-            # Usamos list comprehension para filtrar los None y construir el menú y el mapa de acciones
             final_menu_items = [item for item in menu_items if item is not None]
             final_actions = [action for action in actions if action is not None]
             
