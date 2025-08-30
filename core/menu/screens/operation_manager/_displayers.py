@@ -85,12 +85,39 @@ def _get_terminal_width():
     except:
         return 90
 
+# Reemplaza la función _get_unified_box_width completa en el archivo mencionado
+
 def _get_unified_box_width() -> int:
+    """
+    Calcula un ancho de caja unificado y dinámico.
+    
+    CORRECCIÓN: Se ajusta la lógica para permitir que la caja se expanda con el
+    ancho del terminal, sin quedar limitada por un ancho de contenido fijo.
+    """
     terminal_width = _get_terminal_width()
+    
+    # Se mantienen los cálculos de ancho de contenido como referencia mínima.
     open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
     pending_pos_content_width = 12 + 22 + 22
     content_width = max(open_pos_content_width, pending_pos_content_width) + 4
-    box_width = min(terminal_width - 2, content_width, 120)
+    
+    # --- INICIO DE LA LÓGICA CORREGIDA ---
+    # 1. El ancho base ahora es el ancho del terminal, menos los márgenes.
+    base_width = terminal_width - 2
+    
+    # 2. El ancho final será el más grande entre el ancho del terminal y
+    #    el ancho mínimo requerido por el contenido, pero sin superar un máximo de 120.
+    #    Esto asegura que la caja se expanda si hay espacio, pero no se
+    #    haga más pequeña que el contenido si la ventana es muy estrecha.
+    box_width = max(base_width, content_width)
+    box_width = min(box_width, 120)
+    # --- FIN DE LA LÓGICA CORREGIDA ---
+    
+    # Si la ventana es muy estrecha y ni siquiera cabe el contenido mínimo,
+    # forzamos a que el ancho sea el del terminal.
+    if box_width > terminal_width - 2:
+        box_width = terminal_width - 2
+        
     return box_width
 
 def _clean_ansi_codes(text: str) -> str:
