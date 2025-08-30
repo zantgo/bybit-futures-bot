@@ -27,11 +27,6 @@ class _Workflow:
         if operacion and operacion.estado == 'ACTIVA' and self._can_open_new_position(side_to_open):
             self._open_logical_position(side_to_open, entry_price, timestamp)
 
-    # ==============================================================================
-    # --- INICIO DE LA CORRECCIÓN: MÉTODO MOVIDO E INDENTADO ---
-    # El método 'check_and_close_positions' estaba fuera de la clase.
-    # Ahora está indentado correctamente para ser parte de la clase _Workflow.
-    # ==============================================================================
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
@@ -110,11 +105,6 @@ class _Workflow:
                         reason=close_info.get('reason', "UNKNOWN")
                     )
 
-    # ==============================================================================
-    # --- INICIO DE LA CORRECCIÓN: MÉTODO MOVIDO E INDENTADO ---
-    # El método 'sync_physical_positions' también estaba fuera de la clase.
-    # Ahora está indentado correctamente.
-    # ==============================================================================
     def sync_physical_positions(self, side: str):
         """
         Contiene la LÓGICA del Heartbeat de seguridad. Comprueba la existencia real
@@ -142,14 +132,30 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            if not physical_positions:
+            # --- INICIO DE LA CORRECCIÓN ---
+            #
+            # En lugar de un simple 'if not physical_positions:', ahora distinguimos
+            # entre un error de API (None) y una respuesta exitosa con cero posiciones ([]).
+            #
+            if physical_positions is None:
+                # Caso 1: La llamada a la API falló.
+                # No hacemos nada drástico, solo lo registramos y esperamos al siguiente tick.
+                self._memory_logger.log(f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones del exchange (error de API). Se reintentará en el siguiente tick.", "WARN")
+                return # Salimos de la función sin hacer nada más.
+
+            if not physical_positions: # Esto es equivalente a 'if physical_positions == []'
+                # Caso 2: La llamada a la API fue exitosa y confirmó que NO hay posiciones.
+                # ESTE es el único caso en el que debemos asumir una liquidación/cierre inesperado.
                 reason = (
                     f"HEARTBEAT: CIERRE INESPERADO DETECTADO ({side.upper()}). "
                     f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
-                    f"pero no se encontró ninguna en el exchange. Posible liquidación o cierre manual."
+                    f"pero el exchange confirmó que no existe ninguna. Posible liquidación o cierre manual."
                 )
                 self._memory_logger.log(reason, "WARN")
                 
                 self._om_api.handle_liquidation_event(side, reason)
+            #
+            # --- FIN DE LA CORRECCIÓN ---
+
         except Exception as e:
             self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
