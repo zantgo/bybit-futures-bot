@@ -178,23 +178,20 @@ class _PrivateLogic:
         except Exception as e:
             self._memory_logger.log(f"ERROR [TSL] side={side} index={index} current_price={current_price}: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-        
+# Reemplaza la función _close_logical_position completa en core/strategy/pm/manager/_private_logic.py
+    
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
         op_before = self._om_api.get_operation_by_side(side)
         
         if not self._executor or not op_before or index >= len(op_before.posiciones):
             self._memory_logger.log(f"ERROR [Close Attempt] side={side} index={index} executor={self._executor is not None} op_before_exists={op_before is not None}", level="ERROR")
             return {'success': False, 'message': 'Índice o executor no válido'}
-
+    
         pos_to_close = op_before.posiciones[index]
-        # --- INICIO DE LA CORRECCIÓN DEL BUG: RESETEO DE POSICIÓN ---
-        # Guardamos el ID de la posición antes de cualquier modificación. Este ID es
-        # inmutable y nos servirá para encontrar y resetear el objeto correcto
-        # después de que la operación se actualice.
         pos_id_to_reset = pos_to_close.id
-
+    
         result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
-
+    
         if result and result.get('success', False):
             pnl = result.get('pnl_net_usdt', 0.0)
             reinvest_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
@@ -206,30 +203,19 @@ class _PrivateLogic:
             
             op_after_updates = self._om_api.get_operation_by_side(side)
             
-            if op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
+            if op_after_updates and op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
                 self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
             
-            # --- LÓGICA DE RESETEO EXPLÍCITO DE LA POSICIÓN CERRADA ---
-            # La lógica anterior era implícita y propensa a errores. Ahora, explícitamente
-            # encontramos la posición que se cerró y la devolvemos a su estado PENDIENTE.
-            
-            # CÓDIGO ANTERIOR COMENTADO (implícito y menos robusto)
-            # pos_to_reset = next((p for p in op_after.posiciones if p.id == pos_to_close.id), None)
-            # if pos_to_reset:
-            #     # La lógica de reseteo estaba aquí, pero era menos clara
-            #     # sobre qué objeto se estaba modificando y en qué momento.
-            
-            # NUEVA LÓGICA
-            pos_to_reset_in_list = next((p for p in op_after_updates.posiciones if p.id == pos_id_to_reset), None)
+            pos_to_reset_in_list = None
+            if op_after_updates:
+                pos_to_reset_in_list = next((p for p in op_after_updates.posiciones if p.id == pos_id_to_reset), None)
             
             if pos_to_reset_in_list:
                 self._memory_logger.log(f"Reseteando posición ID ...{str(pos_id_to_reset)[-6:]} a estado PENDIENTE.", "INFO")
-                # Restauramos la posición a su estado original para que pueda ser reutilizada.
                 pos_to_reset_in_list.estado = 'PENDIENTE'
-                # Limpiamos todos los datos relacionados con el trade anterior.
                 pos_to_reset_in_list.entry_timestamp = None
                 pos_to_reset_in_list.entry_price = None
-                pos_to_reset_in_list.margin_usdt = None # El margen se recalcula en la reinversión si aplica.
+                pos_to_reset_in_list.margin_usdt = None
                 pos_to_reset_in_list.size_contracts = None
                 pos_to_reset_in_list.stop_loss_price = None
                 pos_to_reset_in_list.est_liq_price = None
@@ -241,27 +227,25 @@ class _PrivateLogic:
                 pos_to_reset_in_list.api_filled_qty = None
             else:
                 self._memory_logger.log(f"ADVERTENCIA [Close]: No se encontró la posición con ID ...{str(pos_id_to_reset)[-6:]} para resetearla. Esto no debería ocurrir.", "WARN")
-
-            params = {
-                'posiciones': op_after_updates.posiciones,
-                'comercios_cerrados_contador': op_after_updates.comercios_cerrados_contador + 1,
-            }
-            if hasattr(op_after_updates, 'profit_balance_acumulado') and transfer_amount > 0:
-                params['profit_balance_acumulado'] = op_after_updates.profit_balance_acumulado + transfer_amount
+    
+            if op_after_updates:
+                params = {
+                    'posiciones': op_after_updates.posiciones,
+                    'comercios_cerrados_contador': op_after_updates.comercios_cerrados_contador + 1,
+                }
+                if hasattr(op_after_updates, 'profit_balance_acumulado') and transfer_amount > 0:
+                    params['profit_balance_acumulado'] = op_after_updates.profit_balance_acumulado + transfer_amount
+                
+                self._om_api.create_or_update_operation(side, params)
             
-            self._om_api.create_or_update_operation(side, params)
-            
-            # --- FIN DE LA CORRECCIÓN ---
-
-            # La lógica de distribución se llama después de que la operación ha sido actualizada
-            if op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
+            op_final_for_distribute = self._om_api.get_operation_by_side(side)
+            if op_final_for_distribute and op_final_for_distribute.auto_reinvest_enabled and reinvest_amount > 0:
                 self._om_api.distribuir_reinvestable_profits(side)
-
+    
             if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
-                # Volvemos a obtener la operación por si la distribución la modificó
-                op_final = self._om_api.get_operation_by_side(side)
-                if op_final:
-                    self._position_state.sync_positions_from_operation(op_final)
+                op_final_for_sync = self._om_api.get_operation_by_side(side)
+                if op_final_for_sync:
+                    self._position_state.sync_positions_from_operation(op_final_for_sync)
             
             if side == 'long':
                 self._total_realized_pnl_long += pnl
@@ -275,8 +259,6 @@ class _PrivateLogic:
             self._om_api.revisar_y_transicionar_a_detenida(side)
         
         return result
-    
-
     def _manual_open_position(self, side: str, entry_price: float, timestamp: datetime.datetime) -> dict:
         """
         Lógica interna para abrir una posición manualmente. Es casi idéntica a
