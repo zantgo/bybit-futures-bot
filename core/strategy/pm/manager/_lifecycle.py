@@ -1,3 +1,5 @@
+# core/strategy/pm/manager/_lifecycle.py
+
 import datetime
 import time
 import copy
@@ -8,7 +10,7 @@ from datetime import timezone
 
 try:
     # --- INICIO DE LA MODIFICACIÓN ---
-    from core.strategy.entities import Operacion, LogicalPosition, LogicalBalances
+    from core.strategy.entities import Operacion, LogicalPosition
     # --- FIN DE LA MODIFICACIÓN ---
     from core.exchange import AbstractExchange
 except ImportError:
