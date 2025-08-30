@@ -108,7 +108,7 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
             "[3] Eliminar la última PENDIENTE",
             None,
             "[h] Ayuda", # Botón de ayuda añadido
-            "[b] Volver al Asistente (Guardar Cambios)"
+            "[b] Volver"
         ]
 
         if not has_pending:
