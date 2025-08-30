@@ -84,12 +84,13 @@ class OperationManager:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
             return copy.deepcopy(original_op)
-
+    # Reemplaza la función create_or_update_operation completa en core/strategy/om/_manager.py
+    
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op: return False, f"Lado de operación inválido '{side}'."
-
+    
             estado_original = target_op.estado
             changed_keys = set()
             nuevas_posiciones = params.get('posiciones')
@@ -103,7 +104,7 @@ class OperationManager:
             
             capital_operativo_anterior = target_op.capital_operativo_logico_actual
             diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
-
+    
             if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and nuevas_posiciones is not None and abs(diferencia_capital) > 1e-9:
                 current_price = sm_api.get_session_summary().get('current_market_price', 0.0) if sm_api else 0.0
                 live_performance = target_op.get_live_performance(current_price, self._utils)
@@ -118,7 +119,7 @@ class OperationManager:
                 flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
                 target_op.capital_flows.append(flow_event)
                 changed_keys.add('capital_flows')
-
+    
             for key, value in params.items():
                 if key not in ['posiciones'] and hasattr(target_op, key) and not callable(getattr(target_op, key)):
                     old_value = getattr(target_op, key)
@@ -126,10 +127,25 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changed_keys.add(key)
             
+            # --- INICIO DEL CÓDIGO CORREGIDO PARA EL BUG ---
             if nuevas_posiciones is not None:
-                target_op.posiciones = copy.deepcopy(nuevas_posiciones)
+                pos_map_actual = {p.id: p for p in target_op.posiciones}
+                ids_nuevas_posiciones = {p.id for p in nuevas_posiciones}
+    
+                target_op.posiciones = [p for p in target_op.posiciones if p.id in ids_nuevas_posiciones]
+    
+                for pos_actualizada in nuevas_posiciones:
+                    if pos_actualizada.id in pos_map_actual:
+                        pos_existente = pos_map_actual[pos_actualizada.id]
+                        for key, value in pos_actualizada.__dict__.items():
+                            if hasattr(pos_existente, key):
+                                setattr(pos_existente, key, value)
+                    else:
+                        target_op.posiciones.append(copy.deepcopy(pos_actualizada))
+                
                 changed_keys.add('posiciones')
-
+            # --- FIN DEL CÓDIGO CORREGIDO PARA EL BUG ---
+    
             if changed_keys:
                 if estado_original == 'DETENIDA':
                     target_op.pnl_realizado_usdt = 0.0
@@ -141,54 +157,38 @@ class OperationManager:
                 
                 if estado_original == 'DETENIENDO':
                     return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
-
-                # --- INICIO DE LA LÓGICA DE TRANSICIÓN DE ESTADO CORREGIDA Y ROBUSTA ---
+    
                 estado_nuevo = target_op.estado
-
-                # Determina si la configuración actual es para una entrada a mercado o condicional.
+                
                 is_market_entry = all(v is None for v in [
                     target_op.cond_entrada_above,
                     target_op.cond_entrada_below,
                     target_op.tiempo_espera_minutos
                 ])
                 
-                # Caso 1: La operación está DETENIDA y se está configurando por primera vez.
-                if estado_original == 'DETENIDA':
-                    if is_market_entry:
+                if is_market_entry:
+                    if estado_original != 'ACTIVA':
                         estado_nuevo = 'ACTIVA'
-                        target_op.estado_razon = "Operación iniciada a condición de mercado."
+                        target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
                         target_op.tiempo_ultimo_inicio_activo = now
                         if not target_op.tiempo_inicio_ejecucion:
                             target_op.tiempo_inicio_ejecucion = now
-                    else: # Si tiene cualquier condición de entrada, pasa a EN_ESPERA.
-                        estado_nuevo = 'EN_ESPERA'
-                        target_op.estado_razon = "Operación en espera de condición de entrada."
-                        if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
-                            target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-                
-                # Caso 2: La operación está PAUSADA y el usuario AÑADE una nueva condición de entrada.
-                # Esto es una acción explícita para "re-armar" la operación.
-                elif estado_original == 'PAUSADA' and any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']):
+                elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
                     estado_nuevo = 'EN_ESPERA'
-                    target_op.estado_razon = "Operación re-armada, en espera de nueva condición de entrada."
+                    target_op.estado_razon = "Operación en espera de nueva condición de entrada."
                     if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
                         target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-
-                # Si no se cumple ninguna de estas condiciones explícitas de transición, el estado no se cambia.
-                # Esto previene la "resurrección" automática de un estado PAUSADO.
-                
-                # --- FIN DE LA LÓGICA DE TRANSICIÓN DE ESTADO CORREGIDA Y ROBUSTA ---
-
+    
                 if estado_nuevo != estado_original:
                     self._memory_logger.log(
                         f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> '{estado_nuevo}'. Razón: {target_op.estado_razon}",
                         "WARN"
                     )
                     target_op.estado = estado_nuevo
-
+    
         return True, f"Operación {side.upper()} actualizada con éxito."
-
+        
     def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
