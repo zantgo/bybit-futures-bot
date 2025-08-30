@@ -23,34 +23,43 @@ class _ApiActions:
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         """Cierra una posición lógica específica por su índice relativo a las posiciones abiertas."""
-        price = self.get_current_market_price()
-        if not price:
-            return False, "No se pudo obtener el precio de mercado actual para el cierre."
-        
-        operacion = self._om_api.get_operation_by_side(side)
-        if not operacion:
-            return False, f"No se encontró la operación para el lado {side.upper()}."
-
-        open_positions = operacion.posiciones_abiertas
-        if not (0 <= index < len(open_positions)):
-            return False, f"Índice {index} fuera de rango. Solo hay {len(open_positions)} posiciones abiertas."
-
-        pos_to_close = open_positions[index]
+        # --- INICIO DE LA SOLUCIÓN ADICIONAL: Aplicar la misma protección aquí ---
+        self._manual_close_in_progress = True
+        self._memory_logger.log(f"Bandera de cierre manual (SINGLE) ACTIVADA para {side.upper()}.", "DEBUG")
         try:
-            original_index = next(i for i, p in enumerate(operacion.posiciones) if p.id == pos_to_close.id)
-        except StopIteration:
-            return False, f"Error interno: No se pudo encontrar la posición con ID {pos_to_close.id}."
+        # --- FIN DE LA SOLUCIÓN ADICIONAL ---
+            price = self.get_current_market_price()
+            if not price:
+                return False, "No se pudo obtener el precio de mercado actual para el cierre."
+            
+            operacion = self._om_api.get_operation_by_side(side)
+            if not operacion:
+                return False, f"No se encontró la operación para el lado {side.upper()}."
 
-        result = self._close_logical_position(
-            side, original_index, price, datetime.datetime.now(timezone.utc), reason="MANUAL_SINGLE"
-        )
-        
-        success = result and result.get('success', False)
-        message = result.get('message', 'Fallo al enviar la orden de cierre.')
-        
-        return success, message
+            open_positions = operacion.posiciones_abiertas
+            if not (0 <= index < len(open_positions)):
+                return False, f"Índice {index} fuera de rango. Solo hay {len(open_positions)} posiciones abiertas."
 
-    # Reemplaza la función close_all_logical_positions completa en _api_actions.py
+            pos_to_close = open_positions[index]
+            try:
+                original_index = next(i for i, p in enumerate(operacion.posiciones) if p.id == pos_to_close.id)
+            except StopIteration:
+                return False, f"Error interno: No se pudo encontrar la posición con ID {pos_to_close.id}."
+
+            result = self._close_logical_position(
+                side, original_index, price, datetime.datetime.now(timezone.utc), reason="MANUAL_SINGLE"
+            )
+            
+            success = result and result.get('success', False)
+            message = result.get('message', 'Fallo al enviar la orden de cierre.')
+            
+            return success, message
+        # --- INICIO DE LA SOLUCIÓN ADICIONAL: Bloque finally ---
+        finally:
+            self._manual_close_in_progress = False
+            self._memory_logger.log(f"Bandera de cierre manual (SINGLE) DESACTIVADA para {side.upper()}.", "DEBUG")
+        # --- FIN DE LA SOLUCIÓN ADICIONAL ---
+
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
         """
         Cierra TODAS las posiciones lógicas de un lado.
@@ -58,7 +67,7 @@ class _ApiActions:
         """
         # --- INICIO DE LA SOLUCIÓN: Activar la bandera y usar try...finally ---
         self._manual_close_in_progress = True
-        self._memory_logger.log(f"Bandera de cierre manual ACTIVADA para {side.upper()}.", "DEBUG")
+        self._memory_logger.log(f"Bandera de cierre manual (ALL) ACTIVADA para {side.upper()}.", "DEBUG")
         try:
         # --- FIN DE LA SOLUCIÓN ---
             price = self.get_current_market_price()
@@ -99,7 +108,7 @@ class _ApiActions:
         # --- INICIO DE LA SOLUCIÓN: Bloque finally para desactivar la bandera ---
         finally:
             self._manual_close_in_progress = False
-            self._memory_logger.log(f"Bandera de cierre manual DESACTIVADA para {side.upper()}.", "DEBUG")
+            self._memory_logger.log(f"Bandera de cierre manual (ALL) DESACTIVADA para {side.upper()}.", "DEBUG")
         # --- FIN DE LA SOLUCIÓN ---
         
     def manual_open_next_pending_position(self, side: str) -> Tuple[bool, str]:
