@@ -1,6 +1,8 @@
 # Contenido completo y corregido para: core/strategy/pm/manager/_workflow.py
 import datetime
 from typing import Any, List, Dict
+# ¡Importante! Añadir esta importación para acceder a la función de cierre total.
+from core import api as core_api 
 
 class _Workflow:
     """
@@ -43,18 +45,41 @@ class _Workflow:
             if operacion.estado == 'DETENIENDO':
                 if operacion.posiciones_abiertas_count > 0:
                     self._memory_logger.log(f"PM Workflow: Estado DETENIENDO confirmado para {side.upper()}. "
-                                            f"Iniciando cierre forzoso de {operacion.posiciones_abiertas_count} posiciones.", "WARN")
+                                            f"Iniciando cierre forzoso de TODAS las posiciones físicas.", "WARN")
                     
-                    indices_to_close = [i for i, p in enumerate(operacion.posiciones) if p.estado == 'ABIERTA']
-                    for index in sorted(indices_to_close, reverse=True):
-                        self._close_logical_position(
-                            side,
-                            index,
-                            current_price,
-                            timestamp,
-                            reason="FORCE_STOP"
+                    # --- INICIO DE LA CORRECCIÓN ---
+                    #
+                    # En lugar de iterar y cerrar una por una, hacemos una única llamada a la API
+                    # para cerrar la posición física completa de ese lado.
+                    #
+                    symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+                    account_purpose_map = {'long': 'longs', 'short': 'shorts'}
+                    account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_purpose_map.get(side))
+                    side_to_close_api = 'Buy' if side == 'long' else 'Sell'
+
+                    if account_name:
+                        # Esta función enviará una única orden de mercado 'reduceOnly'
+                        # para cerrar la posición completa en el exchange.
+                        success = core_api.close_position_by_side(
+                            symbol=symbol,
+                            side_to_close=side_to_close_api,
+                            account_name=account_name
                         )
-                continue
+
+                        if success:
+                            self._memory_logger.log(f"PM Workflow: Orden de cierre total para {side.upper()} enviada con éxito.", "INFO")
+                            # Una vez enviada la orden, la lógica de liquidación se encargará de resetear el estado.
+                            # Para acelerar el proceso, podemos simular un evento de liquidación aquí mismo.
+                            reason = f"FORCE_STOP: Cierre total ejecutado para {side.upper()}."
+                            self._om_api.handle_liquidation_event(side, reason)
+                        else:
+                            self._memory_logger.log(f"PM Workflow: FALLO al enviar la orden de cierre total para {side.upper()}.", "ERROR")
+                    else:
+                        self._memory_logger.log(f"PM Workflow ERROR: No se encontró el nombre de la cuenta para el lado {side.upper()}", "ERROR")
+                    
+                    # --- FIN DE LA CORRECCIÓN ---
+                    
+                continue # Importante: No continuar con la lógica de SL/TSL si estamos deteniendo.
 
             if operacion.estado not in ['ACTIVA', 'PAUSADA', 'EN_ESPERA']:
                 continue
@@ -132,20 +157,11 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            # --- INICIO DE LA CORRECCIÓN ---
-            #
-            # En lugar de un simple 'if not physical_positions:', ahora distinguimos
-            # entre un error de API (None) y una respuesta exitosa con cero posiciones ([]).
-            #
             if physical_positions is None:
-                # Caso 1: La llamada a la API falló.
-                # No hacemos nada drástico, solo lo registramos y esperamos al siguiente tick.
                 self._memory_logger.log(f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones del exchange (error de API). Se reintentará en el siguiente tick.", "WARN")
-                return # Salimos de la función sin hacer nada más.
+                return
 
-            if not physical_positions: # Esto es equivalente a 'if physical_positions == []'
-                # Caso 2: La llamada a la API fue exitosa y confirmó que NO hay posiciones.
-                # ESTE es el único caso en el que debemos asumir una liquidación/cierre inesperado.
+            if not physical_positions:
                 reason = (
                     f"HEARTBEAT: CIERRE INESPERADO DETECTADO ({side.upper()}). "
                     f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
@@ -154,8 +170,5 @@ class _Workflow:
                 self._memory_logger.log(reason, "WARN")
                 
                 self._om_api.handle_liquidation_event(side, reason)
-            #
-            # --- FIN DE LA CORRECCIÓN ---
-
         except Exception as e:
             self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
