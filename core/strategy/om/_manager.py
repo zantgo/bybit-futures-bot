@@ -166,7 +166,7 @@ class OperationManager:
                     target_op.tiempo_espera_minutos
                 ])
                 
-                if is_market_entry:
+                if is_market_entry and estado_original != 'PAUSADA':
                     if estado_original != 'ACTIVA':
                         estado_nuevo = 'ACTIVA'
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
