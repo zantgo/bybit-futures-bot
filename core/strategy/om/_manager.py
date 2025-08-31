@@ -1,4 +1,4 @@
-# ./core/strategy/om/_manager.py
+# Contenido completo y corregido para: core/strategy/om/_manager.py
 
 import datetime
 import uuid
@@ -84,7 +84,6 @@ class OperationManager:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
             return copy.deepcopy(original_op)
-    # Reemplaza la función create_or_update_operation completa en core/strategy/om/_manager.py
     
     def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         with self._lock:
@@ -127,7 +126,6 @@ class OperationManager:
                         setattr(target_op, key, value)
                         changed_keys.add(key)
             
-            # --- INICIO DEL CÓDIGO CORREGIDO PARA EL BUG ---
             if nuevas_posiciones is not None:
                 pos_map_actual = {p.id: p for p in target_op.posiciones}
                 ids_nuevas_posiciones = {p.id for p in nuevas_posiciones}
@@ -144,7 +142,6 @@ class OperationManager:
                         target_op.posiciones.append(copy.deepcopy(pos_actualizada))
                 
                 changed_keys.add('posiciones')
-            # --- FIN DEL CÓDIGO CORREGIDO PARA EL BUG ---
     
             if changed_keys:
                 if estado_original == 'DETENIDA':
@@ -284,6 +281,7 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
+    # Reemplaza la función detener_operacion completa en este archivo
     def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -302,10 +300,18 @@ class OperationManager:
             log_msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}"
             self._memory_logger.log(log_msg, "WARN")
 
+            # --- INICIO DE LA CORRECCIÓN DEL BUCLE INFINITO ---
+            #
+            # Comprobamos aquí mismo si hay posiciones abiertas.
+            # Si NO hay, podemos completar la transición a DETENIDA inmediatamente.
+            #
             if not target_op.posiciones_abiertas:
                 self.revisar_y_transicionar_a_detenida(side)
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
-        return True, f"Proceso de detención para {side.upper()} iniciado."
+            # --- FIN DE LA CORRECCIÓN DEL BUCLE INFINITO ---
+
+        # Si hay posiciones abiertas, el PositionManager se encargará del cierre.
+        return True, f"Proceso de detención para {side.upper()} iniciado. Esperando cierre de posiciones."
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:
@@ -332,14 +338,18 @@ class OperationManager:
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
             
+            # La condición sigue siendo la misma: solo transiciona si no hay posiciones abiertas.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (
                     f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIDA'. Razón final: '{target_op.estado_razon}'"
                 )
                 self._memory_logger.log(log_msg, "INFO")
+                # Antes de resetear, podríamos querer guardar un snapshot final
                 target_op.estado = 'DETENIDA'
-
+                # Aquí se podrían resetear más campos si fuera necesario para una nueva operación.
+                # Por ejemplo: target_op.posiciones.clear() si queremos que empiece de cero la próxima vez.
+    
     def actualizar_reinvestable_profit(self, side: str, amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)
@@ -390,15 +400,11 @@ class OperationManager:
                 f"OM: Procesando evento de liquidación/cierre total para {side.upper()}.", "WARN"
             )
 
-            # Cambia el estado a DETENIENDO para asegurar el cese de actividad.
             target_op.estado = 'DETENIENDO'
             
-            # Solo actualiza la razón si se proporciona una nueva.
-            # Esto preserva la razón original en un cierre forzoso (ej. "Límite de trades").
             if reason is not None:
                 target_op.estado_razon = reason
 
-            # Si hay posiciones abiertas, registra su capital como una pérdida realizada.
             if target_op.posiciones_abiertas:
                 total_loss = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
                 target_op.pnl_realizado_usdt -= total_loss
@@ -406,7 +412,6 @@ class OperationManager:
                     f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada debido a liquidación/cierre forzoso.", "WARN"
                 )
             
-            # Limpia TODAS las posiciones (abiertas y pendientes) ya que la operación se resetea.
             target_op.posiciones.clear()
             
             self._memory_logger.log(
@@ -414,5 +419,4 @@ class OperationManager:
                 "WARN"
             )
             
-            # Llama a la función que completará la transición a DETENIDA, ya que no quedan posiciones.
             self.revisar_y_transicionar_a_detenida(side)
