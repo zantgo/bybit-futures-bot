@@ -53,8 +53,12 @@ class _Workflow:
                     # para cerrar la posición física completa de ese lado.
                     #
                     symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-                    account_purpose_map = {'long': 'longs', 'short': 'shorts'}
-                    account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_purpose_map.get(side))
+                    #account_purpose_map = {'long': 'longs', 'short': 'shorts'}
+                    #account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_purpose_map.get(side))
+
+                    account_key = f"{side.upper()}S" # 'long' -> 'LONGS', 'short' -> 'SHORTS'
+                    account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_key)
+
                     side_to_close_api = 'Buy' if side == 'long' else 'Sell'
 
                     if account_name:
