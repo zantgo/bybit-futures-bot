@@ -373,7 +373,12 @@ class OperationManager:
                 "INFO"
             )
 
-    def handle_liquidation_event(self, side: str, reason: str):
+    def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
+        """
+        Gestiona un evento de liquidación o un cierre forzoso total.
+        Limpia el estado de las posiciones y registra la pérdida total del capital en juego.
+        La razón del estado solo se actualiza si se proporciona una nueva explícitamente.
+        """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             
@@ -382,20 +387,32 @@ class OperationManager:
 
             estado_original = target_op.estado
             self._memory_logger.log(
-                f"OM: Procesando evento de liquidación para {side.upper()}.", "WARN"
+                f"OM: Procesando evento de liquidación/cierre total para {side.upper()}.", "WARN"
             )
 
+            # Cambia el estado a DETENIENDO para asegurar el cese de actividad.
             target_op.estado = 'DETENIENDO'
-            target_op.estado_razon = reason
-            total_loss = target_op.capital_operativo_logico_actual
-            target_op.pnl_realizado_usdt -= total_loss
-            self._memory_logger.log(
-                f"OM: Pérdida por liquidación de ${total_loss:.4f} registrada.", "WARN"
-            )
             
+            # Solo actualiza la razón si se proporciona una nueva.
+            # Esto preserva la razón original en un cierre forzoso (ej. "Límite de trades").
+            if reason is not None:
+                target_op.estado_razon = reason
+
+            # Si hay posiciones abiertas, registra su capital como una pérdida realizada.
+            if target_op.posiciones_abiertas:
+                total_loss = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
+                target_op.pnl_realizado_usdt -= total_loss
+                self._memory_logger.log(
+                    f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada debido a liquidación/cierre forzoso.", "WARN"
+                )
+            
+            # Limpia TODAS las posiciones (abiertas y pendientes) ya que la operación se resetea.
             target_op.posiciones.clear()
+            
             self._memory_logger.log(
                 f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}",
                 "WARN"
             )
+            
+            # Llama a la función que completará la transición a DETENIDA, ya que no quedan posiciones.
             self.revisar_y_transicionar_a_detenida(side)

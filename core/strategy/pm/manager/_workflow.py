@@ -47,23 +47,12 @@ class _Workflow:
                     self._memory_logger.log(f"PM Workflow: Estado DETENIENDO confirmado para {side.upper()}. "
                                             f"Iniciando cierre forzoso de TODAS las posiciones físicas.", "WARN")
                     
-                    # --- INICIO DE LA CORRECCIÓN ---
-                    #
-                    # En lugar de iterar y cerrar una por una, hacemos una única llamada a la API
-                    # para cerrar la posición física completa de ese lado.
-                    #
                     symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-                    #account_purpose_map = {'long': 'longs', 'short': 'shorts'}
-                    #account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_purpose_map.get(side))
-
-                    account_key = f"{side.upper()}S" # 'long' -> 'LONGS', 'short' -> 'SHORTS'
+                    account_key = f"{side.upper()}S"
                     account_name = self._config.BOT_CONFIG["ACCOUNTS"].get(account_key)
-
                     side_to_close_api = 'Buy' if side == 'long' else 'Sell'
 
                     if account_name:
-                        # Esta función enviará una única orden de mercado 'reduceOnly'
-                        # para cerrar la posición completa en el exchange.
                         success = core_api.close_position_by_side(
                             symbol=symbol,
                             side_to_close=side_to_close_api,
@@ -72,16 +61,21 @@ class _Workflow:
 
                         if success:
                             self._memory_logger.log(f"PM Workflow: Orden de cierre total para {side.upper()} enviada con éxito.", "INFO")
-                            # Una vez enviada la orden, la lógica de liquidación se encargará de resetear el estado.
-                            # Para acelerar el proceso, podemos simular un evento de liquidación aquí mismo.
-                            reason = f"FORCE_STOP: Cierre total ejecutado para {side.upper()}."
-                            self._om_api.handle_liquidation_event(side, reason)
                         else:
-                            self._memory_logger.log(f"PM Workflow: FALLO al enviar la orden de cierre total para {side.upper()}.", "ERROR")
+                            self._memory_logger.log(f"PM Workflow: Cierre total para {side.upper()} completado (o no se encontraron posiciones).", "INFO")
+
+                        # --- INICIO DE LA CORRECCIÓN DE LA RAZÓN DE CIERRE ---
+                        #
+                        # En lugar de crear una nueva razón genérica, usamos la razón
+                        # original que ya está guardada en el objeto de la operación.
+                        # Esto preserva la causa raíz del cierre (ej. "Límite de trades alcanzado").
+                        #
+                        reason = operacion.estado_razon
+                        self._om_api.handle_liquidation_event(side, reason)
+                        # --- FIN DE LA CORRECCIÓN DE LA RAZÓN DE CIERRE ---
+
                     else:
-                        self._memory_logger.log(f"PM Workflow ERROR: No se encontró el nombre de la cuenta para el lado {side.upper()}", "ERROR")
-                    
-                    # --- FIN DE LA CORRECCIÓN ---
+                        self._memory_logger.log(f"PM Workflow ERROR: No se encontró el nombre de la cuenta para el lado {side.upper()} (Clave buscada: '{account_key}')", "ERROR")
                     
                 continue # Importante: No continuar con la lógica de SL/TSL si estamos deteniendo.
 
