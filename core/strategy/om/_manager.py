@@ -13,6 +13,7 @@ try:
     from core.strategy.sm import api as sm_api
     from core import utils
 except ImportError:
+    # ... (fallback de importaciones sin cambios) ...
     asdict = lambda x: x
     class Operacion:
         def __init__(self, id: str):
@@ -46,10 +47,7 @@ except ImportError:
     utils = type('obj', (object,), {'safe_division': lambda n, d, default=0.0: 0 if d == 0 else n / d})()
 
 class OperationManager:
-    """
-    Gestiona el ciclo de vida y la configuración de las operaciones estratégicas
-    (LONG y SHORT).
-    """
+    # ... (funciones __init__ hasta activar_por_condicion sin cambios) ...
     def __init__(self, config: Any, utils: Any, trading_api: Any, memory_logger_instance: Any):
         self._config = config
         self._utils = utils
@@ -281,7 +279,6 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    # Reemplaza la función detener_operacion completa en este archivo
     def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -300,17 +297,10 @@ class OperationManager:
             log_msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}"
             self._memory_logger.log(log_msg, "WARN")
 
-            # --- INICIO DE LA CORRECCIÓN DEL BUCLE INFINITO ---
-            #
-            # Comprobamos aquí mismo si hay posiciones abiertas.
-            # Si NO hay, podemos completar la transición a DETENIDA inmediatamente.
-            #
             if not target_op.posiciones_abiertas:
                 self.revisar_y_transicionar_a_detenida(side)
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
-            # --- FIN DE LA CORRECCIÓN DEL BUCLE INFINITO ---
 
-        # Si hay posiciones abiertas, el PositionManager se encargará del cierre.
         return True, f"Proceso de detención para {side.upper()} iniciado. Esperando cierre de posiciones."
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
@@ -338,18 +328,14 @@ class OperationManager:
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
             
-            # La condición sigue siendo la misma: solo transiciona si no hay posiciones abiertas.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (
                     f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIDA'. Razón final: '{target_op.estado_razon}'"
                 )
                 self._memory_logger.log(log_msg, "INFO")
-                # Antes de resetear, podríamos querer guardar un snapshot final
                 target_op.estado = 'DETENIDA'
-                # Aquí se podrían resetear más campos si fuera necesario para una nueva operación.
-                # Por ejemplo: target_op.posiciones.clear() si queremos que empiece de cero la próxima vez.
-    
+
     def actualizar_reinvestable_profit(self, side: str, amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)
@@ -383,6 +369,7 @@ class OperationManager:
                 "INFO"
             )
 
+    # Reemplaza la función handle_liquidation_event completa en este archivo
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
         """
         Gestiona un evento de liquidación o un cierre forzoso total.
@@ -392,31 +379,38 @@ class OperationManager:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             
-            if not target_op or target_op.estado in ['DETENIDA', 'DETENIENDO']:
+            if not target_op or target_op.estado == 'DETENIDA':
                 return
 
             estado_original = target_op.estado
             self._memory_logger.log(
-                f"OM: Procesando evento de liquidación/cierre total para {side.upper()}.", "WARN"
+                f"OM: Procesando evento de liquidación/cierre confirmado para {side.upper()}.", "WARN"
             )
-
-            target_op.estado = 'DETENIENDO'
             
-            if reason is not None:
-                target_op.estado_razon = reason
-
+            # Si hay posiciones abiertas en el estado lógico del bot, registra su capital como pérdida.
             if target_op.posiciones_abiertas:
                 total_loss = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
                 target_op.pnl_realizado_usdt -= total_loss
                 self._memory_logger.log(
-                    f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada debido a liquidación/cierre forzoso.", "WARN"
+                    f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada.", "WARN"
                 )
             
+            # Limpia TODAS las posiciones lógicas ya que el exchange confirmó que no existen.
             target_op.posiciones.clear()
             
+            # Aseguramos que el estado sea 'DETENIENDO' para que la transición final funcione.
+            # Solo actualiza la razón si se proporciona una nueva (desde el Heartbeat).
+            # Si la razón es None (desde un cierre forzoso), preserva la razón existente.
+            if target_op.estado != 'DETENIENDO':
+                 target_op.estado = 'DETENIENDO'
+            
+            if reason is not None:
+                target_op.estado_razon = reason
+            
             self._memory_logger.log(
-                f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}",
+                f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón preservada: {target_op.estado_razon}",
                 "WARN"
             )
             
+            # Llama a la función que completará la transición a DETENIDA, ya que no quedan posiciones.
             self.revisar_y_transicionar_a_detenida(side)
