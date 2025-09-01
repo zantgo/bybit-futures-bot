@@ -93,8 +93,6 @@ class _Workflow:
                     side_to_close_api = 'Buy' if side == 'long' else 'Sell'
 
                     if account_name:
-                        # La variable 'success' ya no es necesaria aquí porque la confirmación
-                        # la hará el Heartbeat, pero la mantenemos si la usas en otro lado.
                         success = core_api.close_position_by_side(
                             symbol=symbol,
                             side_to_close=side_to_close_api,
@@ -106,14 +104,13 @@ class _Workflow:
                         else:
                             self._memory_logger.log(f"PM Workflow: Cierre total para {side.upper()} completado (o no se encontraron posiciones).", "INFO")
 
-                        # --- INICIO DE LA CORRECCIÓN: Llamar a la nueva función no destructiva ---
+                        # --- INICIO DE LA CORRECCIÓN: Pasar el precio de cierre ---
                         #
-                        # En lugar de llamar a `handle_liquidation_event`, que es destructiva,
-                        # llamamos a nuestra nueva función `finalize_forced_closure` que preserva
-                        # la configuración de posiciones y calcula la pérdida correctamente.
+                        # Se pasa el `current_price` a la función de finalización
+                        # para que pueda calcular el PNL real y preciso del cierre.
                         #
                         reason = operacion.estado_razon
-                        self._om_api.finalize_forced_closure(side, reason)
+                        self._om_api.finalize_forced_closure(side, reason, current_price)
                         # --- FIN DE LA CORRECCIÓN ---
 
                     else:

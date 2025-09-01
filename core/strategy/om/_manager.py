@@ -12,6 +12,8 @@ try:
     from core.logging import memory_logger
     from core.strategy.sm import api as sm_api
     from core import utils
+    from core.strategy.pm import _calculations as pm_calculations # <-- Añadir esta importación al inicio del archivo
+
 except ImportError:
     # ... (fallback de importaciones sin cambios) ...
     asdict = lambda x: x
@@ -440,11 +442,11 @@ class OperationManager:
             # Llama a la función que completará la transición y el reseteo de posiciones.
             self.revisar_y_transicionar_a_detenida(side)
 
-    # --- INICIO DE LA NUEVA FUNCIÓN ---
-    def finalize_forced_closure(self, side: str, reason: Optional[str] = None):
+    # Reemplaza la función finalize_forced_closure completa
+    def finalize_forced_closure(self, side: str, reason: Optional[str] = None, exit_price: Optional[float] = None):
         """
         Gestiona la finalización de un cierre forzoso controlado (NO liquidación).
-        Registra la pérdida del capital en riesgo y luego resetea las posiciones a PENDIENTE.
+        Calcula el PNL REAL de las posiciones cerradas y luego las resetea a PENDIENTE.
         """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -453,22 +455,39 @@ class OperationManager:
             
             self._memory_logger.log(f"OM: Finalizando cierre forzoso para {side.upper()}.", "INFO")
 
-            if target_op.posiciones_abiertas:
-                capital_at_risk = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
-                target_op.pnl_realizado_usdt -= capital_at_risk
-                self._memory_logger.log(f"OM: Pérdida de ${capital_at_risk:.4f} (capital en uso) registrada por cierre forzoso.", "WARN")
+            # --- INICIO DE LA LÓGICA DE CÁLCULO DE PNL REAL ---
+            if target_op.posiciones_abiertas and exit_price is not None:
+                pnl_total_cierre = 0.0
+                comisiones_total_cierre = 0.0
+                
+                # Iteramos sobre una copia para no modificar la lista mientras la recorremos
+                for pos in list(target_op.posiciones_abiertas):
+                    # Usamos el calculador del PM para obtener el PNL neto
+                    pnl_result = pm_calculations.calculate_pnl_commission_reinvestment(
+                        side=side,
+                        entry_price=pos.entry_price,
+                        exit_price=exit_price,
+                        size_contracts=pos.size_contracts
+                    )
+                    pnl_total_cierre += pnl_result.get('pnl_net_usdt', 0.0)
+                    comisiones_total_cierre += pnl_result.get('commission_usdt', 0.0)
+
+                # Actualizamos los contadores de la operación
+                target_op.pnl_realizado_usdt += pnl_total_cierre
+                target_op.comisiones_totales_usdt += comisiones_total_cierre
+                target_op.comercios_cerrados_contador += len(target_op.posiciones_abiertas)
+                
+                self._memory_logger.log(f"OM: PNL Neto de ${pnl_total_cierre:+.4f} registrado por cierre forzoso.", "WARN")
+            # --- FIN DE LA LÓGICA DE CÁLCULO DE PNL REAL ---
 
             # Marcamos las posiciones abiertas como 'CERRADA' para la transición.
             for p in target_op.posiciones:
                 if p.estado == 'ABIERTA':
                     p.estado = 'CERRADA'
             
-            # Aseguramos que el estado y la razón estén correctos
             if target_op.estado != 'DETENIENDO':
                 target_op.estado = 'DETENIENDO'
             if reason is not None:
                 target_op.estado_razon = reason
             
-            # Llamamos a la función que completará la transición y el reseteo de posiciones a PENDIENTE.
             self.revisar_y_transicionar_a_detenida(side)
-    # --- FIN DE LA NUEVA FUNCIÓN ---

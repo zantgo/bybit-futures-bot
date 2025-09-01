@@ -130,12 +130,11 @@ def handle_liquidation_event(side: str, reason: str):
 # ==============================================================================
 # --- FIN DE LA NUEVA FUNCIONALIDAD ---
 # ==============================================================================
-
-def finalize_forced_closure(side: str, reason: Optional[str] = None):
+# Reemplaza el proxy de finalize_forced_closure
+def finalize_forced_closure(side: str, reason: Optional[str] = None, exit_price: Optional[float] = None):
     """
     Delega la llamada para finalizar un cierre forzoso controlado,
-    preservando la configuración de posiciones.
+    pasando el precio de salida para un cálculo de PNL preciso.
     """
     if _om_instance:
-        _om_instance.finalize_forced_closure(side, reason)
-# --- FIN DE LA CORRECCIÓN ---
+        _om_instance.finalize_forced_closure(side, reason, exit_price)
