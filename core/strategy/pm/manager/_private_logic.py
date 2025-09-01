@@ -178,87 +178,105 @@ class _PrivateLogic:
         except Exception as e:
             self._memory_logger.log(f"ERROR [TSL] side={side} index={index} current_price={current_price}: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-# Reemplaza la función _close_logical_position completa en core/strategy/pm/manager/_private_logic.py
     
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
-        op_before = self._om_api.get_operation_by_side(side)
         
-        if not self._executor or not op_before or index >= len(op_before.posiciones):
-            self._memory_logger.log(f"ERROR [Close Attempt] side={side} index={index} executor={self._executor is not None} op_before_exists={op_before is not None}", level="ERROR")
-            return {'success': False, 'message': 'Índice o executor no válido'}
-    
-        pos_to_close = op_before.posiciones[index]
-        pos_id_to_reset = pos_to_close.id
-    
-        result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
-    
-        if result and result.get('success', False):
-            pnl = result.get('pnl_net_usdt', 0.0)
-            reinvest_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
-            transfer_amount = result.get('amount_transferable_to_profit', 0.0)
+        # --- INICIO DE LA SOLUCIÓN ---
+        # Se activa la bandera de protección al inicio de cualquier proceso de cierre.
+        self._manual_close_in_progress = True
+        self._memory_logger.log(f"Bandera de protección de cierre ACTIVADA para {side.upper()} (Razón: {reason}).", "DEBUG")
+        try:
+        # --- FIN DE LA SOLUCIÓN ---
+
+            op_before = self._om_api.get_operation_by_side(side)
             
-            self._om_api.actualizar_pnl_realizado(side, pnl)
-            self._om_api.actualizar_total_reinvertido(side, reinvest_amount)
-            self._om_api.actualizar_comisiones_totales(side, result.get('commission_usdt', 0.0))
-            
-            op_after_updates = self._om_api.get_operation_by_side(side)
-            
-            if op_after_updates and op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
-                self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
-            
-            pos_to_reset_in_list = None
-            if op_after_updates:
-                pos_to_reset_in_list = next((p for p in op_after_updates.posiciones if p.id == pos_id_to_reset), None)
-            
-            if pos_to_reset_in_list:
-                self._memory_logger.log(f"Reseteando posición ID ...{str(pos_id_to_reset)[-6:]} a estado PENDIENTE.", "INFO")
-                pos_to_reset_in_list.estado = 'PENDIENTE'
-                pos_to_reset_in_list.entry_timestamp = None
-                pos_to_reset_in_list.entry_price = None
-                pos_to_reset_in_list.margin_usdt = None
-                pos_to_reset_in_list.size_contracts = None
-                pos_to_reset_in_list.stop_loss_price = None
-                pos_to_reset_in_list.est_liq_price = None
-                pos_to_reset_in_list.ts_is_active = False
-                pos_to_reset_in_list.ts_peak_price = None
-                pos_to_reset_in_list.ts_stop_price = None
-                pos_to_reset_in_list.api_order_id = None
-                pos_to_reset_in_list.api_avg_fill_price = None
-                pos_to_reset_in_list.api_filled_qty = None
-            else:
-                self._memory_logger.log(f"ADVERTENCIA [Close]: No se encontró la posición con ID ...{str(pos_id_to_reset)[-6:]} para resetearla. Esto no debería ocurrir.", "WARN")
-    
-            if op_after_updates:
-                params = {
-                    'posiciones': op_after_updates.posiciones,
-                    'comercios_cerrados_contador': op_after_updates.comercios_cerrados_contador + 1,
-                }
-                if hasattr(op_after_updates, 'profit_balance_acumulado') and transfer_amount > 0:
-                    params['profit_balance_acumulado'] = op_after_updates.profit_balance_acumulado + transfer_amount
-                
-                self._om_api.create_or_update_operation(side, params)
-            
-            op_final_for_distribute = self._om_api.get_operation_by_side(side)
-            if op_final_for_distribute and op_final_for_distribute.auto_reinvest_enabled and reinvest_amount > 0:
-                self._om_api.distribuir_reinvestable_profits(side)
-    
-            if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
-                op_final_for_sync = self._om_api.get_operation_by_side(side)
-                if op_final_for_sync:
-                    self._position_state.sync_positions_from_operation(op_final_for_sync)
-            
-            if side == 'long':
-                self._total_realized_pnl_long += pnl
-            else:
-                self._total_realized_pnl_short += pnl
-                
-            min_transfer = self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]
-            if _transfer_executor and transfer_amount > 0 and transfer_amount >= min_transfer:
-                _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
-            
-            self._om_api.revisar_y_transicionar_a_detenida(side)
+            if not self._executor or not op_before or index >= len(op_before.posiciones):
+                self._memory_logger.log(f"ERROR [Close Attempt] side={side} index={index} executor={self._executor is not None} op_before_exists={op_before is not None}", level="ERROR")
+                # --- MODIFICACIÓN DE LA SOLUCIÓN: El return debe estar dentro del try ---
+                return {'success': False, 'message': 'Índice o executor no válido'}
         
-        return result
+            pos_to_close = op_before.posiciones[index]
+            pos_id_to_reset = pos_to_close.id
+        
+            result = self._executor.execute_close(pos_to_close, side, exit_price, timestamp, reason)
+        
+            if result and result.get('success', False):
+                pnl = result.get('pnl_net_usdt', 0.0)
+                reinvest_amount = result.get('amount_reinvested_in_operational_margin', 0.0)
+                transfer_amount = result.get('amount_transferable_to_profit', 0.0)
+                
+                self._om_api.actualizar_pnl_realizado(side, pnl)
+                self._om_api.actualizar_total_reinvertido(side, reinvest_amount)
+                self._om_api.actualizar_comisiones_totales(side, result.get('commission_usdt', 0.0))
+                
+                op_after_updates = self._om_api.get_operation_by_side(side)
+                
+                if op_after_updates and op_after_updates.auto_reinvest_enabled and reinvest_amount > 0:
+                    self._om_api.actualizar_reinvestable_profit(side, reinvest_amount)
+                
+                pos_to_reset_in_list = None
+                if op_after_updates:
+                    pos_to_reset_in_list = next((p for p in op_after_updates.posiciones if p.id == pos_id_to_reset), None)
+                
+                if pos_to_reset_in_list:
+                    self._memory_logger.log(f"Reseteando posición ID ...{str(pos_id_to_reset)[-6:]} a estado PENDIENTE.", "INFO")
+                    pos_to_reset_in_list.estado = 'PENDIENTE'
+                    pos_to_reset_in_list.entry_timestamp = None
+                    pos_to_reset_in_list.entry_price = None
+                    pos_to_reset_in_list.margin_usdt = None
+                    pos_to_reset_in_list.size_contracts = None
+                    pos_to_reset_in_list.stop_loss_price = None
+                    pos_to_reset_in_list.est_liq_price = None
+                    pos_to_reset_in_list.ts_is_active = False
+                    pos_to_reset_in_list.ts_peak_price = None
+                    pos_to_reset_in_list.ts_stop_price = None
+                    pos_to_reset_in_list.api_order_id = None
+                    pos_to_reset_in_list.api_avg_fill_price = None
+                    pos_to_reset_in_list.api_filled_qty = None
+                else:
+                    self._memory_logger.log(f"ADVERTENCIA [Close]: No se encontró la posición con ID ...{str(pos_id_to_reset)[-6:]} para resetearla. Esto no debería ocurrir.", "WARN")
+        
+                if op_after_updates:
+                    params = {
+                        'posiciones': op_after_updates.posiciones,
+                        'comercios_cerrados_contador': op_after_updates.comercios_cerrados_contador + 1,
+                    }
+                    if hasattr(op_after_updates, 'profit_balance_acumulado') and transfer_amount > 0:
+                        params['profit_balance_acumulado'] = op_after_updates.profit_balance_acumulado + transfer_amount
+                    
+                    self._om_api.create_or_update_operation(side, params)
+                
+                op_final_for_distribute = self._om_api.get_operation_by_side(side)
+                if op_final_for_distribute and op_final_for_distribute.auto_reinvest_enabled and reinvest_amount > 0:
+                    self._om_api.distribuir_reinvestable_profits(side)
+        
+                if hasattr(self, '_position_state') and hasattr(self._position_state, 'sync_positions_from_operation'):
+                    op_final_for_sync = self._om_api.get_operation_by_side(side)
+                    if op_final_for_sync:
+                        self._position_state.sync_positions_from_operation(op_final_for_sync)
+                
+                if side == 'long':
+                    self._total_realized_pnl_long += pnl
+                else:
+                    self._total_realized_pnl_short += pnl
+                    
+                min_transfer = self._config.SESSION_CONFIG["PROFIT"]["MIN_TRANSFER_AMOUNT_USDT"]
+                if _transfer_executor and transfer_amount > 0 and transfer_amount >= min_transfer:
+                    _transfer_executor.execute_transfer(amount=transfer_amount, from_account_side=side, exchange_adapter=self._exchange, config=self._config)
+                
+                self._om_api.revisar_y_transicionar_a_detenida(side)
+            
+            # --- MODIFICACIÓN DE LA SOLUCIÓN: El return debe estar dentro del try ---
+            return result
+
+        # --- INICIO DE LA SOLUCIÓN ---
+        finally:
+            # Este bloque se ejecutará siempre, incluso si hay un error dentro del 'try',
+            # garantizando que la bandera se desactive y el heartbeat de seguridad se reanude.
+            self._manual_close_in_progress = False
+            self._memory_logger.log(f"Bandera de protección de cierre DESACTIVADA para {side.upper()}.", "DEBUG")
+        # --- FIN DE LA SOLUCIÓN ---
+        
     def _manual_open_position(self, side: str, entry_price: float, timestamp: datetime.datetime) -> dict:
         """
         Lógica interna para abrir una posición manualmente. Es casi idéntica a
