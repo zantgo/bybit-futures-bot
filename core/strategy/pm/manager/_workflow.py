@@ -1,5 +1,6 @@
 # Contenido completo y corregido para: core/strategy/pm/manager/_workflow.py
 import datetime
+import time
 from typing import Any, List, Dict
 # ¡Importante! Añadir esta importación para acceder a la función de cierre total.
 from core import api as core_api 
@@ -146,23 +147,39 @@ class _Workflow:
                 # Comprobar Stop Loss
                 sl_price = pos.stop_loss_price
                 if sl_price and ((side == 'long' and current_price <= sl_price) or \
-                                 (side == 'short' and current_price >= sl_price)):
+                                    (side == 'short' and current_price >= sl_price)):
                     positions_to_close.append({'index': index, 'reason': 'SL'})
                     continue
 
                 # Comprobar Trailing Stop
                 ts_stop_price = pos.ts_stop_price
                 if ts_stop_price and ((side == 'long' and current_price <= ts_stop_price) or \
-                                      (side == 'short' and current_price >= ts_stop_price)):
+                                        (side == 'short' and current_price >= ts_stop_price)):
                     positions_to_close.append({'index': index, 'reason': 'TS'})
 
             # Ejecutar cierres por SL/TSL
             if positions_to_close:
-                for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
-                    self._close_logical_position(
-                        side, 
-                        close_info['index'], 
-                        current_price, 
-                        timestamp, 
-                        reason=close_info.get('reason', "UNKNOWN")
-                    )
+                
+                # --- INICIO DE LA SOLUCIÓN: Añadir el bloque try...finally ---
+                self._manual_close_in_progress = True
+                self._memory_logger.log(f"Bandera de protección de cierre (WORKFLOW) ACTIVADA para {side.upper()}.", "DEBUG")
+                try:
+                # --- FIN DE LA SOLUCIÓN ---
+
+                    for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
+                        self._close_logical_position(
+                            side, 
+                            close_info['index'], 
+                            current_price, 
+                            timestamp, 
+                            reason=close_info.get('reason', "UNKNOWN")
+                        )
+
+                # --- INICIO DE LA SOLUCIÓN: Añadir el bloque try...finally ---
+                finally:
+                    # Esta pausa es importante para dar tiempo a que las actualizaciones de estado se propaguen
+                    # antes de que la bandera se desactive y el siguiente heartbeat pueda ejecutarse.
+                    time.sleep(0.1) 
+                    self._manual_close_in_progress = False
+                    self._memory_logger.log(f"Bandera de protección de cierre (WORKFLOW) DESACTIVADA para {side.upper()}.", "DEBUG")
+                # --- FIN DE LA SOLUCIÓN ---
