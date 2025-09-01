@@ -354,7 +354,6 @@ class OperationManager:
                 "INFO"
             )
 
- # Reemplaza la función revisar_y_transicionar_a_detenida completa
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -371,21 +370,34 @@ class OperationManager:
                 )
                 self._memory_logger.log(log_msg, "INFO")
                 
-                # --- INICIO DE LA CORRECCIÓN: CONGELAR EN LUGAR DE RESETEAR ---
+                # --- INICIO DE LA NUEVA LÓGICA: RESETEAR EN LUGAR DE ELIMINAR ---
                 #
-                # En lugar de llamar a target_op.reset(), que borraría todo,
-                # simplemente cambiamos el estado. Esto preserva el último PNL,
-                # el número de posiciones, etc., como un snapshot final.
-                # Las posiciones pendientes se eliminan para evitar confusiones.
+                # En lugar de eliminar las posiciones pendientes, ahora iteramos sobre todas
+                # las posiciones existentes y las revertimos a su estado PENDIENTE original.
                 #
+                for pos in target_op.posiciones:
+                    pos.estado = 'PENDIENTE'
+                    pos.entry_timestamp = None
+                    pos.entry_price = None
+                    pos.margin_usdt = 0.0
+                    pos.size_contracts = None
+                    pos.stop_loss_price = None
+                    pos.est_liq_price = None
+                    pos.ts_is_active = False
+                    pos.ts_peak_price = None
+                    pos.ts_stop_price = None
+                    pos.api_order_id = None
+                    pos.api_avg_fill_price = None
+                    pos.api_filled_qty = None
+                
+                # Finalmente, cambiamos el estado. El resto del snapshot (PNL, etc.) se preserva.
                 target_op.estado = 'DETENIDA'
-                target_op.posiciones = [p for p in target_op.posiciones if p.estado != 'PENDIENTE']
-                # --- FIN DE LA CORRECCIÓN ---
 
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
         """
-        Gestiona un evento de liquidación o un cierre forzoso total.
-        Registra la pérdida y finaliza la transición a DETENIDA.
+        Gestiona la PARTE CONTABLE de un evento de liquidación o cierre forzoso.
+        En ambos casos, la pérdida registrada es el capital de las posiciones
+        que estaban abiertas en ese momento.
         """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -393,33 +405,37 @@ class OperationManager:
             if not target_op or target_op.estado == 'DETENIDA':
                 return
 
-            # --- INICIO DE LA CORRECCIÓN: SIMPLIFICAR Y PRESERVAR ESTADO ---
-            #
-            # Esta función ahora solo registra la pérdida y transiciona el estado.
-            # No limpia las posiciones, ya que la TUI las necesita para el snapshot.
-            #
             estado_original = target_op.estado
             
+            # --- INICIO DE LA LÓGICA CONTABLE UNIFICADA Y CORREGIDA ---
+            
+            # No es necesario diferenciar el cálculo, solo el log.
+            # En ambos casos (liquidación o cierre forzoso), la pérdida es el capital en riesgo.
+            if target_op.posiciones_abiertas:
+                capital_at_risk = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
+                target_op.pnl_realizado_usdt -= capital_at_risk
+                
+                # El mensaje de log sí diferencia la causa
+                log_event_type = "liquidación" if reason and "HEARTBEAT" in reason.upper() else "cierre forzoso"
+                self._memory_logger.log(f"OM: Pérdida de ${capital_at_risk:.4f} (capital en uso) registrada por {log_event_type}.", "WARN")
+
+            # Marcamos las posiciones abiertas como 'CERRADA' para la transición.
+            for p in target_op.posiciones:
+                if p.estado == 'ABIERTA':
+                    p.estado = 'CERRADA'
+            
+            # --- FIN DE LA LÓGICA CONTABLE ---
+
             if target_op.estado != 'DETENIENDO':
-                target_op.estado = 'DETENIENDO'
+                 target_op.estado = 'DETENIENDO'
             
             if reason is not None:
                 target_op.estado_razon = reason
-
-            self._memory_logger.log(
-                f"OM: Procesando evento de liquidación/cierre para {side.upper()} con razón: '{target_op.estado_razon}'", "WARN"
-            )
-
-            if target_op.posiciones_abiertas:
-                total_loss = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
-                target_op.pnl_realizado_usdt -= total_loss
-                self._memory_logger.log(
-                    f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada.", "WARN"
-                )
-                # Marcamos las posiciones abiertas como 'CERRADA' para la visualización del snapshot
-                for p in target_op.posiciones:
-                    if p.estado == 'ABIERTA':
-                        p.estado = 'CERRADA' # Un estado visual, no funcional
             
+            self._memory_logger.log(
+                f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}",
+                "WARN"
+            )
+            
+            # Llama a la función que completará la transición y el reseteo de posiciones.
             self.revisar_y_transicionar_a_detenida(side)
-            # --- FIN DE LA CORRECCIÓN ---
