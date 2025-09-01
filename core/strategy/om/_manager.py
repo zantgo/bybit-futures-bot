@@ -439,3 +439,36 @@ class OperationManager:
             
             # Llama a la función que completará la transición y el reseteo de posiciones.
             self.revisar_y_transicionar_a_detenida(side)
+
+    # --- INICIO DE LA NUEVA FUNCIÓN ---
+    def finalize_forced_closure(self, side: str, reason: Optional[str] = None):
+        """
+        Gestiona la finalización de un cierre forzoso controlado (NO liquidación).
+        Registra la pérdida del capital en riesgo y luego resetea las posiciones a PENDIENTE.
+        """
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            if not target_op:
+                return
+            
+            self._memory_logger.log(f"OM: Finalizando cierre forzoso para {side.upper()}.", "INFO")
+
+            if target_op.posiciones_abiertas:
+                capital_at_risk = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
+                target_op.pnl_realizado_usdt -= capital_at_risk
+                self._memory_logger.log(f"OM: Pérdida de ${capital_at_risk:.4f} (capital en uso) registrada por cierre forzoso.", "WARN")
+
+            # Marcamos las posiciones abiertas como 'CERRADA' para la transición.
+            for p in target_op.posiciones:
+                if p.estado == 'ABIERTA':
+                    p.estado = 'CERRADA'
+            
+            # Aseguramos que el estado y la razón estén correctos
+            if target_op.estado != 'DETENIENDO':
+                target_op.estado = 'DETENIENDO'
+            if reason is not None:
+                target_op.estado_razon = reason
+            
+            # Llamamos a la función que completará la transición y el reseteo de posiciones a PENDIENTE.
+            self.revisar_y_transicionar_a_detenida(side)
+    # --- FIN DE LA NUEVA FUNCIÓN ---

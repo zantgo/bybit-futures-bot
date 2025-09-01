@@ -29,6 +29,46 @@ class _Workflow:
         if operacion and operacion.estado == 'ACTIVA' and self._can_open_new_position(side_to_open):
             self._open_logical_position(side_to_open, entry_price, timestamp)
 
+    def sync_physical_positions(self, side: str):
+        """
+        Contiene la LÓGICA del Heartbeat de seguridad. Comprueba la existencia real
+        de una posición en el exchange y sincroniza el estado interno del bot si
+        hay una discrepancia grave (ej. liquidación, cierre manual).
+        """
+        if self._manual_close_in_progress:
+            self._memory_logger.log(f"Heartbeat omitido para {side.upper()}: Cierre manual en progreso.", "DEBUG")
+            return
+
+        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
+            return
+
+        operacion = self._om_api.get_operation_by_side(side)
+        
+        if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'DETENIENDO']):
+            return
+
+        try:
+            account_purpose = 'longs' if side == 'long' else 'shorts'
+            symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+            
+            physical_positions = self._exchange.get_positions(
+                symbol=symbol,
+                account_purpose=account_purpose
+            )
+
+            if physical_positions is None:
+                self._memory_logger.log(f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones del exchange (error de API). Se reintentará en el siguiente tick.", "WARN")
+                return
+
+            if not physical_positions:
+                reason = f"LIQUIDACIÓN DETECTADA: {operacion.posiciones_abiertas_count} pos. {side.upper()} no encontradas ."
+
+                self._memory_logger.log(reason, "WARN")
+                
+                self._om_api.handle_liquidation_event(side, reason)
+        except Exception as e:
+            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
+
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
@@ -53,6 +93,8 @@ class _Workflow:
                     side_to_close_api = 'Buy' if side == 'long' else 'Sell'
 
                     if account_name:
+                        # La variable 'success' ya no es necesaria aquí porque la confirmación
+                        # la hará el Heartbeat, pero la mantenemos si la usas en otro lado.
                         success = core_api.close_position_by_side(
                             symbol=symbol,
                             side_to_close=side_to_close_api,
@@ -64,15 +106,15 @@ class _Workflow:
                         else:
                             self._memory_logger.log(f"PM Workflow: Cierre total para {side.upper()} completado (o no se encontraron posiciones).", "INFO")
 
-                        # --- INICIO DE LA CORRECCIÓN DE LA RAZÓN DE CIERRE ---
+                        # --- INICIO DE LA CORRECCIÓN: Llamar a la nueva función no destructiva ---
                         #
-                        # En lugar de crear una nueva razón genérica, usamos la razón
-                        # original que ya está guardada en el objeto de la operación.
-                        # Esto preserva la causa raíz del cierre (ej. "Límite de trades alcanzado").
+                        # En lugar de llamar a `handle_liquidation_event`, que es destructiva,
+                        # llamamos a nuestra nueva función `finalize_forced_closure` que preserva
+                        # la configuración de posiciones y calcula la pérdida correctamente.
                         #
                         reason = operacion.estado_razon
-                        self._om_api.handle_liquidation_event(side, reason)
-                        # --- FIN DE LA CORRECCIÓN DE LA RAZÓN DE CIERRE ---
+                        self._om_api.finalize_forced_closure(side, reason)
+                        # --- FIN DE LA CORRECCIÓN ---
 
                     else:
                         self._memory_logger.log(f"PM Workflow ERROR: No se encontró el nombre de la cuenta para el lado {side.upper()} (Clave buscada: '{account_key}')", "ERROR")
@@ -127,46 +169,3 @@ class _Workflow:
                         timestamp, 
                         reason=close_info.get('reason', "UNKNOWN")
                     )
-
-    def sync_physical_positions(self, side: str):
-        """
-        Contiene la LÓGICA del Heartbeat de seguridad. Comprueba la existencia real
-        de una posición en el exchange y sincroniza el estado interno del bot si
-        hay una discrepancia grave (ej. liquidación, cierre manual).
-        """
-        if self._manual_close_in_progress:
-            self._memory_logger.log(f"Heartbeat omitido para {side.upper()}: Cierre manual en progreso.", "DEBUG")
-            return
-
-        if self._config.BOT_CONFIG["PAPER_TRADING_MODE"]:
-            return
-
-        operacion = self._om_api.get_operation_by_side(side)
-        
-        if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'DETENIENDO']):
-            return
-
-        try:
-            account_purpose = 'longs' if side == 'long' else 'shorts'
-            symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-            
-            physical_positions = self._exchange.get_positions(
-                symbol=symbol,
-                account_purpose=account_purpose
-            )
-
-            if physical_positions is None:
-                self._memory_logger.log(f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones del exchange (error de API). Se reintentará en el siguiente tick.", "WARN")
-                return
-
-            if not physical_positions:
-                reason = (
-                    f"HEARTBEAT: CIERRE INESPERADO DETECTADO ({side.upper()}). "
-                    f"El bot registraba {operacion.posiciones_abiertas_count} pos. abiertas, "
-                    f"pero el exchange confirmó que no existe ninguna. Posible liquidación o cierre manual."
-                )
-                self._memory_logger.log(reason, "WARN")
-                
-                self._om_api.handle_liquidation_event(side, reason)
-        except Exception as e:
-            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
