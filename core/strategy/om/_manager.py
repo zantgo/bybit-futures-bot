@@ -321,21 +321,6 @@ class OperationManager:
             if op:
                 op.comisiones_totales_usdt += abs(fee_amount)
 
-    def revisar_y_transicionar_a_detenida(self, side: str):
-        with self._lock:
-            target_op = self._get_operation_by_side_internal(side)
-            
-            if not target_op or target_op.estado != 'DETENIENDO':
-                return
-            
-            if not target_op.posiciones_abiertas:
-                estado_original = target_op.estado
-                log_msg = (
-                    f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIDA'. Razón final: '{target_op.estado_razon}'"
-                )
-                self._memory_logger.log(log_msg, "INFO")
-                target_op.estado = 'DETENIDA'
-
     def actualizar_reinvestable_profit(self, side: str, amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)
@@ -369,12 +354,38 @@ class OperationManager:
                 "INFO"
             )
 
-    # Reemplaza la función handle_liquidation_event completa en este archivo
+ # Reemplaza la función revisar_y_transicionar_a_detenida completa
+    def revisar_y_transicionar_a_detenida(self, side: str):
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            
+            if not target_op or target_op.estado != 'DETENIENDO':
+                return
+            
+            # La condición sigue siendo la misma: la transición final ocurre
+            # cuando ya no hay posiciones abiertas.
+            if not target_op.posiciones_abiertas:
+                estado_original = target_op.estado
+                log_msg = (
+                    f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIDA'. Razón final: '{target_op.estado_razon}'"
+                )
+                self._memory_logger.log(log_msg, "INFO")
+                
+                # --- INICIO DE LA CORRECCIÓN: CONGELAR EN LUGAR DE RESETEAR ---
+                #
+                # En lugar de llamar a target_op.reset(), que borraría todo,
+                # simplemente cambiamos el estado. Esto preserva el último PNL,
+                # el número de posiciones, etc., como un snapshot final.
+                # Las posiciones pendientes se eliminan para evitar confusiones.
+                #
+                target_op.estado = 'DETENIDA'
+                target_op.posiciones = [p for p in target_op.posiciones if p.estado != 'PENDIENTE']
+                # --- FIN DE LA CORRECCIÓN ---
+
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
         """
         Gestiona un evento de liquidación o un cierre forzoso total.
-        Limpia el estado de las posiciones y registra la pérdida total del capital en juego.
-        La razón del estado solo se actualiza si se proporciona una nueva explícitamente.
+        Registra la pérdida y finaliza la transición a DETENIDA.
         """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -382,35 +393,33 @@ class OperationManager:
             if not target_op or target_op.estado == 'DETENIDA':
                 return
 
+            # --- INICIO DE LA CORRECCIÓN: SIMPLIFICAR Y PRESERVAR ESTADO ---
+            #
+            # Esta función ahora solo registra la pérdida y transiciona el estado.
+            # No limpia las posiciones, ya que la TUI las necesita para el snapshot.
+            #
             estado_original = target_op.estado
-            self._memory_logger.log(
-                f"OM: Procesando evento de liquidación/cierre confirmado para {side.upper()}.", "WARN"
-            )
             
-            # Si hay posiciones abiertas en el estado lógico del bot, registra su capital como pérdida.
+            if target_op.estado != 'DETENIENDO':
+                target_op.estado = 'DETENIENDO'
+            
+            if reason is not None:
+                target_op.estado_razon = reason
+
+            self._memory_logger.log(
+                f"OM: Procesando evento de liquidación/cierre para {side.upper()} con razón: '{target_op.estado_razon}'", "WARN"
+            )
+
             if target_op.posiciones_abiertas:
                 total_loss = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
                 target_op.pnl_realizado_usdt -= total_loss
                 self._memory_logger.log(
                     f"OM: Pérdida de ${total_loss:.4f} (capital en uso) registrada.", "WARN"
                 )
+                # Marcamos las posiciones abiertas como 'CERRADA' para la visualización del snapshot
+                for p in target_op.posiciones:
+                    if p.estado == 'ABIERTA':
+                        p.estado = 'CERRADA' # Un estado visual, no funcional
             
-            # Limpia TODAS las posiciones lógicas ya que el exchange confirmó que no existen.
-            target_op.posiciones.clear()
-            
-            # Aseguramos que el estado sea 'DETENIENDO' para que la transición final funcione.
-            # Solo actualiza la razón si se proporciona una nueva (desde el Heartbeat).
-            # Si la razón es None (desde un cierre forzoso), preserva la razón existente.
-            if target_op.estado != 'DETENIENDO':
-                 target_op.estado = 'DETENIENDO'
-            
-            if reason is not None:
-                target_op.estado_razon = reason
-            
-            self._memory_logger.log(
-                f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón preservada: {target_op.estado_razon}",
-                "WARN"
-            )
-            
-            # Llama a la función que completará la transición a DETENIDA, ya que no quedan posiciones.
             self.revisar_y_transicionar_a_detenida(side)
+            # --- FIN DE LA CORRECCIÓN ---
