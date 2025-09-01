@@ -170,14 +170,19 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
         for pos in open_positions:
             pnl = 0.0
-            entry_price = pos.entry_price or 0.0
-            size = pos.size_contracts or 0.0
+            
+            # --- INICIO DE LA CORRECCIÓN: Manejo seguro de valores None ---
+            entry_price = pos.entry_price if pos.entry_price is not None else 0.0
+            size = pos.size_contracts if pos.size_contracts is not None else 0.0
+            margin = pos.margin_usdt if pos.margin_usdt is not None else 0.0
+            # --- FIN DE LA CORRECCIÓN ---
+
             if current_price > 0 and entry_price > 0:
                 pnl = (current_price - entry_price) * size if side == 'long' else (entry_price - current_price) * size
 
             pnl_color = "\033[92m" if pnl >= 0 else "\033[91m"
             reset = "\033[0m"
-            sl_str = f"{pos.stop_loss_price:.4f}" if pos.stop_loss_price else "N/A"
+            sl_str = f"{pos.stop_loss_price:.4f}" if pos.stop_loss_price is not None else "N/A"
 
             tp_act_price = 0.0
             tsl_act_pct = getattr(pos, 'tsl_activation_pct_at_open', 0)
@@ -193,7 +198,9 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             line = (
                 f"  {str(pos.id)[-6:]:<7} "
                 f"{entry_price:>9.4f} "
-                f"{pos.margin_usdt:>10.2f} "
+                # --- INICIO DE LA CORRECCIÓN: Formateo seguro ---
+                f"{margin:>10.2f} " # Ahora 'margin' es un float (0.0 si era None)
+                # --- FIN DE LA CORRECCIÓN ---
                 f"{pnl_color}{pnl:>+11.4f}{reset} "
                 f"{sl_str:>9} "
                 f"{tp_act_str:>9} "
@@ -213,14 +220,21 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
         print("├" + "─" * (box_width - 2) + "┤")
 
         for pos in pending_positions:
+            # --- INICIO DE LA CORRECCIÓN: Manejo seguro de valores None ---
+            capital_asignado = pos.capital_asignado if pos.capital_asignado is not None else 0.0
+            valor_nominal = pos.valor_nominal if pos.valor_nominal is not None else 0.0
+            # --- FIN DE LA CORRECCIÓN ---
+            
             line = (
                 f"  {str(pos.id)[-6:]:<10} "
-                f"{pos.capital_asignado:>20.2f} USDT"
-                f"{pos.valor_nominal:>20.2f} USDT"
+                # --- INICIO DE LA CORRECCIÓN: Formateo seguro ---
+                f"{capital_asignado:>20.2f} USDT"
+                f"{valor_nominal:>20.2f} USDT"
+                # --- FIN DE LA CORRECCIÓN ---
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
-
+        
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
