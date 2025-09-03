@@ -324,9 +324,6 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     _render_signal_status_block(summary, config_module, box_width)
     _render_operations_status_block(summary, box_width)
 
-# Reemplaza la función show_dashboard_screen completa en _dashboard.py
-# Reemplaza la función show_dashboard_screen completa en core/menu/screens/_dashboard.py
-
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
     # Aseguramos que todas las dependencias necesarias, incluida la de ayuda, estén importadas
@@ -374,7 +371,6 @@ def show_dashboard_screen(session_manager: Any):
         if summary and not summary.get('error'):
             _render_dashboard_view(summary, config_module)
 
-        # La estructura del menú ya es correcta y no necesita cambios.
         menu_items = [
             "[1] Gestionar Operación LONG",
             "[2] Gestionar Operación SHORT",
@@ -410,11 +406,26 @@ def show_dashboard_screen(session_manager: Any):
                 sm_api.update_session_parameters(changes_made)
         elif action == 'view_logs':
             _log_viewer.show_log_viewer()
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # elif action == 'refresh':
+        #     time.sleep(0.1)
+        #     continue
         elif action == 'refresh':
-            time.sleep(0.1)
+            if not sm_api.is_running():
+                print("\n\033[93mTicker detenido. Realizando consulta de precio puntual...\033[0m")
+                sm_api.force_single_tick()
+                # Pausa para dar tiempo a que el evento se procese y se actualicen los datos en memoria
+                # antes de que el bucle se reinicie y redibuje la pantalla.
+                time.sleep(1) 
+            else:
+                # Si el Ticker está corriendo, una pequeña pausa es suficiente para que
+                # el siguiente tick automático refresque la pantalla.
+                time.sleep(0.1)
             continue
+        # --- FIN DE LA MODIFICACIÓN ---
+            
         elif action == 'help':
-            # La llamada a la ayuda ya es correcta.
             helpers_module.show_help_popup("dashboard_main")
         elif action == 'exit_session' or choice is None:
             clear_screen()

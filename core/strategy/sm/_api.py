@@ -66,3 +66,9 @@ def is_running() -> bool:
     if not _sm_instance:
         return False
     return _sm_instance.is_running()
+
+
+def force_single_tick():
+    """Delega la llamada para forzar un único tick de precio."""
+    if _sm_instance:
+        _sm_instance.force_single_tick()

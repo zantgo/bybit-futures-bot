@@ -197,3 +197,29 @@ class Ticker:
             except Exception as e:
                 self._memory_logger.log(f"Ticker: ERROR CRÍTICO ejecutando callback: {e}", level="ERROR")
                 self._memory_logger.log(traceback.format_exc(), level="ERROR")
+
+    def run_single_real_tick(self):
+        """
+        Realiza una única consulta de precio real al exchange y ejecuta el
+        callback una sola vez, sin iniciar el bucle del Ticker.
+        """
+        if not self._exchange_adapter:
+            self._memory_logger.log("Ticker Sim: Adaptador de exchange no disponible. No se puede ejecutar tick real.", level="ERROR")
+            return
+
+        if not callable(self._raw_event_callback):
+            self._memory_logger.log("Ticker Sim: Callback no configurado. No se puede ejecutar el tick.", level="ERROR")
+            return
+
+        symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+        self._memory_logger.log(f"Ticker: Ejecutando consulta puntual para '{symbol}'...", level="DEBUG")
+        
+        # Obtenemos el precio directamente
+        standard_ticker = self._exchange_adapter.get_ticker(symbol)
+        
+        if standard_ticker and isinstance(standard_ticker, StandardTicker):
+            # Usamos el mismo manejador que el bucle principal para procesar el precio
+            self._handle_new_price(standard_ticker)
+            self._memory_logger.log(f"Ticker: Tick puntual ejecutado con precio real: {standard_ticker.price}", level="INFO")
+        else:
+            self._memory_logger.log(f"Ticker: Fallo al obtener precio en la consulta puntual.", level="WARN")

@@ -220,8 +220,6 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
     
-# Reemplaza la función operation_setup_wizard completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     from ...._helpers import show_help_popup # <-- Importación añadida
     config_module = _deps.get("config_module")
@@ -276,7 +274,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         print_tui_header(f"Asistente de Operación {side.upper()}")
         _display_setup_box(temp_op, _get_terminal_width(), is_modification)
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Gestionar Lista de Posiciones y Simular Riesgo",
             "[2] Editar Estrategia Global",
@@ -285,13 +282,12 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             "[5] Editar Condiciones de Entrada",
             "[6] Editar Condiciones de Salida",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[s] Guardar Cambios",
             "[c] Cancelar y Volver"
         ]
         if is_modification and temp_op.estado == 'ACTIVA':
             menu_items[4] = "[5] Editar Condiciones de Entrada (No disponible en estado ACTIVA)"
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy(); menu_options['clear_screen'] = False
         menu = TerminalMenu(menu_items, title="\nSelecciona una categoría para editar:", **menu_options)
@@ -314,10 +310,8 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
             elif choice == 5:
                 if _submenus_exit._edit_exit_conditions_submenu(temp_op): params_changed = True
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            elif choice == 7: # Índice de Ayuda
+            elif choice == 7:
                 show_help_popup('wizard_main')
-            # --- FIN DE LA MODIFICACIÓN ---
             
             elif choice == 8: # Índice de Guardar
                 if not params_changed and is_modification:
@@ -326,6 +320,21 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 _display_setup_box(temp_op, _get_terminal_width(), is_modification)
                 if TerminalMenu(["[1] Sí, guardar y aplicar", "[2] No, seguir editando"], title="\n¿Confirmas estos parámetros?").show() == 0:
                     success, msg = om_api.create_or_update_operation(side, temp_op.__dict__)
+
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    # Después de guardar, se comprueba si el Ticker necesita ser reactivado.
+                    from core.strategy.sm import api as sm_api
+                    if not sm_api.is_running():
+                        # Se obtiene el estado más reciente de la operación después de la actualización.
+                        new_op_state = om_api.get_operation_by_side(side)
+                        # Si el nuevo estado ya no es DETENIDA, significa que la hemos activado.
+                        if new_op_state and new_op_state.estado != 'DETENIDA':
+                            print("\n\033[93mReactivando Ticker de precios...\033[0m")
+                            sm_api.start()
+                            # Pequeña pausa para que el Ticker arranque y la TUI reciba el primer dato.
+                            time.sleep(1) 
+                    # --- FIN DE LA MODIFICACIÓN ---
+
                     print(f"\n{msg}"); time.sleep(2.5); break
             
             elif choice == 9 or choice is None: # Índice de Cancelar

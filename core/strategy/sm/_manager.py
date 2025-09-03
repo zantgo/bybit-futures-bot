@@ -1,5 +1,3 @@
-# core/strategy/sm/_manager.py
-
 """
 Módulo Gestor de Sesión (SessionManager).
 """
@@ -121,6 +119,47 @@ class SessionManager:
         self._initialized = True
         memory_logger.log("SessionManager: Sesión inicializada y lista para arrancar.", "INFO")
 
+    # --- INICIO DE LAS FUNCIONES A AÑADIR ---
+    def _process_and_callback(self, intermediate_ticks_info: list, final_price_info: dict):
+        """
+        Wrapper interno para el callback que procesa el evento y luego
+        comprueba el estado del Ticker.
+        """
+        # 1. Ejecuta el procesamiento normal del evento
+        if self._event_processor:
+            self._event_processor.process_event(intermediate_ticks_info, final_price_info)
+        
+        # 2. Comprueba si el Ticker debe detenerse
+        self._check_and_manage_ticker_state()
+
+    def _check_and_manage_ticker_state(self):
+        """
+        Comprueba el estado de las operaciones y detiene el Ticker si ambas están detenidas.
+        """
+        if not self.is_running():
+            # Si el Ticker ya está parado, no hay nada que hacer.
+            return
+
+        try:
+            long_op = self._om_api.get_operation_by_side('long')
+            short_op = self._om_api.get_operation_by_side('short')
+
+            if long_op and short_op and long_op.estado == 'DETENIDA' and short_op.estado == 'DETENIDA':
+                memory_logger.log("SessionManager: Ambas operaciones están DETENIDAS. Pausando el Ticker automáticamente.", "WARN")
+                self.stop()
+        except Exception as e:
+            # Evita que un error en esta comprobación detenga el bot
+            memory_logger.log(f"SM: Error en _check_and_manage_ticker_state: {e}", "ERROR")
+
+    def force_single_tick(self):
+        """
+        Fuerza al Ticker a ejecutar una única consulta de precio y procesar el evento.
+        Ideal para un botón de refresco cuando el Ticker está detenido.
+        """
+        if self._ticker:
+            self._ticker.run_single_real_tick()
+    # --- FIN DE LAS FUNCIONES A AÑADIR ---
+
     def start(self):
         """Inicia el ticker y marca la sesión como en ejecución."""
         if not self._initialized:
@@ -132,10 +171,16 @@ class SessionManager:
 
         memory_logger.log("SessionManager: Iniciando Ticker de precios...", "INFO")
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # self._ticker.start(
+        #     exchange_adapter=self._exchange_adapter,
+        #     raw_event_callback=self._event_processor.process_event
+        # )
         self._ticker.start(
             exchange_adapter=self._exchange_adapter,
-            raw_event_callback=self._event_processor.process_event
+            raw_event_callback=self._process_and_callback 
         )
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if not self._session_start_time: 
             self._session_start_time = datetime.datetime.now(timezone.utc)
@@ -172,11 +217,7 @@ class SessionManager:
             long_op = self._om_api.get_operation_by_side('long')
             short_op = self._om_api.get_operation_by_side('short')
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Se refactoriza la función interna `get_op_details` para que siempre
-            # devuelva el estado y la información relevante, sin importar el estado.
             def get_op_details(op: Optional[Operacion]) -> Dict[str, Any]:
-                # Si el objeto de operación no existe, devolvemos valores por defecto.
                 if not op: 
                     return {
                         "id": "N/A", 
@@ -185,7 +226,6 @@ class SessionManager:
                         "duracion_activa": "N/A"
                     }
                 
-                # Calcular la duración solo si está ACTIVA y tiene un tiempo de inicio.
                 duration_str = "N/A"
                 if op.estado == 'ACTIVA' and getattr(op, 'tiempo_ultimo_inicio_activo', None):
                     start_time = op.tiempo_ultimo_inicio_activo
@@ -199,12 +239,10 @@ class SessionManager:
                     "duracion_activa": duration_str
                 }
 
-            # Se asegura que la clave 'operations_info' siempre se construya en el resumen.
             summary['operations_info'] = {
                 'long': get_op_details(long_op),
                 'short': get_op_details(short_op)
             }
-            # --- FIN DE LA CORRECCIÓN ---
             
             if long_op:
                 summary['comisiones_totales_usdt_long'] = long_op.comisiones_totales_usdt
