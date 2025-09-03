@@ -70,10 +70,10 @@ SESSION_CONFIG = {
     # Parámetros de Generación de Señales
     "SIGNAL": {
         "ENABLED": True, 
-        "PRICE_CHANGE_BUY_PERCENTAGE": -0.2,
-        "PRICE_CHANGE_SELL_PERCENTAGE": 0.2,
-        "WEIGHTED_DECREMENT_THRESHOLD": 0.4,
-        "WEIGHTED_INCREMENT_THRESHOLD": 0.4,
+        "PRICE_CHANGE_BUY_PERCENTAGE": -0.15,
+        "PRICE_CHANGE_SELL_PERCENTAGE": 0.15,
+        "WEIGHTED_DECREMENT_THRESHOLD": 0.35,
+        "WEIGHTED_INCREMENT_THRESHOLD": 0.35,
     },
 
     # Parámetros de Ganancias
