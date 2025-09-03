@@ -7,6 +7,7 @@ from datetime import timezone
 import traceback
 from typing import Dict, Any, Optional
 import numpy as np # Importado para cálculos de promedio
+import threading # --- MODIFICACIÓN: Importación añadida ---
 
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
@@ -49,7 +50,6 @@ class SessionManager:
         # --- INICIO DE LA MODIFICACIÓN: Almacenar dependencias y preparar componentes ---
         self._dependencies = dependencies
         self._config = dependencies.get('config_module')
-        # ... (el resto de las asignaciones existentes se mantienen) ...
         self._utils = dependencies.get('utils_module')
         self._exchange_adapter = dependencies.get('exchange_adapter')
         self._om = dependencies.get('operation_manager')
@@ -63,6 +63,7 @@ class SessionManager:
             raise ValueError("La clase Ticker no fue encontrada en las dependencias.")
         self._ticker = Ticker_class(dependencies)
 
+        # (Líneas eliminadas comentadas)
         # EventProcessor_class = dependencies.get('EventProcessor')
         # if not EventProcessor_class:
         #     raise ValueError("La clase EventProcessor no fue encontrada en las dependencias.")
@@ -90,7 +91,7 @@ class SessionManager:
         self._is_running = False
         self._session_start_time: Optional[datetime.datetime] = None
         self._last_known_valid_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-
+        
     # --- INICIO DE LA MODIFICACIÓN: Nueva función para construir componentes de estrategia ---
     def _build_strategy_components(self):
         """
@@ -106,24 +107,21 @@ class SessionManager:
         if not all([TAManager_class, SignalGenerator_class, EventProcessor_class]):
              raise ValueError("Dependencias de estrategia (TA, Signal, EventProcessor) no encontradas.")
 
-        # Creamos nuevas instancias frescas
         self._ta_manager = TAManager_class(self._config)
         self._signal_generator = SignalGenerator_class(self._dependencies)
         
-        # Inyectamos las nuevas instancias en un diccionario de dependencias para el EventProcessor
         strategy_deps = self._dependencies.copy()
         strategy_deps['ta_manager'] = self._ta_manager
         strategy_deps['signal_generator'] = self._signal_generator
         
         self._event_processor = EventProcessor_class(strategy_deps)
 
-        # Inicializamos el procesador de eventos con la instancia del PM
         self._event_processor.initialize(
             operation_mode="live_interactive",
             pm_instance=self._pm
         )
     # --- FIN DE LA MODIFICACIÓN ---
-        
+
     def initialize(self):
         """
         Prepara la sesión para ser iniciada, inicializando sus componentes hijos
@@ -159,14 +157,13 @@ class SessionManager:
         # if self._signal_generator:
         #     self._signal_generator.initialize()
 
-        # Nueva llamada a la función centralizada
         self._build_strategy_components()
         # --- FIN DE LA MODIFICACIÓN ---
 
         self._initialized = True
         memory_logger.log("SessionManager: Sesión inicializada y lista para arrancar.", "INFO")
 
-    # --- INICIO DE LA MODIFICACIÓN: Añadir las nuevas funciones ---
+    # --- INICIO DE LA MODIFICACIÓN: Añadir las nuevas funciones para el Ticker ---
     def _process_and_callback(self, intermediate_ticks_info: list, final_price_info: dict):
         """
         Wrapper interno para el callback que procesa el evento y luego
@@ -221,7 +218,7 @@ class SessionManager:
         # )
         self._ticker.start(
             exchange_adapter=self._exchange_adapter,
-            raw_event_callback=self._process_and_callback
+            raw_event_callback=self._process_and_callback 
         )
         # --- FIN DE LA MODIFICACIÓN ---
         
@@ -232,12 +229,25 @@ class SessionManager:
         memory_logger.log("SessionManager: Sesión iniciada y Ticker operativo.", "INFO")
 
     def stop(self):
-        """Detiene el ticker y marca la sesión como no en ejecución."""
+        """
+        Detiene el ticker y marca la sesión como no en ejecución.
+        Maneja el caso de ser llamado desde el propio hilo del ticker para evitar deadlocks.
+        """
         if not self._is_running:
             return
 
         memory_logger.log("SessionManager: Deteniendo Ticker de precios...", "INFO")
-        self._ticker.stop()
+        
+        # --- INICIO DE LA MODIFICACIÓN: Lógica anti-deadlock ---
+        # self._ticker.stop()
+        
+        # Nueva lógica:
+        if self._ticker._thread and threading.current_thread() is self._ticker._thread:
+            self._ticker.signal_stop()
+        else:
+            self._ticker.stop()
+        # --- FIN DE LA MODIFICACIÓN ---
+
         self._is_running = False
         memory_logger.log("SessionManager: Sesión detenida.", "INFO")
 
@@ -349,7 +359,6 @@ class SessionManager:
             # if self._ta_manager: self._ta_manager.initialize()
             # if self._signal_generator: self._signal_generator.initialize()
 
-            # Nueva llamada a la función centralizada que reconstruye todo el stack
             self._build_strategy_components()
             # --- FIN DE LA MODIFICACIÓN ---
 

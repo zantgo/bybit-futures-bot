@@ -1,4 +1,5 @@
-# ./connection/_ticker.py
+# Reemplaza el archivo completo: connection/_ticker.py
+# O simplemente añade la nueva función y modifica la existente.
 
 import threading
 import time
@@ -6,7 +7,7 @@ import traceback
 import sys
 import os
 from typing import Optional, Dict, Any, Callable
-import datetime # Importamos datetime
+import datetime
 
 try:
     import requests
@@ -78,29 +79,39 @@ class Ticker:
         self._thread.start()
         self._memory_logger.log("Ticker: Hilo iniciado.", level="INFO")
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # def stop(self):
+    #     if self._thread and self._thread.is_alive():
+    #         self._memory_logger.log("Ticker: Solicitando parada...", level="INFO")
+    #         self._stop_event.set()
+    #         self._thread.join(timeout=5)
+    #         if self._thread.is_alive():
+    #             self._memory_logger.log("WARN [Ticker]: El hilo no terminó de forma limpia.", level="WARN")
+    #     self._thread = None
+    
+    def signal_stop(self):
+        """Solamente establece el evento de parada para que el hilo termine su bucle."""
+        self._stop_event.set()
+
     def stop(self):
+        """Señaliza la parada y espera a que el hilo termine (join)."""
         if self._thread and self._thread.is_alive():
-            self._memory_logger.log("Ticker: Solicitando parada...", level="INFO")
-            self._stop_event.set()
+            self._memory_logger.log("Ticker: Solicitando parada y esperando finalización...", level="INFO")
+            self.signal_stop()
             self._thread.join(timeout=5)
             if self._thread.is_alive():
                 self._memory_logger.log("WARN [Ticker]: El hilo no terminó de forma limpia.", level="WARN")
         
         self._thread = None
+    # --- FIN DE LA MODIFICACIÓN ---
 
-    # --- INICIO DE LA NUEVA FUNCIONALIDAD ---
     def run_simulation_tick(self, new_price: float):
-        """
-        Ejecuta un único tick de simulación con un precio proporcionado manualmente.
-        Esto bypasea la llamada a la API y nos da control total.
-        """
         if not callable(self._raw_event_callback):
             self._memory_logger.log("Ticker Sim: Callback no configurado. No se puede ejecutar el tick.", "ERROR")
             return
 
         symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
         
-        # Creamos un objeto StandardTicker como si viniera de la API
         simulated_ticker = StandardTicker(
             timestamp=datetime.datetime.now(datetime.timezone.utc),
             symbol=symbol,
@@ -109,7 +120,26 @@ class Ticker:
         
         self._handle_new_price(simulated_ticker)
         self._memory_logger.log(f"Ticker Sim: Tick ejecutado con precio simulado: {new_price}", "DEBUG")
-    # --- FIN DE LA NUEVA FUNCIONALIDAD ---
+
+    def run_single_real_tick(self):
+        if not self._exchange_adapter:
+            self._memory_logger.log("Ticker Sim: Adaptador de exchange no disponible. No se puede ejecutar tick real.", level="ERROR")
+            return
+
+        if not callable(self._raw_event_callback):
+            self._memory_logger.log("Ticker Sim: Callback no configurado. No se puede ejecutar el tick.", level="ERROR")
+            return
+
+        symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
+        self._memory_logger.log(f"Ticker: Ejecutando consulta puntual para '{symbol}'...", level="DEBUG")
+        
+        standard_ticker = self._exchange_adapter.get_ticker(symbol)
+        
+        if standard_ticker and isinstance(standard_ticker, StandardTicker):
+            self._handle_new_price(standard_ticker)
+            self._memory_logger.log(f"Ticker: Tick puntual ejecutado con precio real: {standard_ticker.price}", level="INFO")
+        else:
+            self._memory_logger.log(f"Ticker: Fallo al obtener precio en la consulta puntual.", level="WARN")
 
     def _fetch_price_loop(self):
         if not self._exchange_adapter:
@@ -197,29 +227,3 @@ class Ticker:
             except Exception as e:
                 self._memory_logger.log(f"Ticker: ERROR CRÍTICO ejecutando callback: {e}", level="ERROR")
                 self._memory_logger.log(traceback.format_exc(), level="ERROR")
-
-    def run_single_real_tick(self):
-        """
-        Realiza una única consulta de precio real al exchange y ejecuta el
-        callback una sola vez, sin iniciar el bucle del Ticker.
-        """
-        if not self._exchange_adapter:
-            self._memory_logger.log("Ticker Sim: Adaptador de exchange no disponible. No se puede ejecutar tick real.", level="ERROR")
-            return
-
-        if not callable(self._raw_event_callback):
-            self._memory_logger.log("Ticker Sim: Callback no configurado. No se puede ejecutar el tick.", level="ERROR")
-            return
-
-        symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
-        self._memory_logger.log(f"Ticker: Ejecutando consulta puntual para '{symbol}'...", level="DEBUG")
-        
-        # Obtenemos el precio directamente
-        standard_ticker = self._exchange_adapter.get_ticker(symbol)
-        
-        if standard_ticker and isinstance(standard_ticker, StandardTicker):
-            # Usamos el mismo manejador que el bucle principal para procesar el precio
-            self._handle_new_price(standard_ticker)
-            self._memory_logger.log(f"Ticker: Tick puntual ejecutado con precio real: {standard_ticker.price}", level="INFO")
-        else:
-            self._memory_logger.log(f"Ticker: Fallo al obtener precio en la consulta puntual.", level="WARN")
