@@ -42,6 +42,15 @@ class TAManager:
         }
         memory_logger.log("[TAManager] Inicializado.", "INFO")
 
+    def get_latest_indicators(self) -> dict:
+        """
+        Devuelve una copia del último conjunto de indicadores almacenado en caché.
+        """
+        return self._latest_indicators.copy()
+
+# Reemplaza la función process_raw_price_event completa en:
+# core/strategy/ta/_manager.py
+
     def process_raw_price_event(self, raw_event_data: dict) -> dict:
         """
         Procesa un único evento de precio crudo: lo almacena, recalcula
@@ -57,44 +66,62 @@ class TAManager:
             return self.get_latest_indicators()
 
         self._data_store.add_event(raw_event_data)
+        
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de cálculo y fallback robustecida ---
+
+        # if self._config.SESSION_CONFIG["TA"]["ENABLED"]:
+        #     try:
+        #         calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
+        #     except Exception as e:
+        #         ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
+        #         memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
+        #         memory_logger.log(traceback.format_exc(), level="ERROR")
+
+        #         calculated_indicators = {
+        #             'timestamp': raw_event_data.get('timestamp', pd.NaT),
+        #             'price': raw_event_data.get('price', np.nan),
+        #             'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
+        #             'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
+        #         }
+        # else:
+        #     calculated_indicators = {
+        #         'timestamp': raw_event_data.get('timestamp', pd.NaT),
+        #         'price': raw_event_data.get('price', np.nan),
+        #         'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
+        #         'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
+        #     }
+
+        # Nueva lógica:
+        # 1. Primero, se obtiene el DataFrame actual después de añadir el nuevo evento.
         current_raw_df = self._data_store.get_data()
 
-        calculated_indicators = {}
-        
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Se restaura la comprobación de la bandera "ENABLED" para que el cálculo
-        # de indicadores técnicos pueda ser activado/desactivado desde config.py.
-        if self._config.SESSION_CONFIG["TA"]["ENABLED"]:
-            try:
-                calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
-            except Exception as e:
-                ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
-                memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
-                memory_logger.log(traceback.format_exc(), level="ERROR")
-
-                # Fallback en caso de error en el cálculo
-                calculated_indicators = {
-                    'timestamp': raw_event_data.get('timestamp', pd.NaT),
-                    'price': raw_event_data.get('price', np.nan),
-                    'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
-                    'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
-                }
-        else:
-            # Si el TA está desactivado, pasamos los datos básicos sin indicadores.
+        # 2. Si el Análisis Técnico (TA) está desactivado, se construye un diccionario
+        #    con los datos básicos del tick y se sale de la función.
+        if not self._config.SESSION_CONFIG["TA"]["ENABLED"]:
             calculated_indicators = {
                 'timestamp': raw_event_data.get('timestamp', pd.NaT),
                 'price': raw_event_data.get('price', np.nan),
                 'ema': np.nan, 'weighted_increment': np.nan, 'weighted_decrement': np.nan,
                 'inc_price_change_pct': np.nan, 'dec_price_change_pct': np.nan,
             }
-        # --- FIN DE LA CORRECCIÓN ---
+        else:
+            # 3. Si el TA está activado, se intenta calcular todos los indicadores.
+            try:
+                calculated_indicators = _calculator.calculate_all_indicators(current_raw_df)
+            except Exception as e:
+                # 4. Si el cálculo falla por CUALQUIER razón, se loguea el error
+                #    y se mantiene el último conjunto de indicadores válidos para evitar
+                #    enviar datos inconsistentes (NaNs) al resto del sistema.
+                ts_str = utils.format_datetime(raw_event_data.get('timestamp'))
+                memory_logger.log(f"ERROR [TAManager - Calculator Call @ {ts_str}]: {e}", level="ERROR")
+                memory_logger.log(traceback.format_exc(), level="ERROR")
+                
+                # En lugar de crear un diccionario de NaNs, se retorna el último valor conocido.
+                # Esto es más seguro porque evita que el SignalGenerator reciba NaNs
+                # inesperadamente si ya había empezado a recibir datos válidos.
+                return self.get_latest_indicators()
+        # --- FIN DE LA MODIFICACIÓN ---
 
         self._latest_indicators = calculated_indicators.copy()
         
         return self.get_latest_indicators()
-
-    def get_latest_indicators(self) -> dict:
-        """
-        Devuelve una copia del último conjunto de indicadores almacenado en caché.
-        """
-        return self._latest_indicators.copy()

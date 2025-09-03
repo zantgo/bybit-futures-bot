@@ -59,6 +59,8 @@ class SignalGenerator:
         if self._memory_logger:
             self._memory_logger.log("SignalGenerator: Estado reseteado. Esperando cálculo de indicadores iniciales...", "INFO")
 
+# Reemplaza la función generate_signal completa en:
+# core/strategy/signal/_generator.py
 
     def generate_signal(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -72,30 +74,47 @@ class SignalGenerator:
             reason = "Timestamp o Precio inválido en los datos procesados"
         
         else:
-            indicators_are_valid = (
-                pd.notna(ema) and np.isfinite(ema) and
-                pd.notna(w_inc) and np.isfinite(w_inc) and
-                pd.notna(w_dec) and np.isfinite(w_dec)
-            )
+            # --- INICIO DE LA MODIFICACIÓN: Lógica de habilitación corregida ---
 
-            if not indicators_are_valid:
-                signal = "HOLD_INITIALIZING"
-                reason = "Calculando indicadores iniciales..."
+            # if not indicators_are_valid:
+            #     signal = "HOLD_INITIALIZING"
+            #     reason = "Calculando indicadores iniciales..."
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Se restaura la comprobación de la bandera "ENABLED" para permitir
-            # que la generación de señales se pueda activar/desactivar desde config.py.
-            elif self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
-                if not self._strategy_is_ready and self._memory_logger:
-                    self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
-                    self._strategy_is_ready = True
+            # elif self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
+            #     if not self._strategy_is_ready and self._memory_logger:
+            #         self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
+            #         self._strategy_is_ready = True
 
-                signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
+            #     signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
             
-            else:
+            # else:
+            #     signal = "HOLD_STRATEGY_DISABLED"
+            #     reason = "Estrategia de Señal desactivada en config"
+            
+            # Nueva lógica:
+            # 1. Primero, se comprueba si la generación de señales está habilitada en la configuración.
+            if not self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
                 signal = "HOLD_STRATEGY_DISABLED"
                 reason = "Estrategia de Señal desactivada en config"
-            # --- FIN DE LA CORRECCIÓN ---
+            else:
+                # 2. Si está habilitada, entonces se comprueba si los indicadores son válidos.
+                indicators_are_valid = (
+                    pd.notna(ema) and np.isfinite(ema) and
+                    pd.notna(w_inc) and np.isfinite(w_inc) and
+                    pd.notna(w_dec) and np.isfinite(w_dec)
+                )
+
+                if not indicators_are_valid:
+                    signal = "HOLD_INITIALIZING"
+                    reason = "Calculando indicadores iniciales..."
+                else:
+                    # 3. Solo si los indicadores son válidos, se evalúa la estrategia para una señal.
+                    if not self._strategy_is_ready and self._memory_logger:
+                        self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
+                        self._strategy_is_ready = True
+
+                    signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
+            # --- FIN DE LA MODIFICACIÓN ---
 
         return self._data_handler.build_signal_dict(
             timestamp, price, ema, inc_pct, dec_pct, w_inc, w_dec, signal, reason
