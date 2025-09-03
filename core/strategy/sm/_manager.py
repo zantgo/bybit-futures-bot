@@ -6,8 +6,8 @@ import datetime
 from datetime import timezone
 import traceback
 from typing import Dict, Any, Optional
-import numpy as np # Importado para cálculos de promedio
-import threading 
+import numpy as np
+import threading
 
 # --- Dependencias del Proyecto (inyectadas a través de __init__) ---
 try:
@@ -16,7 +16,6 @@ try:
     from connection import Ticker
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
-    # --- Añadido para tipado correcto ---
     from core.strategy.entities import Operacion
 except ImportError:
     memory_logger = type('obj', (object,), {'log': print})()
@@ -271,12 +270,7 @@ class SessionManager:
         except Exception as e:
             error_msg = f"Error generando el resumen de la sesión: {e}"
             memory_logger.log(f"SessionManager: {error_msg}", "ERROR")
-
-            # --- INICIO DE LA MODIFICACIÓN: Reemplazar print_exc por format_exc ---
-            # traceback.print_exc()
             memory_logger.log(traceback.format_exc(), "ERROR")
-            # --- FIN DE LA MODIFICACIÓN ---
-
             return {"error": error_msg}
 
     def update_session_parameters(self, params: Dict[str, Any]):
@@ -309,15 +303,28 @@ class SessionManager:
         
         strategy_needs_reset = any(key in STRATEGY_AFFECTING_KEYS for key in changed_keys)
 
-        if strategy_needs_reset:
-            memory_logger.log("SessionManager: Cambios en parámetros de estrategia detectados. Reiniciando componentes de TA y Señal...", "WARN")
-            
-            self._build_strategy_components()
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de reinicio unificada ---
+        # if strategy_needs_reset:
+        #     memory_logger.log("SessionManager: Cambios en parámetros de estrategia detectados. Reiniciando componentes de TA y Señal...", "WARN")
+        #     self._build_strategy_components()
 
-        if 'TICKER_INTERVAL_SECONDS' in changed_keys:
-            memory_logger.log("SessionManager: Parámetros del Ticker actualizados. Reiniciando el hilo del Ticker...", "WARN")
+        # if 'TICKER_INTERVAL_SECONDS' in changed_keys:
+        #     memory_logger.log("SessionManager: Parámetros del Ticker actualizados. Reiniciando el hilo del Ticker...", "WARN")
+        #     self.stop()
+        #     self.start()
+
+        # Nueva lógica:
+        # Si la estrategia o el intervalo del Ticker cambian, debemos reiniciar el Ticker
+        # para asegurar que el callback del nuevo EventProcessor se utilice.
+        if strategy_needs_reset or 'TICKER_INTERVAL_SECONDS' in changed_keys:
+            if strategy_needs_reset:
+                memory_logger.log("SM: Cambios en estrategia detectados. Reconstruyendo componentes...", "WARN")
+                self._build_strategy_components()
+            
+            memory_logger.log("SM: Parámetros actualizados. Reiniciando Ticker para aplicar cambios.", "WARN")
             self.stop()
             self.start()
+        # --- FIN DE LA MODIFICACIÓN ---
         
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""
