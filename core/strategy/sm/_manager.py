@@ -149,7 +149,9 @@ class SessionManager:
             short_op = self._om_api.get_operation_by_side('short')
 
             if long_op and short_op and long_op.estado == 'DETENIDA' and short_op.estado == 'DETENIDA':
-                memory_logger.log("SessionManager: Ambas operaciones están DETENIDAS. Pausando el Ticker automáticamente.", "WARN")
+                # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
+                # memory_logger.log("SessionManager: Ambas operaciones están DETENIDAS. Pausando el Ticker automáticamente.", "WARN")
+                # --- FIN DE LA MODIFICACIÓN ---
                 self.stop()
         except Exception as e:
             memory_logger.log(f"SM: Error en _check_and_manage_ticker_state: {e}", "ERROR")
@@ -173,13 +175,9 @@ class SessionManager:
 
         memory_logger.log("SessionManager: Iniciando Ticker de precios...", "INFO")
         
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de reinicio condicional de indicadores ---
-        # Si el Ticker no está corriendo (es decir, estamos reactivando desde una parada total),
-        # reconstruimos los componentes de estrategia para reiniciarlos.
         if not self.is_running():
             memory_logger.log("SM: Reactivando Ticker desde estado detenido. Reiniciando indicadores.", "WARN")
             self._build_strategy_components()
-        # --- FIN DE LA MODIFICACIÓN ---
 
         self._ticker.start(
             exchange_adapter=self._exchange_adapter,
@@ -200,7 +198,9 @@ class SessionManager:
         if not self._is_running:
             return
 
-        memory_logger.log("SessionManager: Deteniendo Ticker de precios...", "INFO")
+        # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
+        # memory_logger.log("SessionManager: Deteniendo Ticker de precios...", "INFO")
+        # --- FIN DE LA MODIFICACIÓN ---
         
         if self._ticker._thread and threading.current_thread() is self._ticker._thread:
             self._ticker.signal_stop()
@@ -208,7 +208,9 @@ class SessionManager:
             self._ticker.stop()
 
         self._is_running = False
-        memory_logger.log("SessionManager: Sesión detenida.", "INFO")
+        # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
+        # memory_logger.log("SessionManager: Sesión detenida.", "INFO")
+        # --- FIN DE LA MODIFICACIÓN ---
 
     def get_session_summary(self) -> Dict[str, Any]:
         """
@@ -311,14 +313,14 @@ class SessionManager:
         
         strategy_needs_reset = any(key in STRATEGY_AFFECTING_KEYS for key in changed_keys)
 
-        # Nueva lógica: La reconstrucción de componentes se delega a start().
-        # Aquí solo decidimos si es necesario reiniciar el Ticker.
         if strategy_needs_reset or 'TICKER_INTERVAL_SECONDS' in changed_keys:
+            if strategy_needs_reset:
+                memory_logger.log("SM: Cambios en estrategia detectados. Reconstruyendo componentes...", "WARN")
+                self._build_strategy_components()
+            
             memory_logger.log("SM: Parámetros actualizados. Reiniciando Ticker para aplicar cambios.", "WARN")
-            # Ya no es necesario reconstruir aquí.
             self.stop()
             self.start()
-        # --- FIN DE LA MODIFICACIÓN ---
         
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""
