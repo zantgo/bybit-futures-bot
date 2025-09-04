@@ -173,6 +173,14 @@ class SessionManager:
 
         memory_logger.log("SessionManager: Iniciando Ticker de precios...", "INFO")
         
+        # --- INICIO DE LA MODIFICACIÓN: Lógica de reinicio condicional de indicadores ---
+        # Si el Ticker no está corriendo (es decir, estamos reactivando desde una parada total),
+        # reconstruimos los componentes de estrategia para reiniciarlos.
+        if not self.is_running():
+            memory_logger.log("SM: Reactivando Ticker desde estado detenido. Reiniciando indicadores.", "WARN")
+            self._build_strategy_components()
+        # --- FIN DE LA MODIFICACIÓN ---
+
         self._ticker.start(
             exchange_adapter=self._exchange_adapter,
             raw_event_callback=self._process_and_callback 
@@ -303,25 +311,11 @@ class SessionManager:
         
         strategy_needs_reset = any(key in STRATEGY_AFFECTING_KEYS for key in changed_keys)
 
-        # --- INICIO DE LA MODIFICACIÓN: Lógica de reinicio unificada ---
-        # if strategy_needs_reset:
-        #     memory_logger.log("SessionManager: Cambios en parámetros de estrategia detectados. Reiniciando componentes de TA y Señal...", "WARN")
-        #     self._build_strategy_components()
-
-        # if 'TICKER_INTERVAL_SECONDS' in changed_keys:
-        #     memory_logger.log("SessionManager: Parámetros del Ticker actualizados. Reiniciando el hilo del Ticker...", "WARN")
-        #     self.stop()
-        #     self.start()
-
-        # Nueva lógica:
-        # Si la estrategia o el intervalo del Ticker cambian, debemos reiniciar el Ticker
-        # para asegurar que el callback del nuevo EventProcessor se utilice.
+        # Nueva lógica: La reconstrucción de componentes se delega a start().
+        # Aquí solo decidimos si es necesario reiniciar el Ticker.
         if strategy_needs_reset or 'TICKER_INTERVAL_SECONDS' in changed_keys:
-            if strategy_needs_reset:
-                memory_logger.log("SM: Cambios en estrategia detectados. Reconstruyendo componentes...", "WARN")
-                self._build_strategy_components()
-            
             memory_logger.log("SM: Parámetros actualizados. Reiniciando Ticker para aplicar cambios.", "WARN")
+            # Ya no es necesario reconstruir aquí.
             self.stop()
             self.start()
         # --- FIN DE LA MODIFICACIÓN ---
