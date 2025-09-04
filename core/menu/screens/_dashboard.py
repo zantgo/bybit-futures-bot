@@ -407,23 +407,14 @@ def show_dashboard_screen(session_manager: Any):
         elif action == 'view_logs':
             _log_viewer.show_log_viewer()
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # elif action == 'refresh':
-        #     time.sleep(0.1)
-        #     continue
         elif action == 'refresh':
             if not sm_api.is_running():
                 print("\n\033[93mTicker detenido. Realizando consulta de precio puntual...\033[0m")
                 sm_api.force_single_tick()
-                # Pausa para dar tiempo a que el evento se procese y se actualicen los datos en memoria
-                # antes de que el bucle se reinicie y redibuje la pantalla.
                 time.sleep(1) 
             else:
-                # Si el Ticker está corriendo, una pequeña pausa es suficiente para que
-                # el siguiente tick automático refresque la pantalla.
                 time.sleep(0.1)
             continue
-        # --- FIN DE LA MODIFICACIÓN ---
             
         elif action == 'help':
             helpers_module.show_help_popup("dashboard_main")
@@ -443,9 +434,11 @@ def show_dashboard_screen(session_manager: Any):
         session_manager.stop()
 
     from runner import shutdown_session_backend
+    
     shutdown_session_backend(
         session_manager=session_manager,
         final_summary=final_summary_data,
         config_module=_deps.get("config_module"),
-        open_snapshot_logger_module=_deps.get("open_snapshot_logger_module")
+        open_snapshot_logger_module=_deps.get("open_snapshot_logger_module"),
+        memory_logger_module=_deps.get("memory_logger_module")
     )

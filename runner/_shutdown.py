@@ -4,13 +4,17 @@ Módulo responsable de la secuencia de apagado limpio de una sesión de trading.
 import datetime
 from typing import Any, Dict
 import os
-# --- INICIO DE LA MODIFICACIÓN: Importar el logger ---
-from core.logging import memory_logger
+
+# --- INICIO DE LA MODIFICACIÓN: La importación se mueve a un nivel local si es necesaria ---
+# (Se elimina 'from core.logging import memory_logger' de aquí para evitar dependencias globales)
 # --- FIN DE LA MODIFICACIÓN ---
 
 def _write_session_summary_to_file(
     final_summary: Dict[str, Any],
-    config_module: Any
+    config_module: Any,
+    # --- INICIO DE LA MODIFICACIÓN: Se añade el parámetro del logger ---
+    memory_logger_module: Any
+    # --- FIN DE LA MODIFICACIÓN ---
 ):
     """
     Formatea el resumen final de la sesión y lo guarda en un archivo de texto.
@@ -20,7 +24,8 @@ def _write_session_summary_to_file(
     if not final_summary or final_summary.get('error'):
         # --- INICIO DE LA MODIFICACIÓN: Reemplazar print con logger ---
         # print("No se generará archivo de resumen debido a un error en los datos.")
-        memory_logger.log("No se generará archivo de resumen debido a un error en los datos.", "WARN")
+        if memory_logger_module:
+            memory_logger_module.log("No se generará archivo de resumen debido a un error en los datos.", "WARN")
         # --- FIN DE LA MODIFICACIÓN ---
         return
 
@@ -98,46 +103,52 @@ def _write_session_summary_to_file(
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(content))
         
-        # Este print es útil para el usuario final, por lo que se mantiene,
-        # pero también se añade al log.
         print(f"\nResumen de la sesión guardado en: {filepath}")
-        memory_logger.log(f"Resumen de la sesión guardado en: {filepath}", "INFO")
+        if memory_logger_module:
+            memory_logger_module.log(f"Resumen de la sesión guardado en: {filepath}", "INFO")
 
     except Exception as e:
-        # Este print también es útil para notificar al usuario de un error crítico.
-        # Se mantiene y se añade al log.
         error_msg = f"\nERROR: No se pudo escribir el archivo de resumen de sesión: {e}"
         print(error_msg)
-        memory_logger.log(error_msg, "ERROR")
+        if memory_logger_module:
+            memory_logger_module.log(error_msg, "ERROR")
 
 
 def shutdown_session_backend(
     session_manager: Any,
     final_summary: Dict[str, Any],
     config_module: Any,
-    open_snapshot_logger_module: Any
+    open_snapshot_logger_module: Any,
+    # --- INICIO DE LA MODIFICACIÓN: Se añade el parámetro del logger ---
+    memory_logger_module: Any
+    # --- FIN DE LA MODIFICACIÓN ---
 ):
     """
     Ejecuta la secuencia de limpieza y apagado para una sesión de trading.
     """
     # --- INICIO DE LA MODIFICACIÓN: Reemplazar print con logger ---
     # print("\n--- Limpieza Final de la Sesión de Trading (Backend) ---")
-    memory_logger.log("--- Limpieza Final de la Sesión de Trading (Backend) ---", "INFO")
+    if memory_logger_module:
+        memory_logger_module.log("--- Limpieza Final de la Sesión de Trading (Backend) ---", "INFO")
     
     if not session_manager:
         # print("Advertencia: No se proporcionó un SessionManager para el apagado.")
-        memory_logger.log("Advertencia: No se proporcionó un SessionManager para el apagado.", "WARN")
+        if memory_logger_module:
+            memory_logger_module.log("Advertencia: No se proporcionó un SessionManager para el apagado.", "WARN")
         return
 
     if session_manager.is_running():
         # print("Deteniendo el Ticker de precios de la sesión...")
-        memory_logger.log("Deteniendo el Ticker de precios de la sesión...", "INFO")
+        if memory_logger_module:
+            memory_logger_module.log("Deteniendo el Ticker de precios de la sesión...", "INFO")
         session_manager.stop()
         # print("Ticker detenido.")
-        memory_logger.log("Ticker detenido.", "INFO")
+        if memory_logger_module:
+            memory_logger_module.log("Ticker detenido.", "INFO")
 
     # print("Obteniendo resumen final para logging...")
-    memory_logger.log("Obteniendo resumen final para logging...", "INFO")
+    if memory_logger_module:
+        memory_logger_module.log("Obteniendo resumen final para logging...", "INFO")
     summary = session_manager.get_session_summary()
     
     if summary and not summary.get('error'):
@@ -148,16 +159,19 @@ def shutdown_session_backend(
             open_snapshot_logger_module.log_open_positions_snapshot(summary)
         
         # print("Resumen final de la sesión obtenido y logueado.")
-        memory_logger.log("Resumen final de la sesión obtenido y logueado.", "INFO")
+        if memory_logger_module:
+            memory_logger_module.log("Resumen final de la sesión obtenido y logueado.", "INFO")
         
-        _write_session_summary_to_file(final_summary, config_module)
+        _write_session_summary_to_file(final_summary, config_module, memory_logger_module)
 
     else:
         final_summary['error'] = 'No se pudo obtener el resumen final de la sesión.'
         error_msg = summary.get('error', 'Error desconocido') if summary else 'N/A'
         # print(f"No se pudo obtener el resumen final: {error_msg}")
-        memory_logger.log(f"No se pudo obtener el resumen final: {error_msg}", "ERROR")
+        if memory_logger_module:
+            memory_logger_module.log(f"No se pudo obtener el resumen final: {error_msg}", "ERROR")
     
     # print("Secuencia de apagado de la sesión (Backend) completada.")
-    memory_logger.log("Secuencia de apagado de la sesión (Backend) completada.", "INFO")
+    if memory_logger_module:
+        memory_logger_module.log("Secuencia de apagado de la sesión (Backend) completada.", "INFO")
     # --- FIN DE LA MODIFICACIÓN ---
