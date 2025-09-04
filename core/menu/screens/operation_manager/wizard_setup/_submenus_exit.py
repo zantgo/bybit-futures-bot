@@ -45,7 +45,6 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         print(f"  - Límite de Duración: {time_str}")
         print(f"  - Límite de Trades: {trades_str}")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Editar Condición 'Precio SUPERIOR a'",
             f"[2] Editar Condición 'Precio INFERIOR a'",
@@ -62,7 +61,6 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
         choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
 
         if choice is None or choice == 7: break # El índice de "Volver" ahora es 7
-        # --- FIN DE LA MODIFICACIÓN ---
         
         try:
             if choice == 0:
@@ -84,20 +82,56 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
                 params_changed_in_submenu = True
 
             elif choice == 2:
-                new_val = get_input("Límite de Duración (min)", int, temp_op.tiempo_maximo_min, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
-                if new_val != temp_op.tiempo_maximo_min:
+                # --- INICIO DE LA SOLUCIÓN ---
+                original_val = temp_op.tiempo_maximo_min
+                original_action = temp_op.accion_por_limite_tiempo
+
+                new_val = get_input("Límite de Duración (min)", int, original_val, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
+
+                new_action = original_action
+                if new_val is not None:
+                    # Siempre preguntamos por la acción si el límite está activo.
+                    new_action = get_action_menu("Acción al alcanzar el tiempo máximo", original_action)
+
+                # Comprobamos si el valor O la acción han cambiado.
+                if new_val != original_val or new_action != original_action:
                     temp_op.tiempo_maximo_min = new_val
-                    if temp_op.tiempo_maximo_min is not None:
-                        temp_op.accion_por_limite_tiempo = get_action_menu("Acción al alcanzar el tiempo máximo", temp_op.accion_por_limite_tiempo)
+                    temp_op.accion_por_limite_tiempo = new_action
                     params_changed_in_submenu = True
+                # --- FIN DE LA SOLUCIÓN ---
+
+                # --- LÍNEA ORIGINAL ELIMINADA (COMENTADA PARA REFERENCIA) ---
+                # if new_val != temp_op.tiempo_maximo_min:
+                #     temp_op.tiempo_maximo_min = new_val
+                #     if temp_op.tiempo_maximo_min is not None:
+                #         temp_op.accion_por_limite_tiempo = get_action_menu("Acción al alcanzar el tiempo máximo", temp_op.accion_por_limite_tiempo)
+                #     params_changed_in_submenu = True
             
             elif choice == 3:
-                new_val = get_input("Límite de Trades", int, temp_op.max_comercios, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
-                if new_val != temp_op.max_comercios:
+                # --- INICIO DE LA SOLUCIÓN ---
+                original_val = temp_op.max_comercios
+                original_action = temp_op.accion_por_limite_trades
+
+                new_val = get_input("Límite de Trades", int, original_val, min_val=1, is_optional=True, context_info="Deja vacío para desactivar")
+                
+                new_action = original_action
+                if new_val is not None:
+                    # Siempre preguntamos por la acción si el límite está activo.
+                    new_action = get_action_menu("Acción al alcanzar el máximo de trades", original_action)
+
+                # Comprobamos si el valor O la acción han cambiado.
+                if new_val != original_val or new_action != original_action:
                     temp_op.max_comercios = new_val
-                    if temp_op.max_comercios is not None:
-                        temp_op.accion_por_limite_trades = get_action_menu("Acción al alcanzar el máximo de trades", temp_op.accion_por_limite_trades)
+                    temp_op.accion_por_limite_trades = new_action
                     params_changed_in_submenu = True
+                # --- FIN DE LA SOLUCIÓN ---
+                
+                # --- LÍNEA ORIGINAL ELIMINADA (COMENTADA PARA REFERENCIA) ---
+                # if new_val != temp_op.max_comercios:
+                #     temp_op.max_comercios = new_val
+                #     if temp_op.max_comercios is not None:
+                #         temp_op.accion_por_limite_trades = get_action_menu("Acción al alcanzar el máximo de trades", temp_op.accion_por_limite_trades)
+                #     params_changed_in_submenu = True
 
             elif choice == 5:
                 if temp_op.cond_salida_above or temp_op.cond_salida_below or temp_op.tiempo_maximo_min or temp_op.max_comercios:
@@ -108,10 +142,8 @@ def _edit_exit_conditions_submenu(temp_op: Operacion):
                     params_changed_in_submenu = True
                     print("\nTodas las condiciones de salida han sido desactivadas."); time.sleep(1.5)
 
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 6: # Índice de Ayuda
                 show_help_popup('wizard_exit_conditions')
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
