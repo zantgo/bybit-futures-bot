@@ -134,6 +134,11 @@ class Operacion:
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
 
+                # ... (al final de la lista de atributos en __init__)
+        self.be_sl_tp_enabled: bool = False
+        self.be_sl_distance_pct: Optional[float] = None
+        self.be_tp_distance_pct: Optional[float] = None
+
     @property
     def capital_operativo_logico_actual(self) -> float:
         """Suma el capital de todas las posiciones lógicas (abiertas o no). Es la base de capital actual de la operación."""
@@ -324,3 +329,37 @@ class Operacion:
         self.tiempo_inicio_ejecucion = None
         self.tiempo_acumulado_activo_seg = 0.0
         self.tiempo_ultimo_inicio_activo = None
+                # ... (dentro del método reset)
+        self.be_sl_tp_enabled = False
+        self.be_sl_distance_pct = None
+        self.be_tp_distance_pct = None
+
+    # Añade este método si no lo tienes
+    def get_live_break_even_price(self) -> Optional[float]:
+        """
+        Calcula el precio de mercado al cual el PNL total (realizado + no realizado) sería cero.
+        """
+        open_positions = self.posiciones_abiertas
+        if not open_positions:
+            return None
+
+        total_size = sum(p.size_contracts for p in open_positions if p.size_contracts is not None)
+        if total_size <= 1e-12:
+            return None
+
+        pnl_unrealized_target = -self.pnl_realizado_usdt
+        
+        avg_entry = self.avg_entry_price
+        if avg_entry is None:
+            return None
+
+        price_change_needed = safe_division(pnl_unrealized_target, total_size)
+
+        if self.tendencia == 'LONG_ONLY':
+            break_even_price = avg_entry + price_change_needed
+        elif self.tendencia == 'SHORT_ONLY':
+            break_even_price = avg_entry - price_change_needed
+        else:
+            return None
+
+        return break_even_price if break_even_price > 0 else None

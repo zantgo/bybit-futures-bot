@@ -135,6 +135,7 @@ class EventProcessor:
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
                 
     # Reemplaza esta función completa en core/strategy/_event_processor.py
+# Reemplaza la función _check_operation_triggers completa en core/strategy/_event_processor.py
 
     def _check_operation_triggers(self, current_price: float):
         """
@@ -177,9 +178,51 @@ class EventProcessor:
                     
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
+                    # --- INICIO DE LA MODIFICACIÓN (Paso 4.1) ---
+                    # Se añade la lógica para el nuevo modo BE-SL/TP.
+                    # Se comprueba ANTES que los modos basados en ROI para que tenga prioridad si ambos estuvieran activos.
+                    if getattr(operacion, 'be_sl_tp_enabled', False):
+                        break_even_price = operacion.get_live_break_even_price()
+                        
+                        if break_even_price is not None:
+                            sl_dist = getattr(operacion, 'be_sl_distance_pct', None)
+                            tp_dist = getattr(operacion, 'be_tp_distance_pct', None)
+                            
+                            # Comprobar Stop Loss
+                            if sl_dist is not None:
+                                if side == 'long':
+                                    sl_price = break_even_price * (1 - sl_dist / 100)
+                                    if current_price <= sl_price:
+                                        risk_condition_met = True
+                                        risk_reason = f"BE-SL: Precio ({current_price:.4f}) <= Stop ({sl_price:.4f})"
+                                        risk_action = operacion.accion_por_sl_tp_roi
+                                else: # side == 'short'
+                                    sl_price = break_even_price * (1 + sl_dist / 100)
+                                    if current_price >= sl_price:
+                                        risk_condition_met = True
+                                        risk_reason = f"BE-SL: Precio ({current_price:.4f}) >= Stop ({sl_price:.4f})"
+                                        risk_action = operacion.accion_por_sl_tp_roi
+
+                            # Comprobar Take Profit (solo si el SL no se activó)
+                            if not risk_condition_met and tp_dist is not None:
+                                if side == 'long':
+                                    tp_price = break_even_price * (1 + tp_dist / 100)
+                                    if current_price >= tp_price:
+                                        risk_condition_met = True
+                                        risk_reason = f"BE-TP: Precio ({current_price:.4f}) >= TP ({tp_price:.4f})"
+                                        risk_action = operacion.accion_por_sl_tp_roi
+                                else: # side == 'short'
+                                    tp_price = break_even_price * (1 - tp_dist / 100)
+                                    if current_price <= tp_price:
+                                        risk_condition_met = True
+                                        risk_reason = f"BE-TP: Precio ({current_price:.4f}) <= TP ({tp_price:.4f})"
+                                        risk_action = operacion.accion_por_sl_tp_roi
+                    # --- FIN DE LA MODIFICACIÓN ---
+
+
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
-                    if tsl_act_pct is not None and tsl_dist_pct is not None:
+                    if not risk_condition_met and tsl_act_pct is not None and tsl_dist_pct is not None:
                         tsl_state_changed = False
                         if not operacion.tsl_roi_activo and roi >= tsl_act_pct:
                             self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
@@ -245,8 +288,6 @@ class EventProcessor:
                 if operacion.estado == 'ACTIVA':
                     exit_triggered, exit_reason, accion_final = False, "", ""
 
-                    # --- INICIO DE LA SOLUCIÓN DEFINITIVA (LÓGICA DIRECCIONAL Y MENSAJES PRECISOS) ---
-
                     # 3.1 GESTIÓN DE RIESGO POR PRECIO FIJO: Solo se evalúa si hay posiciones abiertas.
                     if operacion.posiciones_abiertas_count > 0:
                         
@@ -289,8 +330,6 @@ class EventProcessor:
                             exit_reason = f"Límite de tiempo de operación ({operacion.tiempo_maximo_min} min) alcanzado"
                             accion_final = operacion.accion_por_limite_tiempo
                     
-                    # --- FIN DE LA SOLUCIÓN DEFINITIVA ---
-
                     # 3.3 EJECUCIÓN: Si cualquier condición de salida se cumplió, se actúa.
                     if exit_triggered:
                         log_msg = f"CONDICIÓN DE SALIDA ALCANZADA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
@@ -303,7 +342,7 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-                    
+                                
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y
