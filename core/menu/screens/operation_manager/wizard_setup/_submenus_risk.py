@@ -79,7 +79,7 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         )
         choice = risk_mode_menu.show()
 
-        if choice is None or choice == 9:
+        if choice is None or choice == 9: # El índice de "Volver" ahora es 9
             break
 
         try:
@@ -142,20 +142,22 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                     temp_op.be_sl_distance_pct = None
                     temp_op.be_tp_distance_pct = None
                     params_changed_in_submenu = True
-
-            elif choice == 3:
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se han corregido los índices para que coincidan con el menú actualizado.
+            elif choice == 4: # El índice [4] ahora es Acción al alcanzar SL/TP por ROI
                 new_action = get_action_menu("Acción al alcanzar SL/TP por ROI", temp_op.accion_por_sl_tp_roi)
                 if new_action != temp_op.accion_por_sl_tp_roi:
                     temp_op.accion_por_sl_tp_roi = new_action
                     params_changed_in_submenu = True
 
-            elif choice == 4:
+            elif choice == 5: # El índice [5] ahora es Acción al alcanzar TSL por ROI
                 new_action = get_action_menu("Acción al alcanzar TSL por ROI", temp_op.accion_por_tsl_roi)
                 if new_action != temp_op.accion_por_tsl_roi:
                     temp_op.accion_por_tsl_roi = new_action
                     params_changed_in_submenu = True
             
-            elif choice == 5:
+            elif choice == 6: # El índice [6] ahora es la nueva Acción por Break-Even
                 new_action = get_action_menu(
                     "Acción al alcanzar SL/TP por Break-Even", 
                     temp_op.accion_por_be_sl_tp
@@ -164,8 +166,9 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                     temp_op.accion_por_be_sl_tp = new_action
                     params_changed_in_submenu = True
             
-            elif choice == 7:
+            elif choice == 8: # El índice [h] Ayuda ahora es 8
                 show_help_popup('wizard_risk_operation')
+            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición cancelada."); time.sleep(1)
