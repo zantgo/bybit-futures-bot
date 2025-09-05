@@ -235,6 +235,8 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -246,8 +248,6 @@ def _display_operation_conditions(operacion: Operacion):
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se añade el precio de transición a la razón del estado si existe
     razon_estado_str = f"\033[94m{operacion.estado_razon}\033[0m"
     precio_transicion = getattr(operacion, 'precio_de_transicion', None)
     if precio_transicion is not None:
@@ -257,8 +257,6 @@ def _display_operation_conditions(operacion: Operacion):
         "Estado Actual": f"{color}{operacion.estado}{reset}",
         "Razón de Estado": razon_estado_str
     }
-    # --- FIN DE LA MODIFICACIÓN ---
-    
     max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
     for key, value in estado_data.items():
@@ -290,32 +288,53 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
+        # --- INICIO DE LA MODIFICACIÓN ---
         riesgos_activos = []
+        
+        # Helper para formatear el precio o mostrar N/A
+        def format_price(price):
+            return f"@ ${price:.4f}" if price is not None else "(Calculando...)"
 
+        # SL/TP por ROI y Dinámico
+        roi_sl_tp_price = operacion.get_roi_sl_tp_price()
+        
         if operacion.dynamic_roi_sl:
-            riesgos_activos.append(f"SL Dinámico por ROI: Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})")
+            riesgos_activos.append(f"SL Dinámico por ROI: Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']}) {format_price(roi_sl_tp_price)}")
         elif operacion.roi_sl:
-            riesgos_activos.append(f"SL por ROI: {operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})")
-
+            riesgos_activos.append(f"SL por ROI: {operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']}) {format_price(roi_sl_tp_price)}")
+        
         if operacion.roi_tp:
-            riesgos_activos.append(f"TP por ROI: {operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})")
+            riesgos_activos.append(f"TP por ROI: {operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']}) {format_price(roi_sl_tp_price)}")
 
+        # TSL por ROI
         if operacion.roi_tsl:
             tsl_str = f"TSL por ROI: Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
             if operacion.tsl_roi_activo:
                 tsl_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
             riesgos_activos.append(tsl_str)
 
+        # SL/TP por Break-Even
+        be_price = operacion.get_live_break_even_price()
         if operacion.be_sl:
-            riesgos_activos.append(f"SL por Break-Even: Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})")
+            sl_price = None
+            if be_price:
+                sl_dist = operacion.be_sl['distancia']
+                sl_price = be_price * (1 - sl_dist / 100) if operacion.tendencia == 'LONG_ONLY' else be_price * (1 + sl_dist / 100)
+            riesgos_activos.append(f"SL por Break-Even: Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']}) {format_price(sl_price)}")
+        
         if operacion.be_tp:
-            riesgos_activos.append(f"TP por Break-Even: Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']})")
+            tp_price = None
+            if be_price:
+                tp_dist = operacion.be_tp['distancia']
+                tp_price = be_price * (1 + tp_dist / 100) if operacion.tendencia == 'LONG_ONLY' else be_price * (1 - tp_dist / 100)
+            riesgos_activos.append(f"TP por Break-Even: Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']}) {format_price(tp_price)}")
 
         if not riesgos_activos:
             print(_create_box_line("  - Ningún límite de riesgo de operación configurado.", box_width))
         else:
             for riesgo in riesgos_activos:
                 print(_create_box_line(f"  - {riesgo}", box_width))
+        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -342,7 +361,6 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
@@ -407,23 +425,18 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
     print("└" + "─" * (box_width - 2) + "┘")
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
+
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
     print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
 
-    # --- INICIO DE LA CORRECCIÓN: Mostrar snapshot en estado DETENIDA ---
-    #
-    # La lógica original fue reemplazada. Ahora, si el objeto 'operacion' existe,
-    # simplemente procede a mostrar sus datos, ya que estos serán el snapshot final
-    # si el estado es DETENIDA.
-    #
     if not operacion:
         print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
         print("└" + "─" * (box_width - 2) + "┘")
         return
-    # --- FIN DE LA CORRECCIÓN ---
     
     utils_module = _deps.get("utils_module")
     if not utils_module:
@@ -433,12 +446,17 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
 
     from core.strategy.pm import _calculations as pm_calculations
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se extraen cálculos y se preparan las nuevas métricas de distancia
+    
     aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
         open_positions=operacion.posiciones_abiertas,
         leverage=operacion.apalancamiento,
         side=side
     )
-    avg_entry_price = operacion.avg_entry_price
+    # Se usa el break-even en vivo, que es más preciso que el avg_entry_price
+    live_break_even_price = operacion.get_live_break_even_price()
+    
     live_performance = operacion.get_live_performance(current_price, utils_module)
     
     pnl_realizado = operacion.pnl_realizado_usdt
@@ -446,7 +464,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
     equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
     roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
 
-    # Si la operación está detenida, no hay PNL no realizado.
     if operacion.estado == 'DETENIDA':
         pnl_no_realizado = 0.0
         equity_actual_vivo = operacion.equity_total_usdt
@@ -462,6 +479,26 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
     
+    # Cálculo y formateo de la distancia al Break-Even
+    dist_to_be_str = "N/A"
+    if live_break_even_price is not None and current_price > 0:
+        if side == 'long':
+            dist_pct = ((current_price - live_break_even_price) / live_break_even_price) * 100
+        else: # short
+            dist_pct = ((live_break_even_price - current_price) / live_break_even_price) * 100
+        dist_to_be_str = f"{get_color(dist_pct)}{dist_pct:+.2f}%{reset}"
+
+    # Cálculo y formateo de la distancia a la Liquidación
+    dist_to_liq_str = "N/A"
+    if aggr_liq_price is not None and current_price > 0:
+        if side == 'long':
+            dist_pct = ((current_price - aggr_liq_price) / current_price) * 100
+        else: # short
+            dist_pct = ((aggr_liq_price - current_price) / current_price) * 100
+        
+        color_dist = "\033[91m" if dist_pct < 20 else ("\033[93m" if dist_pct < 50 else "\033[92m")
+        dist_to_liq_str = f"{color_dist}{dist_pct:.2f}%{reset}"
+
     data = {
         "--- CAPITAL ---": "",
         "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
@@ -473,14 +510,17 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
         "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
         "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
+        "Precio Break-Even (Est.)": f"\033[96m${live_break_even_price:.4f}\033[0m" if live_break_even_price else "N/A",
+        "Distancia a Break-Even": dist_to_be_str,
         "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
-        "Precio Break-Even (Est.)": f"\033[96m${avg_entry_price:.4f}\033[0m" if avg_entry_price else "N/A",
+        "Distancia a Liquidación": dist_to_liq_str,
         "--- CONTADORES ---": "",
         "Total Reinvertido": f"${total_reinvertido:.4f}",
         "Comisiones Totales": f"${comisiones_totales:.4f}",
         "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
+    # --- FIN DE LA MODIFICACIÓN ---
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():
