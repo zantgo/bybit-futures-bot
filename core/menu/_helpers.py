@@ -190,20 +190,37 @@ HELP_TEXTS = {
     """),
 
     "wizard_risk_operation": textwrap.dedent("""
-        AYUDA: GESTIÓN DE RIESGO DE OPERACIÓN (BASADO EN ROI)
+        AYUDA: EDITOR DE RIESGO DE OPERACIÓN
 
-        Define las redes de seguridad para el rendimiento GLOBAL de toda la operación,
-        basándose en el Retorno sobre la Inversión (ROI).
+        Esta pantalla define las redes de seguridad automáticas para el
+        rendimiento GLOBAL de toda la operación. Puedes combinar varios
+        tipos de límites para crear una estrategia de riesgo robusta.
 
-        Opciones:
-        - Límite SL/TP por ROI: Establece un objetivo de pérdida máxima (SL) o
-          ganancia (TP) para toda la estrategia. Puede ser un % fijo o dinámico
-          (que sigue tus ganancias realizadas).
-        - Límite TSL por ROI: Un trailing stop sobre el ROI total. Permite que
-          tus ganancias crezcan mientras protege una parte de ellas.
-        - Acción al alcanzar Límite: Define qué hará el bot si se activa uno de
-          estos límites: 'PAUSAR' (deja de abrir nuevas posiciones) o 'DETENER'
-          (cierra todo y resetea la operación).
+        Prioridad de Ejecución:
+        1. Liquidación (siempre activa).
+        2. Todos los Stop Loss (SL) se revisan primero.
+        3. Todos los Take Profit (TP) y Trailing Stops (TSL) se revisan después.
+        
+        La primera condición que se cumpla en un tick, se ejecutará.
+
+        Tipos de Límite:
+        - SL/TP por ROI: Establece un límite basado en el Retorno sobre la
+          Inversión (ROI) total. Es útil para definir un objetivo de ganancia
+          o una pérdida máxima sobre tu capital inicial. Los SL se configuran
+          con valores positivos (ej. 10 para un -10% de ROI).
+
+        - TSL por ROI: Un Trailing Stop sobre el ROI total. Una vez que el ROI
+          alcanza un umbral de 'Activación', el stop "perseguirá" al ROI pico
+          a la 'Distancia' configurada, asegurando ganancias.
+        
+        - SL Dinámico por ROI: Un tipo especial de Trailing Stop que sigue a tu
+          ROI REALIZADO (ganancias ya cerradas). Mueve el suelo de tu stop
+          loss a medida que aseguras profits.
+
+        - SL/TP por Break-Even: El modo más predecible. Establece límites de
+          precio a una distancia porcentual fija de tu precio de break-even
+          actual. A medida que ganas dinero, tu break-even mejora y los
+          límites se mueven automáticamente a tu favor.
     """),
 
     "wizard_entry_conditions": textwrap.dedent("""

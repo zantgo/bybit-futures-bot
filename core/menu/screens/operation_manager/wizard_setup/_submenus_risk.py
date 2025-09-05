@@ -1,4 +1,4 @@
-# core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
+# Reemplaza el archivo completo: core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
 
 import time
 from typing import Any, Dict
@@ -33,12 +33,7 @@ def get_action_menu(prompt: str, current_action: str) -> str:
     if choice == 1: return 'DETENER'
     return current_action
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# La función _edit_operation_risk_submenu ha sido completamente refactorizada.
 def _edit_operation_risk_submenu(temp_op: Operacion):
-    """
-    Submenú rediseñado para la gestión granular de cada tipo de riesgo de operación.
-    """
     from ...._helpers import show_help_popup
     params_changed_in_submenu = False
     
@@ -46,7 +41,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
         clear_screen()
         print_tui_header("Editor de Riesgo de Operación")
 
-        # --- Funciones de ayuda para formatear el estado actual ---
         def format_sl_tp(data: Dict, label: str) -> str:
             if data:
                 return f"{data.get('valor', 'N/A')}% (Acción: {data.get('accion', 'N/A')})"
@@ -67,7 +61,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                 return f"{data.get('distancia', 'N/A')}% (Acción: {data.get('accion', 'N/A')})"
             return "Desactivado"
 
-        # --- Creación de los ítems del menú ---
         menu_items = [
             f"[1] Stop Loss por ROI: {format_sl_tp(temp_op.roi_sl, 'SL')}",
             f"[2] Take Profit por ROI: {format_sl_tp(temp_op.roi_tp, 'TP')}",
@@ -93,14 +86,27 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
             break
 
         try:
+            # --- INICIO DE LA MODIFICACIÓN ---
             # Opción 1: SL por ROI
             if choice == 0:
                 current_val = temp_op.roi_sl.get('valor') if temp_op.roi_sl else None
                 current_act = temp_op.roi_sl.get('accion', 'DETENER') if temp_op.roi_sl else 'DETENER'
-                new_val = get_input("Nuevo SL por ROI (%)", float, current_val, is_optional=True, context_info="Valor negativo. Deja vacío para desactivar.")
-                if new_val is not None:
+                
+                # Pedimos siempre un valor positivo
+                new_val_positive = get_input(
+                    "Distancia SL por ROI (%)", 
+                    float, 
+                    abs(current_val) if current_val is not None else None, 
+                    min_val=0.1, 
+                    is_optional=True, 
+                    context_info="Porcentaje de pérdida de ROI. Introduce un valor positivo."
+                )
+
+                if new_val_positive is not None:
+                    # Convertimos a negativo internamente
+                    new_val_negative = -abs(new_val_positive)
                     new_act = get_action_menu("Acción al alcanzar el SL por ROI", current_act)
-                    temp_op.roi_sl = {'valor': new_val, 'accion': new_act}
+                    temp_op.roi_sl = {'valor': new_val_negative, 'accion': new_act}
                 else:
                     temp_op.roi_sl = None
                 params_changed_in_submenu = True
@@ -109,24 +115,36 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
             elif choice == 1:
                 current_val = temp_op.roi_tp.get('valor') if temp_op.roi_tp else None
                 current_act = temp_op.roi_tp.get('accion', 'PAUSAR') if temp_op.roi_tp else 'PAUSAR'
-                new_val = get_input("Nuevo TP por ROI (%)", float, current_val, is_optional=True, context_info="Valor positivo. Deja vacío para desactivar.")
-                if new_val is not None:
+
+                # Pedimos siempre un valor positivo
+                new_val_positive = get_input(
+                    "Distancia TP por ROI (%)", 
+                    float, 
+                    current_val, 
+                    min_val=0.1, 
+                    is_optional=True, 
+                    context_info="Porcentaje de ganancia de ROI. Introduce un valor positivo."
+                )
+
+                if new_val_positive is not None:
                     new_act = get_action_menu("Acción al alcanzar el TP por ROI", current_act)
-                    temp_op.roi_tp = {'valor': new_val, 'accion': new_act}
+                    # Nos aseguramos de que sea positivo
+                    temp_op.roi_tp = {'valor': abs(new_val_positive), 'accion': new_act}
                 else:
                     temp_op.roi_tp = None
                 params_changed_in_submenu = True
+            # --- FIN DE LA MODIFICACIÓN ---
 
             # Opción 3: TSL por ROI
             elif choice == 2:
-                current_act = temp_op.roi_tsl.get('activacion') if temp_op.roi_tsl else None
+                current_act_val = temp_op.roi_tsl.get('activacion') if temp_op.roi_tsl else None
                 current_dist = temp_op.roi_tsl.get('distancia') if temp_op.roi_tsl else None
                 current_action = temp_op.roi_tsl.get('accion', 'PAUSAR') if temp_op.roi_tsl else 'PAUSAR'
-                new_act = get_input("Nueva Activación TSL (%)", float, current_act, min_val=0.1, is_optional=True, context_info="Deja vacío para desactivar.")
-                if new_act is not None:
+                new_act_val = get_input("Nueva Activación TSL (%)", float, current_act_val, min_val=0.1, is_optional=True, context_info="Deja vacío para desactivar.")
+                if new_act_val is not None:
                     new_dist = get_input("Nueva Distancia TSL (%)", float, current_dist, min_val=0.1)
                     new_action = get_action_menu("Acción al alcanzar el TSL", current_action)
-                    temp_op.roi_tsl = {'activacion': new_act, 'distancia': new_dist, 'accion': new_action}
+                    temp_op.roi_tsl = {'activacion': new_act_val, 'distancia': new_dist, 'accion': new_action}
                 else:
                     temp_op.roi_tsl = None
                 params_changed_in_submenu = True
@@ -182,4 +200,3 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
             print("\nEdición cancelada."); time.sleep(1)
             
     return params_changed_in_submenu
-# --- FIN DE LA MODIFICACIÓN ---
