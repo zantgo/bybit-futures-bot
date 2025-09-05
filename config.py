@@ -114,7 +114,7 @@ OPERATION_DEFAULTS = {
     # Parámetros de RIESGO a nivel de OPERACIÓN COMPLETA.
     # La acción al cumplirse (PAUSAR o DETENER) se configura en el config.py
     "OPERATION_RISK": {
-        "AFTER_STATE": 'DETENER', # PAUSAR O DETENER
+        "AFTER_STATE": 'DETENER', # PAUSAR O DETENER DEFAULT PARA TODOS LOS RIESGOS SE PUEDE EDITAR ELN LA TUI SE DEBE PONER ESTE DEFAULT EN TODOS 
         "ROI_SL_TP": {
             "ENABLED": False, 
             "PERCENTAGE": -25.0, 
@@ -128,6 +128,13 @@ OPERATION_DEFAULTS = {
             "ENABLED": False, # Por defecto, está desactivado.
             "TRAIL_PCT": 50.0 # El valor a restar del ROI realizado. (ej. ROI 20% - 10% = SL/TP en +10%)
         },
+                # --- INICIO DE LA MODIFICACIÓN ---
+        "BE_SL_TP": { # <-- NUEVO DICCIONARIO
+            "ENABLED": False,
+            "SL_DISTANCE_PCT": 10.0,
+            "TP_DISTANCE_PCT": 20.0,
+        },
+        # --- FIN DE LA MODIFICACIÓN ---
     },
     # Parámetros de LÍMITES OPERATIVOS.
     # La acción al cumplirse (PAUSAR o DETENER) es configurable en la TUI.

@@ -37,8 +37,6 @@ def init(dependencies: Dict[str, Any]):
     global _deps
     _deps = dependencies
 
-# Reemplaza la función _edit_strategy_global_submenu completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
 def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
     from ...._helpers import show_help_popup # <-- Importación añadida
     params_changed_in_submenu = False
@@ -46,7 +44,6 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
     while True:
         clear_screen(); print_tui_header("Editando Estrategia Global")
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Apalancamiento ({temp_op.apalancamiento:.1f}x)",
             f"[2] Distancia de Promediación ({temp_op.averaging_distance_pct:.2f}%)",
@@ -58,7 +55,6 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
         
         if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
-        # --- FIN DE LA MODIFICACIÓN ---
         
         try:
             if choice == 0:
@@ -80,16 +76,12 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
                     new_val = reinvest_choice == 0
                     if new_val != temp_op.auto_reinvest_enabled: temp_op.auto_reinvest_enabled = new_val; params_changed_in_submenu = True
             
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 4: # Índice de Ayuda
                 show_help_popup('wizard_strategy_global')
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled: continue
         
     return params_changed_in_submenu
-
-# Reemplaza la función _edit_individual_risk_submenu completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
 
 def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
     from ...._helpers import show_help_popup # <-- Importación añadida
@@ -98,7 +90,6 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
     while True:
         clear_screen(); print_tui_header("Editando Riesgo por Posición Individual")
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] SL Individual ({temp_op.sl_posicion_individual_pct or 'Desactivado'}%)",
             f"[2] Activación TSL ({temp_op.tsl_activacion_pct or 'Desactivado'}%)",
@@ -112,7 +103,6 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
 
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
         if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
-        # --- FIN DE LA MODIFICACIÓN ---
         
         try:
             if choice == 0:
@@ -128,14 +118,14 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
                 new_val = get_input("Nueva Distancia TSL (%)", float, temp_op.tsl_distancia_pct, min_val=0.01)
                 if new_val != temp_op.tsl_distancia_pct: temp_op.tsl_distancia_pct = new_val; params_changed_in_submenu = True
             
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 4: # Índice de Ayuda
                 show_help_popup('wizard_risk_individual')
-            # --- FIN DE LA MODIFICACIÓN ---
             
         except UserInputCancelled: continue
         
     return params_changed_in_submenu
+
+# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
 
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     action = "Modificando" if is_modification else "Creando Nueva"
@@ -176,8 +166,21 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     if getattr(operacion, 'dynamic_roi_sl_enabled', False): op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {getattr(operacion, 'dynamic_roi_sl_trail_pct', 0)}%)"
     else: op_risk_data["Límite SL/TP por ROI (%)"] = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {operacion.sl_roi_pct / leverage:.4f}%)" if operacion.sl_roi_pct is not None else "Desactivado"
     op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    be_sl_tp_dist_str = "Desactivado"
+    if getattr(operacion, 'be_sl_tp_enabled', False):
+        sl_dist = getattr(operacion, 'be_sl_distance_pct', 'N/A')
+        tp_dist = getattr(operacion, 'be_tp_distance_pct', 'N/A')
+        be_sl_tp_dist_str = f"SL {sl_dist}% / TP {tp_dist}%"
+    
+    op_risk_data["Límite SL/TP por Break-Even"] = be_sl_tp_dist_str
+    
     op_risk_data["Acción por SL/TP ROI"] = operacion.accion_por_sl_tp_roi
     op_risk_data["Acción por TSL ROI"] = operacion.accion_por_tsl_roi
+    op_risk_data["Acción por SL/TP Break-Even"] = operacion.accion_por_be_sl_tp
+    # --- FIN DE LA MODIFICACIÓN ---
+
     max_key = max(len(k) for k in op_risk_data.keys()) if op_risk_data else 0
     for label, value in op_risk_data.items(): _print_line(label, value, max_key)
     
@@ -219,9 +222,11 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         _print_line("Límites de Salida", "Ninguno configurado", max_key_exit)
 
     print("└" + "─" * (box_width - 2) + "┘")
-    
+
+# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
-    from ...._helpers import show_help_popup # <-- Importación añadida
+    from ...._helpers import show_help_popup
     config_module = _deps.get("config_module")
     if not config_module:
         print("ERROR CRÍTICO: Módulo de configuración no encontrado."); time.sleep(3); return
@@ -246,7 +251,20 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
         
         temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
-        temp_op.accion_por_tsl_roi = 'PAUSAR'
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        temp_op.accion_por_tsl_roi = defaults["OPERATION_RISK"]["AFTER_STATE"] # <-- LÍNEA CORREGIDA
+        # --- (LÍNEA ORIGINAL COMENTADA) ---
+        # temp_op.accion_por_tsl_roi = 'PAUSAR'
+        # --- FIN DE LA MODIFICACIÓN ---
+
+        be_sl_tp_config = defaults["OPERATION_RISK"].get("BE_SL_TP", {})
+        temp_op.be_sl_tp_enabled = be_sl_tp_config.get("ENABLED", False)
+        if temp_op.be_sl_tp_enabled:
+            temp_op.be_sl_distance_pct = be_sl_tp_config.get("SL_DISTANCE_PCT")
+            temp_op.be_tp_distance_pct = be_sl_tp_config.get("TP_DISTANCE_PCT")
+        
+        temp_op.accion_por_be_sl_tp = defaults["OPERATION_RISK"]["AFTER_STATE"]
 
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
@@ -321,19 +339,13 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 if TerminalMenu(["[1] Sí, guardar y aplicar", "[2] No, seguir editando"], title="\n¿Confirmas estos parámetros?").show() == 0:
                     success, msg = om_api.create_or_update_operation(side, temp_op.__dict__)
 
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Después de guardar, se comprueba si el Ticker necesita ser reactivado.
                     from core.strategy.sm import api as sm_api
                     if not sm_api.is_running():
-                        # Se obtiene el estado más reciente de la operación después de la actualización.
                         new_op_state = om_api.get_operation_by_side(side)
-                        # Si el nuevo estado ya no es DETENIDA, significa que la hemos activado.
                         if new_op_state and new_op_state.estado != 'DETENIDA':
                             print("\n\033[93mReactivando Ticker de precios...\033[0m")
                             sm_api.start()
-                            # Pequeña pausa para que el Ticker arranque y la TUI reciba el primer dato.
                             time.sleep(1) 
-                    # --- FIN DE LA MODIFICACIÓN ---
 
                     print(f"\n{msg}"); time.sleep(2.5); break
             

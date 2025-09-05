@@ -138,6 +138,7 @@ class Operacion:
         self.be_sl_tp_enabled: bool = False
         self.be_sl_distance_pct: Optional[float] = None
         self.be_tp_distance_pct: Optional[float] = None
+        self.accion_por_be_sl_tp: str = 'DETENER' # <-- NUEVA LÍNEA
 
     @property
     def capital_operativo_logico_actual(self) -> float:
@@ -333,7 +334,8 @@ class Operacion:
         self.be_sl_tp_enabled = False
         self.be_sl_distance_pct = None
         self.be_tp_distance_pct = None
-
+        self.accion_por_be_sl_tp = 'DETENER' # <-- NUEVA LÍNEA
+        
     # Añade este método si no lo tienes
     def get_live_break_even_price(self) -> Optional[float]:
         """

@@ -235,6 +235,8 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
         
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -276,7 +278,6 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - Activar si Precio < {operacion.cond_entrada_below:.4f}", box_width))
             if operacion.tiempo_espera_minutos:
                 print(_create_box_line(f"  - Activar tras esperar {operacion.tiempo_espera_minutos} minutos", box_width))
-        # --- FIN DE LA LÓGICA CORREGIDA ---
 
         # --- Gestión de Riesgo de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -308,6 +309,16 @@ def _display_operation_conditions(operacion: Operacion):
                 tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         print(_create_box_line(f"  - {tsl_roi_str}", box_width))
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        be_sl_tp_str = "SL/TP por Break-Even: Desactivado"
+        if getattr(operacion, 'be_sl_tp_enabled', False):
+            sl_dist = getattr(operacion, 'be_sl_distance_pct', 'N/A')
+            tp_dist = getattr(operacion, 'be_tp_distance_pct', 'N/A')
+            accion = getattr(operacion, 'accion_por_be_sl_tp', 'N/A')
+            be_sl_tp_str = f"SL/TP por Break-Even: SL {sl_dist}% / TP {tp_dist}% (Acción: {accion})"
+        print(_create_box_line(f"  - {be_sl_tp_str}", box_width))
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         print(_create_box_line(f"  - Acción por SL/TP ROI: {operacion.accion_por_sl_tp_roi}", box_width))
         print(_create_box_line(f"  - Acción por TSL ROI: {operacion.accion_por_tsl_roi}", box_width))
 
@@ -316,8 +327,6 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
         
-        # NOTA: La lógica de esta sección ya era correcta y usaba los atributos nuevos.
-        # Se mantiene sin cambios para preservar la funcionalidad.
         exit_limits = []
         if operacion.cond_salida_above:
             cond = operacion.cond_salida_above

@@ -109,10 +109,8 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-    
-# ==============================================================================
-# --- INICIO DEL CÓDIGO A REEMPLAZAR (Función Única) ---
-# ==============================================================================
+
+# Reemplaza la función display_risk_panel completa con este código corregido
 
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
@@ -172,7 +170,6 @@ def display_risk_panel(
     color_code = "\033[91m" if is_sl else "\033[92m"
     reset_code = "\033[0m"
 
-    # --- INICIO DE LA NUEVA FUNCIONALIDAD: Cálculo de Distancia a SL/TP ---
     sl_tp_dist_pct_str = "N/A"
     if current_market_price > 0 and roi_price_proj is not None:
         if side == 'long':
@@ -180,11 +177,38 @@ def display_risk_panel(
         else: # short
             sl_tp_dist_pct = ((roi_price_proj - current_market_price) / current_market_price) * 100
         
-        # El color depende de si es SL (riesgo) o TP (ganancia)
         color_sl_tp = color_code
         sl_tp_dist_pct_str = f"{color_sl_tp}{sl_tp_dist_pct:.2f}% de margen de {direction}{reset_code}"
-    # --- FIN DE LA NUEVA FUNCIONALIDAD ---
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Cálculo y formateo de los precios de SL/TP basados en Break-Even
+    be_sl_price_proj_str = "N/A"
+    be_tp_price_proj_str = "N/A"
+    
+    if getattr(operacion, 'be_sl_tp_enabled', False):
+        # Para la proyección, usamos el break-even que ya calculó `calculate_projected_risk_metrics`
+        # Este BE se basa en la simulación de todas las posiciones (abiertas + pendientes)
+        break_even_price_proj = metrics.get('projected_break_even_price') # Suponiendo que la métrica se llama así
+        
+        # Como fallback (o si prefieres este cálculo), podemos usar el BE en vivo de la operación
+        if break_even_price_proj is None:
+             break_even_price_proj = operacion.get_live_break_even_price()
+
+        if break_even_price_proj is not None:
+            sl_dist = getattr(operacion, 'be_sl_distance_pct', None)
+            tp_dist = getattr(operacion, 'be_tp_distance_pct', None)
+
+            if sl_dist is not None:
+                if side == 'long': sl_price = break_even_price_proj * (1 - sl_dist / 100)
+                else: sl_price = break_even_price_proj * (1 + sl_dist / 100)
+                be_sl_price_proj_str = f"${sl_price:.4f}"
+
+            if tp_dist is not None:
+                if side == 'long': tp_price = break_even_price_proj * (1 + tp_dist / 100)
+                else: tp_price = break_even_price_proj * (1 - tp_dist / 100)
+                be_tp_price_proj_str = f"${tp_price:.4f}"
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     # --- Renderizado del Panel ---
     print("\n┌" + "─" * box_width + "┐")
     print(_create_box_line("Panel de Riesgo: Realidad vs. Proyección", box_width + 2, 'center'))
@@ -201,10 +225,14 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liq. Proyectado      : {color_code}{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
-    # --- INICIO DE LA MODIFICACIÓN DE ETIQUETAS Y NUEVA LÍNEA ---
     print(_create_box_line(f"  Precio Obj. {label} Proyectado: {color_code}{roi_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a {label} Proyectado : {sl_tp_dist_pct_str}", box_width + 2))
-    # --- FIN DE LA MODIFICACIÓN DE ETIQUETAS Y NUEVA LÍNEA ---
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Añadimos las nuevas líneas de visualización para el modo Break-Even
+    print(_create_box_line(f"  Precio Obj. SL por Break-Even: {color_code}{be_sl_price_proj_str}{reset_code}", box_width + 2))
+    print(_create_box_line(f"  Precio Obj. TP por Break-Even: {color_code}{be_tp_price_proj_str}{reset_code}", box_width + 2))
+    # --- FIN DE LA MODIFICACIÓN ---
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -212,7 +240,3 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO A REEMPLAZAR ---
-# ==============================================================================

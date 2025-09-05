@@ -1,3 +1,4 @@
+
 from typing import List, Dict, Optional
 import numpy as np
 
@@ -131,9 +132,6 @@ def simulate_max_positions(
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
 
-# ==============================================================================
-# --- INICIO DEL CÓDIGO CORREGIDO (Función Única) ---
-# ==============================================================================
 
 def calculate_projected_risk_metrics(
     operacion: 'Operacion',
@@ -210,20 +208,29 @@ def calculate_projected_risk_metrics(
     if current_market_price > 0 and projected_liq_price is not None:
         liquidation_distance_pct = ((current_market_price - projected_liq_price) / current_market_price) * 100 if side == 'long' else ((projected_liq_price - current_market_price) / current_market_price) * 100
 
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se añade el cálculo del break-even proyectado
+    projected_pnl_unrealized_target = -operacion.pnl_realizado_usdt
+    projected_price_change_needed = utils.safe_division(projected_pnl_unrealized_target, sim_total_size)
+    
+    projected_break_even_price = None
+    if sim_avg_price is not None and sim_avg_price > 0:
+        if side == 'long':
+            projected_break_even_price = sim_avg_price + projected_price_change_needed
+        else: # side == 'short'
+            projected_break_even_price = sim_avg_price - projected_price_change_needed
+    # --- FIN DE LA MODIFICACIÓN ---
+
     # --- 5. Cálculo del Precio Objetivo de ROI Proyectado ---
     projected_roi_target_price = None
-    sl_roi_pct_target = None # Inicializar como None
+    sl_roi_pct_target = None
 
-    # --- INICIO DE LA LÓGICA CORREGIDA ---
     if operacion.dynamic_roi_sl_enabled:
-        # Si es dinámico, calculamos el objetivo AHORA, basado en el ROI actual.
-        realized_roi = operacion.realized_twrr_roi # Será 0.0 si no hay trades cerrados.
+        realized_roi = operacion.realized_twrr_roi
         trail_pct = operacion.dynamic_roi_sl_trail_pct or 0.0
         sl_roi_pct_target = realized_roi - trail_pct
     else:
-        # Si es manual, simplemente usamos el valor configurado.
         sl_roi_pct_target = operacion.sl_roi_pct
-    # --- FIN DE LA LÓGICA CORREGIDA ---
         
     if sl_roi_pct_target is not None:
         all_positions_dicts = [p.__dict__ for p in all_positions]
@@ -248,6 +255,11 @@ def calculate_projected_risk_metrics(
         'liquidation_price_actual': live_liq_price,
         'roi_sl_tp_target_price_actual': operacion.get_roi_sl_tp_price(),
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añade la nueva clave al diccionario de retorno
+        'projected_break_even_price': projected_break_even_price,
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         'projected_liquidation_price': projected_liq_price,
         'projected_roi_target_price': projected_roi_target_price,
         
@@ -259,7 +271,3 @@ def calculate_projected_risk_metrics(
     final_metrics.update(max_sim_metrics)
     
     return final_metrics
-
-# ==============================================================================
-# --- FIN DEL CÓDIGO CORREGIDO ---
-# ==============================================================================

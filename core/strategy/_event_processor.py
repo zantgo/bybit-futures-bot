@@ -133,9 +133,7 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
-                
-    # Reemplaza esta función completa en core/strategy/_event_processor.py
-# Reemplaza la función _check_operation_triggers completa en core/strategy/_event_processor.py
+# Reemplaza esta función completa en core/strategy/_event_processor.py
 
     def _check_operation_triggers(self, current_price: float):
         """
@@ -178,9 +176,8 @@ class EventProcessor:
                     
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
-                    # --- INICIO DE LA MODIFICACIÓN (Paso 4.1) ---
+                    # --- INICIO DE LA MODIFICACIÓN ---
                     # Se añade la lógica para el nuevo modo BE-SL/TP.
-                    # Se comprueba ANTES que los modos basados en ROI para que tenga prioridad si ambos estuvieran activos.
                     if getattr(operacion, 'be_sl_tp_enabled', False):
                         break_even_price = operacion.get_live_break_even_price()
                         
@@ -195,13 +192,15 @@ class EventProcessor:
                                     if current_price <= sl_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-SL: Precio ({current_price:.4f}) <= Stop ({sl_price:.4f})"
-                                        risk_action = operacion.accion_por_sl_tp_roi
+                                        # Se usa la nueva variable de acción dedicada
+                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER') 
                                 else: # side == 'short'
                                     sl_price = break_even_price * (1 + sl_dist / 100)
                                     if current_price >= sl_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-SL: Precio ({current_price:.4f}) >= Stop ({sl_price:.4f})"
-                                        risk_action = operacion.accion_por_sl_tp_roi
+                                        # Se usa la nueva variable de acción dedicada
+                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
 
                             # Comprobar Take Profit (solo si el SL no se activó)
                             if not risk_condition_met and tp_dist is not None:
@@ -210,15 +209,16 @@ class EventProcessor:
                                     if current_price >= tp_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-TP: Precio ({current_price:.4f}) >= TP ({tp_price:.4f})"
-                                        risk_action = operacion.accion_por_sl_tp_roi
+                                        # Se usa la nueva variable de acción dedicada
+                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
                                 else: # side == 'short'
                                     tp_price = break_even_price * (1 - tp_dist / 100)
                                     if current_price <= tp_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-TP: Precio ({current_price:.4f}) <= TP ({tp_price:.4f})"
-                                        risk_action = operacion.accion_por_sl_tp_roi
+                                        # Se usa la nueva variable de acción dedicada
+                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
                     # --- FIN DE LA MODIFICACIÓN ---
-
 
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
@@ -342,7 +342,8 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-                                
+            
+
     def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
         """
         Procesa el tick para generar un evento crudo y luego usa TAManager y
