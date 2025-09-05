@@ -45,7 +45,7 @@ class _Workflow:
 
         operacion = self._om_api.get_operation_by_side(side)
         
-        if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'DETENIENDO']):
+        if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
             return
 
         try:
