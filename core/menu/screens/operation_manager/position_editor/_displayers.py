@@ -105,7 +105,9 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-
+    
+# --- INICIO DE LA MODIFICACIÓN ---
+# La función display_risk_panel ha sido completamente refactorizada.
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
@@ -119,7 +121,7 @@ def display_risk_panel(
     box_width = _get_terminal_width() - 4
     reset_code = "\033[0m"
     
-    # --- 1. Extracción y Formateo de Métricas Generales ---
+    # --- 1. Extracción de Métricas Generales ---
     avg_price_actual_str = f"${metrics.get('avg_entry_price_actual'):.4f}" if metrics.get('avg_entry_price_actual') else "N/A"
     liq_price_actual_str = f"${metrics.get('liquidation_price_actual'):.4f}" if metrics.get('liquidation_price_actual') else "N/A"
     
@@ -143,63 +145,65 @@ def display_risk_panel(
     max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
     max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
 
-    # --- 2. Lógica Dinámica para SL/TP de Operación ---
-    target_price_actual = None
-    target_price_proj = None
-    label_actual = ""
-    label_proj = ""
-    target_dist_str = "N/A"
-    color_code = "\033[90m" # Gris por defecto
+    # --- 2. Preparación de Variables para SL/TP de Operación ---
+    sl_price_actual_str, tp_price_actual_str = "N/A", "N/A"
+    sl_price_proj_str, tp_price_proj_str = "N/A", "N/A"
+    sl_dist_str, tp_dist_str = "N/A", "N/A"
+    
+    # -- Lógica para Riesgo Actual (Posiciones Abiertas) --
+    if operacion.posiciones_abiertas_count > 0:
+        if operacion.be_sl or operacion.be_tp:
+            be_price = operacion.get_live_break_even_price()
+            if be_price:
+                if operacion.be_sl:
+                    sl_dist = operacion.be_sl['distancia']
+                    sl_price = be_price * (1 - sl_dist / 100) if side == 'long' else be_price * (1 + sl_dist / 100)
+                    sl_price_actual_str = f"${sl_price:.4f}"
+                if operacion.be_tp:
+                    tp_dist = operacion.be_tp['distancia']
+                    tp_price = be_price * (1 + tp_dist / 100) if side == 'long' else be_price * (1 - tp_dist / 100)
+                    tp_price_actual_str = f"${tp_price:.4f}"
+        
+        elif operacion.roi_sl or operacion.roi_tp or operacion.dynamic_roi_sl:
+            price_obj = metrics.get('roi_sl_tp_target_price_actual')
+            if price_obj is not None:
+                if operacion.roi_sl or operacion.dynamic_roi_sl:
+                    sl_price_actual_str = f"${price_obj:.4f}"
+                elif operacion.roi_tp:
+                    tp_price_actual_str = f"${price_obj:.4f}"
 
-    # Modo 1: Break-Even SL/TP (Tiene prioridad)
+    # -- Lógica para Riesgo Proyectado (Todas las Posiciones) --
     if operacion.be_sl or operacion.be_tp:
-        break_even_price_proj = metrics.get('projected_break_even_price')
-        break_even_price_actual = operacion.get_live_break_even_price()
-        
-        sl_config = operacion.be_sl
-        tp_config = operacion.be_tp
-        
-        # Determinar si es SL o TP el límite más relevante
-        is_sl = sl_config is not None
-        is_tp = tp_config is not None
-        
-        if is_sl and is_tp:
-            label_actual, label_proj = "SL/TP (BE)", "SL/TP Proyectado (BE)"
-        elif is_sl:
-            label_actual, label_proj = "SL (BE)", "SL Proyectado (BE)"
-        else:
-            label_actual, label_proj = "TP (BE)", "TP Proyectado (BE)"
+        be_price_proj = metrics.get('projected_break_even_price')
+        if be_price_proj:
+            if operacion.be_sl:
+                sl_dist = operacion.be_sl['distancia']
+                sl_price = be_price_proj * (1 - sl_dist / 100) if side == 'long' else be_price_proj * (1 + sl_dist / 100)
+                sl_price_proj_str = f"${sl_price:.4f}"
+                if current_market_price > 0:
+                    dist_pct = ((sl_price - current_market_price) / current_market_price) * 100 if side == 'short' else ((current_market_price - sl_price) / current_market_price) * 100
+                    sl_dist_str = f"\033[91m{dist_pct:.2f}% de margen{reset_code}"
+            if operacion.be_tp:
+                tp_dist = operacion.be_tp['distancia']
+                tp_price = be_price_proj * (1 + tp_dist / 100) if side == 'long' else be_price_proj * (1 - tp_dist / 100)
+                tp_price_proj_str = f"${tp_price:.4f}"
+                if current_market_price > 0:
+                    dist_pct = ((tp_price - current_market_price) / current_market_price) * 100 if side == 'long' else ((current_market_price - tp_price) / current_market_price) * 100
+                    tp_dist_str = f"\033[92m{dist_pct:+.2f}% de margen{reset_code}"
 
-        # Usar SL si está definido, si no, TP. El color depende de esto.
-        if is_sl:
-            color_code = "\033[91m"
-            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 - sl_config['distancia'] / 100) if side == 'long' else break_even_price_proj * (1 + sl_config['distancia'] / 100)
-            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 - sl_config['distancia'] / 100) if side == 'long' else break_even_price_actual * (1 + sl_config['distancia'] / 100)
-        elif is_tp:
-            color_code = "\033[92m"
-            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 + tp_config['distancia'] / 100) if side == 'long' else break_even_price_proj * (1 - tp_config['distancia'] / 100)
-            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 + tp_config['distancia'] / 100) if side == 'long' else break_even_price_actual * (1 - tp_config['distancia'] / 100)
-
-    # Modo 2: ROI SL/TP (si el de Break-Even no está activo)
     elif operacion.roi_sl or operacion.roi_tp or operacion.dynamic_roi_sl:
-        target_price_actual = metrics.get('roi_sl_tp_target_price_actual')
-        target_price_proj = metrics.get('projected_roi_target_price')
-        
-        is_sl = operacion.roi_sl is not None or operacion.dynamic_roi_sl is not None
-        is_tp = operacion.roi_tp is not None
-        
-        if is_sl:
-            label_actual, label_proj, color_code = "SL (ROI)", "SL Proyectado (ROI)", "\033[91m"
-        elif is_tp:
-            label_actual, label_proj, color_code = "TP (ROI)", "TP Proyectado (ROI)", "\033[92m"
-
-    # Calcular distancia porcentual si un objetivo está activo
-    if current_market_price > 0 and target_price_proj is not None:
-        if side == 'long':
-            dist_pct = ((target_price_proj - current_market_price) / current_market_price) * 100
-        else: # short
-            dist_pct = ((current_market_price - target_price_proj) / current_market_price) * 100
-        target_dist_str = f"{color_code}{dist_pct:+.2f}% de margen{reset_code}"
+        price_obj = metrics.get('projected_roi_target_price')
+        if price_obj is not None:
+            if operacion.roi_sl or operacion.dynamic_roi_sl:
+                sl_price_proj_str = f"${price_obj:.4f}"
+                if current_market_price > 0:
+                    dist_pct = ((price_obj - current_market_price) / current_market_price) * 100 if side == 'short' else ((current_market_price - price_obj) / current_market_price) * 100
+                    sl_dist_str = f"\033[91m{dist_pct:.2f}% de margen{reset_code}"
+            elif operacion.roi_tp:
+                tp_price_proj_str = f"${price_obj:.4f}"
+                if current_market_price > 0:
+                    dist_pct = ((price_obj - current_market_price) / current_market_price) * 100 if side == 'long' else ((current_market_price - price_obj) / current_market_price) * 100
+                    tp_dist_str = f"\033[92m{dist_pct:+.2f}% de margen{reset_code}"
 
     # --- 3. Renderizado del Panel ---
     print("\n┌" + "─" * box_width + "┐")
@@ -209,9 +213,10 @@ def display_risk_panel(
     print(_create_box_line(f"\033[96m--- RIESGO ACTUAL (Solo Posiciones Abiertas) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Precio Promedio             : {avg_price_actual_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liquidación          : \033[91m{liq_price_actual_str}{reset_code}", box_width + 2))
-    if label_actual:
-        price_str = f"${target_price_actual:.4f}" if target_price_actual is not None else "N/A (Esperando 1ra pos.)"
-        print(_create_box_line(f"  Precio Obj. {label_actual:<16}: {color_code}{price_str}{reset_code}", box_width + 2))
+    if sl_price_actual_str != "N/A":
+        print(_create_box_line(f"  Precio Obj. SL Activo       : \033[91m{sl_price_actual_str}{reset_code}", box_width + 2))
+    if tp_price_actual_str != "N/A":
+        print(_create_box_line(f"  Precio Obj. TP Activo       : \033[92m{tp_price_actual_str}{reset_code}", box_width + 2))
 
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- RIESGO PROYECTADO (Todas las Posiciones) ---\033[0m", box_width + 2))
@@ -219,10 +224,12 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liq. Proyectado      : \033[91m{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
-    if label_proj:
-        price_str = f"${target_price_proj:.4f}" if target_price_proj is not None else "N/A"
-        print(_create_box_line(f"  Precio Obj. {label_proj:<16}: {color_code}{price_str}{reset_code}", box_width + 2))
-        print(_create_box_line(f"  Distancia a Objetivo        : {target_dist_str}", box_width + 2))
+    if sl_price_proj_str != "N/A":
+        print(_create_box_line(f"  Precio Obj. SL Proyectado   : \033[91m{sl_price_proj_str}{reset_code}", box_width + 2))
+        print(_create_box_line(f"  Distancia a SL Proyectado   : {sl_dist_str}", box_width + 2))
+    if tp_price_proj_str != "N/A":
+        print(_create_box_line(f"  Precio Obj. TP Proyectado   : \033[92m{tp_price_proj_str}{reset_code}", box_width + 2))
+        print(_create_box_line(f"  Distancia a TP Proyectado   : {tp_dist_str}", box_width + 2))
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -230,3 +237,4 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+# --- FIN DE LA MODIFICACIÓN ---
