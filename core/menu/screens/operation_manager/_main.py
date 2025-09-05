@@ -203,14 +203,8 @@ def _show_single_operation_view(side: str):
             elif action == "modify": _wizards.operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "manual_manage": manual_position_manager.show_manual_position_manager_screen(side)
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            elif action == "pause": om_api.pausar_operacion(side, price=current_price); time.sleep(0.2)
-            # --- (LÍNEA ORIGINAL COMENTADA) ---
-            # elif action == "pause": om_api.pausar_operacion(side); time.sleep(0.2)
-            
+            elif action == "pause": om_api.pausar_operacion(side, reason="Pausada manualmente por el usuario.", price=current_price); time.sleep(0.2)
             elif action == "resume": om_api.reanudar_operacion(side, price=current_price); time.sleep(0.2)
-            # --- (LÍNEA ORIGINAL COMENTADA) ---
-            # elif action == "resume": om_api.reanudar_operacion(side); time.sleep(0.2)
             
             elif action == "force_start":
                 if TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show() == 0:

@@ -235,10 +235,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
-
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
-
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -250,6 +246,8 @@ def _display_operation_conditions(operacion: Operacion):
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se añade el precio de transición a la razón del estado si existe
     razon_estado_str = f"\033[94m{operacion.estado_razon}\033[0m"
     precio_transicion = getattr(operacion, 'precio_de_transicion', None)
     if precio_transicion is not None:
@@ -259,6 +257,8 @@ def _display_operation_conditions(operacion: Operacion):
         "Estado Actual": f"{color}{operacion.estado}{reset}",
         "Razón de Estado": razon_estado_str
     }
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
     for key, value in estado_data.items():
@@ -290,9 +290,6 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # La lógica para mostrar el riesgo de operación se refactoriza completamente.
-        
         riesgos_activos = []
 
         if operacion.dynamic_roi_sl:
@@ -319,7 +316,6 @@ def _display_operation_conditions(operacion: Operacion):
         else:
             for riesgo in riesgos_activos:
                 print(_create_box_line(f"  - {riesgo}", box_width))
-        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -346,7 +342,7 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-                
+
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
