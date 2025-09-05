@@ -105,9 +105,7 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-    
-# --- INICIO DE LA MODIFICACIÓN ---
-# La función display_risk_panel ha sido refactorizada completamente.
+
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
@@ -154,38 +152,52 @@ def display_risk_panel(
     color_code = "\033[90m" # Gris por defecto
 
     # Modo 1: Break-Even SL/TP (Tiene prioridad)
-    if operacion.be_sl_tp_enabled:
+    if operacion.be_sl or operacion.be_tp:
         break_even_price_proj = metrics.get('projected_break_even_price')
         break_even_price_actual = operacion.get_live_break_even_price()
         
-        sl_dist = operacion.be_sl_distance_pct
-        tp_dist = operacion.be_tp_distance_pct
+        sl_config = operacion.be_sl
+        tp_config = operacion.be_tp
         
-        is_sl = sl_dist is not None and (tp_dist is None or (current_market_price < (break_even_price_proj or 0)))
+        # Determinar si es SL o TP el límite más relevante
+        is_sl = sl_config is not None
+        is_tp = tp_config is not None
         
+        if is_sl and is_tp:
+            label_actual, label_proj = "SL/TP (BE)", "SL/TP Proyectado (BE)"
+        elif is_sl:
+            label_actual, label_proj = "SL (BE)", "SL Proyectado (BE)"
+        else:
+            label_actual, label_proj = "TP (BE)", "TP Proyectado (BE)"
+
+        # Usar SL si está definido, si no, TP. El color depende de esto.
         if is_sl:
-            label_actual, label_proj, color_code = "SL (BE)", "SL Proyectado (BE)", "\033[91m"
-            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 - sl_dist / 100) if side == 'long' else break_even_price_proj * (1 + sl_dist / 100)
-            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 - sl_dist / 100) if side == 'long' else break_even_price_actual * (1 + sl_dist / 100)
-        elif tp_dist is not None:
-            label_actual, label_proj, color_code = "TP (BE)", "TP Proyectado (BE)", "\033[92m"
-            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 + tp_dist / 100) if side == 'long' else break_even_price_proj * (1 - tp_dist / 100)
-            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 + tp_dist / 100) if side == 'long' else break_even_price_actual * (1 - tp_dist / 100)
+            color_code = "\033[91m"
+            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 - sl_config['distancia'] / 100) if side == 'long' else break_even_price_proj * (1 + sl_config['distancia'] / 100)
+            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 - sl_config['distancia'] / 100) if side == 'long' else break_even_price_actual * (1 + sl_config['distancia'] / 100)
+        elif is_tp:
+            color_code = "\033[92m"
+            if break_even_price_proj: target_price_proj = break_even_price_proj * (1 + tp_config['distancia'] / 100) if side == 'long' else break_even_price_proj * (1 - tp_config['distancia'] / 100)
+            if break_even_price_actual: target_price_actual = break_even_price_actual * (1 + tp_config['distancia'] / 100) if side == 'long' else break_even_price_actual * (1 - tp_config['distancia'] / 100)
 
     # Modo 2: ROI SL/TP (si el de Break-Even no está activo)
-    elif operacion.sl_roi_pct is not None or operacion.dynamic_roi_sl_enabled:
+    elif operacion.roi_sl or operacion.roi_tp or operacion.dynamic_roi_sl:
         target_price_actual = metrics.get('roi_sl_tp_target_price_actual')
         target_price_proj = metrics.get('projected_roi_target_price')
-        is_sl = (operacion.sl_roi_pct or 0) < 0
-        label_actual = "SL (ROI)" if is_sl else "TP (ROI)"
-        label_proj = "SL Proyectado (ROI)" if is_sl else "TP Proyectado (ROI)"
-        color_code = "\033[91m" if is_sl else "\033[92m"
+        
+        is_sl = operacion.roi_sl is not None or operacion.dynamic_roi_sl is not None
+        is_tp = operacion.roi_tp is not None
+        
+        if is_sl:
+            label_actual, label_proj, color_code = "SL (ROI)", "SL Proyectado (ROI)", "\033[91m"
+        elif is_tp:
+            label_actual, label_proj, color_code = "TP (ROI)", "TP Proyectado (ROI)", "\033[92m"
 
     # Calcular distancia porcentual si un objetivo está activo
     if current_market_price > 0 and target_price_proj is not None:
         if side == 'long':
             dist_pct = ((target_price_proj - current_market_price) / current_market_price) * 100
-        else:
+        else: # short
             dist_pct = ((current_market_price - target_price_proj) / current_market_price) * 100
         target_dist_str = f"{color_code}{dist_pct:+.2f}% de margen{reset_code}"
 
@@ -218,4 +230,3 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-# --- FIN DE LA MODIFICACIÓN ---

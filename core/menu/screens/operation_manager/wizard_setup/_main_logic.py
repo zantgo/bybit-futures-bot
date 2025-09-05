@@ -125,8 +125,6 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
         
     return params_changed_in_submenu
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     action = "Modificando" if is_modification else "Creando Nueva"
     tendencia = "LONG" if operacion.tendencia == 'LONG_ONLY' else "SHORT"
@@ -162,28 +160,38 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Gestión de Riesgo de Operación")
-    op_risk_data = {}
-    if getattr(operacion, 'dynamic_roi_sl_enabled', False): op_risk_data["Límite SL/TP por ROI (%)"] = f"DINÁMICO (ROI Realizado - {getattr(operacion, 'dynamic_roi_sl_trail_pct', 0)}%)"
-    else: op_risk_data["Límite SL/TP por ROI (%)"] = f"{operacion.sl_roi_pct}% (Mov. Precio Total: {operacion.sl_roi_pct / leverage:.4f}%)" if operacion.sl_roi_pct is not None else "Desactivado"
-    op_risk_data["Límite TSL-ROI (Act/Dist %)"] = f"+{operacion.tsl_roi_activacion_pct}% / {operacion.tsl_roi_distancia_pct}%" if operacion.tsl_roi_activacion_pct else "Desactivado"
-    
+
     # --- INICIO DE LA MODIFICACIÓN ---
-    be_sl_tp_dist_str = "Desactivado"
-    if getattr(operacion, 'be_sl_tp_enabled', False):
-        sl_dist = getattr(operacion, 'be_sl_distance_pct', 'N/A')
-        tp_dist = getattr(operacion, 'be_tp_distance_pct', 'N/A')
-        be_sl_tp_dist_str = f"SL {sl_dist}% / TP {tp_dist}%"
+    # La lógica para mostrar el riesgo de operación se refactoriza completamente
+    op_risk_data = {}
     
-    op_risk_data["Límite SL/TP por Break-Even"] = be_sl_tp_dist_str
+    # ROI SL/TP y Dynamic SL
+    if operacion.dynamic_roi_sl:
+        op_risk_data["SL Dinámico por ROI"] = f"Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})"
+    elif operacion.roi_sl:
+        op_risk_data["Stop Loss por ROI"] = f"{operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})"
     
-    op_risk_data["Acción por SL/TP ROI"] = operacion.accion_por_sl_tp_roi
-    op_risk_data["Acción por TSL ROI"] = operacion.accion_por_tsl_roi
-    op_risk_data["Acción por SL/TP Break-Even"] = operacion.accion_por_be_sl_tp
+    if operacion.roi_tp:
+        op_risk_data["Take Profit por ROI"] = f"{operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})"
+        
+    # TSL por ROI
+    if operacion.roi_tsl:
+        op_risk_data["TSL por ROI"] = f"Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
+
+    # Break-Even SL/TP
+    if operacion.be_sl:
+        op_risk_data["SL por Break-Even"] = f"Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})"
+    if operacion.be_tp:
+        op_risk_data["TP por Break-Even"] = f"Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']})"
+        
+    if not op_risk_data:
+        _print_line("Límites de Riesgo", "Ninguno configurado", 20)
+    else:
+        max_key = max(len(k) for k in op_risk_data.keys())
+        for label, value in op_risk_data.items():
+            _print_line(label, value, max_key)
     # --- FIN DE LA MODIFICACIÓN ---
 
-    max_key = max(len(k) for k in op_risk_data.keys()) if op_risk_data else 0
-    for label, value in op_risk_data.items(): _print_line(label, value, max_key)
-    
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Entrada")
     
@@ -223,8 +231,6 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     from ...._helpers import show_help_popup
     config_module = _deps.get("config_module")
@@ -243,28 +249,66 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"] if side == 'long' else defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_SHORT"]
         temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL"]["PERCENTAGE"] if defaults["RISK"]["INDIVIDUAL_SL"]["ENABLED"] else None
         if defaults["RISK"]["INDIVIDUAL_TSL"]["ENABLED"]: temp_op.tsl_activacion_pct, temp_op.tsl_distancia_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_ACTIVATION_PCT"], defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_DISTANCE_PCT"]
-        dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
-        temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
-        temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
-        if temp_op.dynamic_roi_sl_enabled: temp_op.sl_roi_pct = None
-        else: temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
-        if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
-        
-        temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
         
         # --- INICIO DE LA MODIFICACIÓN ---
-        temp_op.accion_por_tsl_roi = defaults["OPERATION_RISK"]["AFTER_STATE"] # <-- LÍNEA CORREGIDA
-        # --- (LÍNEA ORIGINAL COMENTADA) ---
-        # temp_op.accion_por_tsl_roi = 'PAUSAR'
-        # --- FIN DE LA MODIFICACIÓN ---
-
-        be_sl_tp_config = defaults["OPERATION_RISK"].get("BE_SL_TP", {})
-        temp_op.be_sl_tp_enabled = be_sl_tp_config.get("ENABLED", False)
-        if temp_op.be_sl_tp_enabled:
-            temp_op.be_sl_distance_pct = be_sl_tp_config.get("SL_DISTANCE_PCT")
-            temp_op.be_tp_distance_pct = be_sl_tp_config.get("TP_DISTANCE_PCT")
+        # Refactorización de la inicialización de los parámetros de riesgo de operación
         
-        temp_op.accion_por_be_sl_tp = defaults["OPERATION_RISK"]["AFTER_STATE"]
+        # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
+        # dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
+        # temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
+        # temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
+        # if temp_op.dynamic_roi_sl_enabled: temp_op.sl_roi_pct = None
+        # else: temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
+        # if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
+        # temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
+        # temp_op.accion_por_tsl_roi = 'PAUSAR'
+        # be_sl_tp_config = defaults["OPERATION_RISK"].get("BE_SL_TP", {})
+        # temp_op.be_sl_tp_enabled = be_sl_tp_config.get("ENABLED", False)
+        # if temp_op.be_sl_tp_enabled:
+        #     temp_op.be_sl_distance_pct = be_sl_tp_config.get("SL_DISTANCE_PCT")
+        #     temp_op.be_tp_distance_pct = be_sl_tp_config.get("TP_DISTANCE_PCT")
+        # temp_op.accion_por_be_sl_tp = defaults["OPERATION_RISK"].get("BE_SL_TP_AFTER_STATE", 'DETENER')
+
+        # --- LÓGICA NUEVA Y CORREGIDA ---
+        op_risk_defaults = defaults["OPERATION_RISK"]
+        default_action = op_risk_defaults.get("AFTER_STATE", 'DETENER')
+
+        # ROI SL/TP (Manual)
+        roi_sl_tp_config = op_risk_defaults.get("ROI_SL_TP", {})
+        if roi_sl_tp_config.get("ENABLED", False):
+            val = roi_sl_tp_config.get("PERCENTAGE", 0)
+            if val < 0:
+                temp_op.roi_sl = {'valor': val, 'accion': default_action}
+            else:
+                temp_op.roi_tp = {'valor': val, 'accion': default_action}
+
+        # ROI TSL
+        roi_tsl_config = op_risk_defaults.get("ROI_TSL", {})
+        if roi_tsl_config.get("ENABLED", False):
+            temp_op.roi_tsl = {
+                'activacion': roi_tsl_config.get("ACTIVATION_PCT"),
+                'distancia': roi_tsl_config.get("DISTANCE_PCT"),
+                'accion': default_action
+            }
+
+        # Dynamic ROI SL
+        dynamic_roi_config = op_risk_defaults.get("DYNAMIC_ROI_SL", {})
+        if dynamic_roi_config.get("ENABLED", False):
+            temp_op.dynamic_roi_sl = {
+                'distancia': dynamic_roi_config.get("TRAIL_PCT"),
+                'accion': default_action
+            }
+
+        # Break-Even SL/TP
+        be_sl_tp_config = op_risk_defaults.get("BE_SL_TP", {})
+        if be_sl_tp_config.get("ENABLED", False):
+            sl_dist = be_sl_tp_config.get("SL_DISTANCE_PCT")
+            tp_dist = be_sl_tp_config.get("TP_DISTANCE_PCT")
+            if sl_dist is not None:
+                temp_op.be_sl = {'distancia': sl_dist, 'accion': default_action}
+            if tp_dist is not None:
+                temp_op.be_tp = {'distancia': tp_dist, 'accion': default_action}
+        # --- FIN DE LA MODIFICACIÓN ---
 
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None

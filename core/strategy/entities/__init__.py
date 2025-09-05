@@ -1,3 +1,5 @@
+# core/strategy/entities/__init__.py
+
 """
 Paquete Central de Entidades de Dominio.
 
@@ -70,6 +72,7 @@ class Operacion:
         self.id: str = id
         self.estado: str = 'DETENIDA'
         self.estado_razon: str = 'Estado inicial'
+        self.precio_de_transicion: Optional[float] = None
         
         # --- Parámetros de Configuración ---
         self.tendencia: Optional[str] = None
@@ -78,35 +81,46 @@ class Operacion:
         self.sl_posicion_individual_pct: float = 10.0
         self.tsl_activacion_pct: float = 0.4
         self.tsl_distancia_pct: float = 0.1
-        self.tsl_roi_activacion_pct: Optional[float] = None
-        self.tsl_roi_distancia_pct: Optional[float] = None
-        self.sl_roi_pct: Optional[float] = None
-        self.dynamic_roi_sl_enabled: bool = False
-        self.dynamic_roi_sl_trail_pct: Optional[float] = None
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Atributos de riesgo de operación refactorizados a una estructura de diccionario
+        
+        # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
+        # self.tsl_roi_activacion_pct: Optional[float] = None
+        # self.tsl_roi_distancia_pct: Optional[float] = None
+        # self.sl_roi_pct: Optional[float] = None
+        # self.dynamic_roi_sl_enabled: bool = False
+        # self.dynamic_roi_sl_trail_pct: Optional[float] = None
+        # self.be_sl_tp_enabled: bool = False
+        # self.be_sl_distance_pct: Optional[float] = None
+        # self.be_tp_distance_pct: Optional[float] = None
+        # self.accion_por_sl_tp_roi: str = 'DETENER'
+        # self.accion_por_tsl_roi: str = 'PAUSAR'
+        # self.accion_por_be_sl_tp: str = 'DETENER'
+
+        # --- Gestión de Riesgo por ROI ---
+        self.roi_sl: Optional[Dict[str, Any]] = None         # ej: {'valor': -25.0, 'accion': 'DETENER'}
+        self.roi_tp: Optional[Dict[str, Any]] = None         # ej: {'valor': 50.0, 'accion': 'PAUSAR'}
+        self.roi_tsl: Optional[Dict[str, Any]] = None        # ej: {'activacion': 25.0, 'distancia': 5.0, 'accion': 'PAUSAR'}
+        self.dynamic_roi_sl: Optional[Dict[str, Any]] = None # ej: {'distancia': 10.0, 'accion': 'DETENER'}
+
+        # --- Gestión de Riesgo por Break-Even ---
+        self.be_sl: Optional[Dict[str, Any]] = None          # ej: {'distancia': 10.0, 'accion': 'DETENER'}
+        self.be_tp: Optional[Dict[str, Any]] = None          # ej: {'distancia': 20.0, 'accion': 'PAUSAR'}
+        
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
         
-        # --- INICIO DE LA MODIFICACIÓN (Simplificación Definitiva del Modelo) ---
-        
-        # Atributos de lista (reemplazados)
-        # self.condiciones_entrada: List[Dict[str, Any]] = []          # <-- REEMPLAZADO
-        # self.condiciones_salida_precio: List[Dict[str, Any]] = []    # <-- REEMPLAZADO
-        # self.accion_por_riesgo_roi: str = 'DETENER'                  # <-- REEMPLAZADO
-
-        # Nuevos atributos específicos para una UI más clara
         self.cond_entrada_above: Optional[float] = None
         self.cond_entrada_below: Optional[float] = None
         
         self.cond_salida_above: Optional[Dict[str, Any]] = None # ej: {'valor': 100.0, 'accion': 'PAUSAR'}
         self.cond_salida_below: Optional[Dict[str, Any]] = None # ej: {'valor': 50.0, 'accion': 'DETENER'}
         
-        self.accion_por_sl_tp_roi: str = 'DETENER'
-        self.accion_por_tsl_roi: str = 'PAUSAR'
-
-        # Atributos de acción por límite de tiempo/trades se mantienen
         self.accion_por_limite_tiempo: str = 'PAUSAR'
         self.accion_por_limite_trades: str = 'PAUSAR'
-        # --- FIN DE LA MODIFICACIÓN ---
         
         self.auto_reinvest_enabled: bool = False 
         self.tiempo_espera_minutos: Optional[int] = None
@@ -133,13 +147,6 @@ class Operacion:
         # Banderas de Estado de Salida
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
-
-                # ... (al final de la lista de atributos en __init__)
-        self.be_sl_tp_enabled: bool = False
-        self.be_sl_distance_pct: Optional[float] = None
-        self.be_tp_distance_pct: Optional[float] = None
-        self.accion_por_be_sl_tp: str = 'DETENER' # <-- NUEVA LÍNEA
-        self.precio_de_transicion: Optional[float] = None
 
     @property
     def capital_operativo_logico_actual(self) -> float:
@@ -227,9 +234,13 @@ class Operacion:
         """
         Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado.
         """
-        sl_roi_pct_target = self.sl_roi_pct
-        if self.dynamic_roi_sl_enabled and self.dynamic_roi_sl_trail_pct is not None:
-            sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl_trail_pct
+        sl_roi_pct_target = None
+        if self.dynamic_roi_sl:
+            sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl.get('distancia', 0)
+        elif self.roi_sl:
+            sl_roi_pct_target = self.roi_sl.get('valor')
+        elif self.roi_tp:
+            sl_roi_pct_target = self.roi_tp.get('valor')
 
         if sl_roi_pct_target is None or not self.posiciones_abiertas:
             return None
@@ -315,11 +326,6 @@ class Operacion:
         self.comercios_cerrados_contador = 0
         self.profit_balance_acumulado = 0.0
         self.auto_reinvest_enabled = False
-        self.tsl_roi_activo = False
-        self.tsl_roi_peak_pct = 0.0
-        self.reinvestable_profit_balance = 0.0
-        self.dynamic_roi_sl_enabled = False
-        self.dynamic_roi_sl_trail_pct = None
         
         self.posiciones = []
         self.capital_flows = []
@@ -331,14 +337,33 @@ class Operacion:
         self.tiempo_inicio_ejecucion = None
         self.tiempo_acumulado_activo_seg = 0.0
         self.tiempo_ultimo_inicio_activo = None
-                # ... (dentro del método reset)
-        self.be_sl_tp_enabled = False
-        self.be_sl_distance_pct = None
-        self.be_tp_distance_pct = None
-        self.accion_por_be_sl_tp = 'DETENER' # <-- NUEVA LÍNEA
-        
 
-    # Añade este método si no lo tienes
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
+        # self.tsl_roi_activo = False
+        # self.tsl_roi_peak_pct = 0.0
+        # self.reinvestable_profit_balance = 0.0
+        # self.dynamic_roi_sl_enabled = False
+        # self.dynamic_roi_sl_trail_pct = None
+        # self.be_sl_tp_enabled = False
+        # self.be_sl_distance_pct = None
+        # self.be_tp_distance_pct = None
+        # self.accion_por_be_sl_tp = 'DETENER'
+        # self.precio_de_transicion = None
+        
+        # Se resetean los nuevos atributos de riesgo
+        self.roi_sl = None
+        self.roi_tp = None
+        self.roi_tsl = None
+        self.dynamic_roi_sl = None
+        self.be_sl = None
+        self.be_tp = None
+        
+        self.tsl_roi_activo = False
+        self.tsl_roi_peak_pct = 0.0
+        self.reinvestable_profit_balance = 0.0
+        # --- FIN DE LA MODIFICACIÓN ---
+
     def get_live_break_even_price(self) -> Optional[float]:
         """
         Calcula el precio de mercado al cual el PNL total (realizado + no realizado) sería cero.

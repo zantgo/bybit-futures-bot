@@ -1,7 +1,7 @@
 # core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
 
 import time
-from typing import Any
+from typing import Any, Dict
 
 try:
     from simple_term_menu import TerminalMenu
@@ -33,144 +33,153 @@ def get_action_menu(prompt: str, current_action: str) -> str:
     if choice == 1: return 'DETENER'
     return current_action
 
+# --- INICIO DE LA MODIFICACIÓN ---
+# La función _edit_operation_risk_submenu ha sido completamente refactorizada.
 def _edit_operation_risk_submenu(temp_op: Operacion):
-    from ...._helpers import show_help_popup # <-- Importación añadida
+    """
+    Submenú rediseñado para la gestión granular de cada tipo de riesgo de operación.
+    """
+    from ...._helpers import show_help_popup
     params_changed_in_submenu = False
     
     while True:
         clear_screen()
         print_tui_header("Editor de Riesgo de Operación")
-        
-        sl_roi_str = "Desactivado"
-        if getattr(temp_op, 'dynamic_roi_sl_enabled', False):
-            sl_roi_str = f"DINÁMICO (ROI Realizado - {getattr(temp_op, 'dynamic_roi_sl_trail_pct', 0)}%)"
-        elif temp_op.sl_roi_pct is not None:
-            sl_roi_str = f"MANUAL ({temp_op.sl_roi_pct}%)"
-        
-        tsl_roi_str = "Desactivado"
-        if temp_op.tsl_roi_activacion_pct is not None:
-             tsl_roi_str = f"Activación a +{temp_op.tsl_roi_activacion_pct}%, Distancia {temp_op.tsl_roi_distancia_pct}%"
 
-        be_sl_tp_str = "Desactivado"
-        if getattr(temp_op, 'be_sl_tp_enabled', False):
-            sl_str = f"SL: {getattr(temp_op, 'be_sl_distance_pct', 'N/A')}%"
-            tp_str = f"TP: {getattr(temp_op, 'be_tp_distance_pct', 'N/A')}%"
-            be_sl_tp_str = f"{sl_str}, {tp_str}"
+        # --- Funciones de ayuda para formatear el estado actual ---
+        def format_sl_tp(data: Dict, label: str) -> str:
+            if data:
+                return f"{data.get('valor', 'N/A')}% (Acción: {data.get('accion', 'N/A')})"
+            return "Desactivado"
 
-        risk_mode_title = "\nSelecciona una opción para editar:"
+        def format_tsl(data: Dict) -> str:
+            if data:
+                return f"Act: {data.get('activacion', 'N/A')}%, Dist: {data.get('distancia', 'N/A')}% (Acción: {data.get('accion', 'N/A')})"
+            return "Desactivado"
         
+        def format_dynamic_sl(data: Dict) -> str:
+            if data:
+                return f"Dist: {data.get('distancia', 'N/A')}% del ROI Realizado (Acción: {data.get('accion', 'N/A')})"
+            return "Desactivado"
+
+        def format_be_sl_tp(data: Dict, label: str) -> str:
+            if data:
+                return f"{data.get('distancia', 'N/A')}% (Acción: {data.get('accion', 'N/A')})"
+            return "Desactivado"
+
+        # --- Creación de los ítems del menú ---
         menu_items = [
-            f"[1] Límite SL/TP por ROI ({sl_roi_str})", 
-            f"[2] Límite TSL por ROI ({tsl_roi_str})",
-            f"[3] SL/TP Fijos sobre Break-Even por Precio ({be_sl_tp_str})",
+            f"[1] Stop Loss por ROI: {format_sl_tp(temp_op.roi_sl, 'SL')}",
+            f"[2] Take Profit por ROI: {format_sl_tp(temp_op.roi_tp, 'TP')}",
+            f"[3] Trailing Stop Loss por ROI: {format_tsl(temp_op.roi_tsl)}",
+            f"[4] Stop Loss Dinámico por ROI: {format_dynamic_sl(temp_op.dynamic_roi_sl)}",
             None,
-            f"[4] Acción al alcanzar SL/TP por ROI ({temp_op.accion_por_sl_tp_roi})",
-            f"[5] Acción al alcanzar TSL por ROI ({temp_op.accion_por_tsl_roi})",
-            f"[6] Acción al alcanzar SL/TP por Break-Even ({temp_op.accion_por_be_sl_tp})",
+            f"[5] Stop Loss por Break-Even: {format_be_sl_tp(temp_op.be_sl, 'SL')}",
+            f"[6] Take Profit por Break-Even: {format_be_sl_tp(temp_op.be_tp, 'TP')}",
             None,
+            "[d] Desactivar TODOS los límites de riesgo",
             "[h] Ayuda",
             "[b] Volver al menú anterior"
         ]
         
         risk_mode_menu = TerminalMenu(
             menu_items,
-            title=risk_mode_title,
+            title="\nSelecciona un límite de riesgo para configurar:",
             **MENU_STYLE
         )
         choice = risk_mode_menu.show()
 
-        if choice is None or choice == 9: # El índice de "Volver" ahora es 9
+        if choice is None or choice == 10:
             break
 
         try:
+            # Opción 1: SL por ROI
             if choice == 0:
-                sl_tp_menu = TerminalMenu(["[1] Límite Manual (Fijo)", "[2] Límite Dinámico (Automático)", "[d] Desactivar por completo"], title="\nModo para SL/TP por ROI:").show()
-                if sl_tp_menu == 0:
-                    temp_op.dynamic_roi_sl_enabled = False
-                    temp_op.dynamic_roi_sl_trail_pct = None
-                    new_val = get_input("Límite SL/TP por ROI (%)", float, temp_op.sl_roi_pct, context_info="Valores negativos son SL, positivos son TP.")
-                    if new_val != temp_op.sl_roi_pct: temp_op.sl_roi_pct = new_val; params_changed_in_submenu = True
-                elif sl_tp_menu == 1:
-                    temp_op.dynamic_roi_sl_enabled = True
-                    temp_op.sl_roi_pct = None
-                    new_val = get_input("Distancia del Trailing Stop al ROI Realizado (%)", float, temp_op.dynamic_roi_sl_trail_pct, min_val=0.1)
-                    if new_val != temp_op.dynamic_roi_sl_trail_pct: temp_op.dynamic_roi_sl_trail_pct = new_val; params_changed_in_submenu = True
-                elif sl_tp_menu == 2:
-                    if temp_op.dynamic_roi_sl_enabled or temp_op.sl_roi_pct is not None:
-                        temp_op.dynamic_roi_sl_enabled, temp_op.dynamic_roi_sl_trail_pct, temp_op.sl_roi_pct = False, None, None
-                        params_changed_in_submenu = True
-
-            elif choice == 1:
-                tsl_act = get_input("Límite TSL-ROI Activación (%)", float, temp_op.tsl_roi_activacion_pct, min_val=0.0, is_optional=True, context_info="Introduce un valor para activar o deja vacío para desactivar.")
-                if tsl_act is not None:
-                    dist = get_input("Límite TSL-ROI Distancia (%)", float, temp_op.tsl_roi_distancia_pct, min_val=0.01)
-                    if tsl_act != temp_op.tsl_roi_activacion_pct or dist != temp_op.tsl_roi_distancia_pct:
-                        temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = tsl_act, dist
-                        params_changed_in_submenu = True
+                current_val = temp_op.roi_sl.get('valor') if temp_op.roi_sl else None
+                current_act = temp_op.roi_sl.get('accion', 'DETENER') if temp_op.roi_sl else 'DETENER'
+                new_val = get_input("Nuevo SL por ROI (%)", float, current_val, is_optional=True, context_info="Valor negativo. Deja vacío para desactivar.")
+                if new_val is not None:
+                    new_act = get_action_menu("Acción al alcanzar el SL por ROI", current_act)
+                    temp_op.roi_sl = {'valor': new_val, 'accion': new_act}
                 else:
-                    if temp_op.tsl_roi_activacion_pct is not None:
-                        temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = None, None
-                        params_changed_in_submenu = True
-            
+                    temp_op.roi_sl = None
+                params_changed_in_submenu = True
+
+            # Opción 2: TP por ROI
+            elif choice == 1:
+                current_val = temp_op.roi_tp.get('valor') if temp_op.roi_tp else None
+                current_act = temp_op.roi_tp.get('accion', 'PAUSAR') if temp_op.roi_tp else 'PAUSAR'
+                new_val = get_input("Nuevo TP por ROI (%)", float, current_val, is_optional=True, context_info="Valor positivo. Deja vacío para desactivar.")
+                if new_val is not None:
+                    new_act = get_action_menu("Acción al alcanzar el TP por ROI", current_act)
+                    temp_op.roi_tp = {'valor': new_val, 'accion': new_act}
+                else:
+                    temp_op.roi_tp = None
+                params_changed_in_submenu = True
+
+            # Opción 3: TSL por ROI
             elif choice == 2:
-                new_sl = get_input(
-                    "Distancia SL desde Break-Even (%)", 
-                    float, 
-                    temp_op.be_sl_distance_pct, 
-                    min_val=0.1, 
-                    is_optional=True, 
-                    context_info="Pérdida máxima desde break-even. Deja vacío para desactivar."
-                )
-                
-                new_tp = get_input(
-                    "Distancia TP desde Break-Even (%)", 
-                    float, 
-                    temp_op.be_tp_distance_pct, 
-                    min_val=0.1, 
-                    is_optional=True, 
-                    context_info="Ganancia objetivo desde break-even. Deja vacío para desactivar."
-                )
+                current_act = temp_op.roi_tsl.get('activacion') if temp_op.roi_tsl else None
+                current_dist = temp_op.roi_tsl.get('distancia') if temp_op.roi_tsl else None
+                current_action = temp_op.roi_tsl.get('accion', 'PAUSAR') if temp_op.roi_tsl else 'PAUSAR'
+                new_act = get_input("Nueva Activación TSL (%)", float, current_act, min_val=0.1, is_optional=True, context_info="Deja vacío para desactivar.")
+                if new_act is not None:
+                    new_dist = get_input("Nueva Distancia TSL (%)", float, current_dist, min_val=0.1)
+                    new_action = get_action_menu("Acción al alcanzar el TSL", current_action)
+                    temp_op.roi_tsl = {'activacion': new_act, 'distancia': new_dist, 'accion': new_action}
+                else:
+                    temp_op.roi_tsl = None
+                params_changed_in_submenu = True
+            
+            # Opción 4: SL Dinámico
+            elif choice == 3:
+                current_val = temp_op.dynamic_roi_sl.get('distancia') if temp_op.dynamic_roi_sl else None
+                current_act = temp_op.dynamic_roi_sl.get('accion', 'DETENER') if temp_op.dynamic_roi_sl else 'DETENER'
+                new_val = get_input("Nueva Distancia del SL Dinámico (%)", float, current_val, min_val=0.1, is_optional=True, context_info="Distancia desde ROI realizado. Deja vacío para desactivar.")
+                if new_val is not None:
+                    new_act = get_action_menu("Acción al alcanzar el SL Dinámico", current_act)
+                    temp_op.dynamic_roi_sl = {'distancia': new_val, 'accion': new_act}
+                else:
+                    temp_op.dynamic_roi_sl = None
+                params_changed_in_submenu = True
 
-                if new_sl is not None or new_tp is not None:
-                    if new_sl != temp_op.be_sl_distance_pct or new_tp != temp_op.be_tp_distance_pct:
-                        temp_op.be_sl_tp_enabled = True
-                        temp_op.be_sl_distance_pct = new_sl
-                        temp_op.be_tp_distance_pct = new_tp
-                        params_changed_in_submenu = True
-                elif temp_op.be_sl_tp_enabled:
-                    temp_op.be_sl_tp_enabled = False
-                    temp_op.be_sl_distance_pct = None
-                    temp_op.be_tp_distance_pct = None
-                    params_changed_in_submenu = True
+            # Opción 5: SL por Break-Even
+            elif choice == 5:
+                current_val = temp_op.be_sl.get('distancia') if temp_op.be_sl else None
+                current_act = temp_op.be_sl.get('accion', 'DETENER') if temp_op.be_sl else 'DETENER'
+                new_val = get_input("Nueva Distancia SL desde Break-Even (%)", float, current_val, min_val=0.1, is_optional=True, context_info="Deja vacío para desactivar.")
+                if new_val is not None:
+                    new_act = get_action_menu("Acción al alcanzar SL por Break-Even", current_act)
+                    temp_op.be_sl = {'distancia': new_val, 'accion': new_act}
+                else:
+                    temp_op.be_sl = None
+                params_changed_in_submenu = True
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se han corregido los índices para que coincidan con el menú actualizado.
-            elif choice == 4: # El índice [4] ahora es Acción al alcanzar SL/TP por ROI
-                new_action = get_action_menu("Acción al alcanzar SL/TP por ROI", temp_op.accion_por_sl_tp_roi)
-                if new_action != temp_op.accion_por_sl_tp_roi:
-                    temp_op.accion_por_sl_tp_roi = new_action
-                    params_changed_in_submenu = True
+            # Opción 6: TP por Break-Even
+            elif choice == 6:
+                current_val = temp_op.be_tp.get('distancia') if temp_op.be_tp else None
+                current_act = temp_op.be_tp.get('accion', 'PAUSAR') if temp_op.be_tp else 'PAUSAR'
+                new_val = get_input("Nueva Distancia TP desde Break-Even (%)", float, current_val, min_val=0.1, is_optional=True, context_info="Deja vacío para desactivar.")
+                if new_val is not None:
+                    new_act = get_action_menu("Acción al alcanzar TP por Break-Even", current_act)
+                    temp_op.be_tp = {'distancia': new_val, 'accion': new_act}
+                else:
+                    temp_op.be_tp = None
+                params_changed_in_submenu = True
 
-            elif choice == 5: # El índice [5] ahora es Acción al alcanzar TSL por ROI
-                new_action = get_action_menu("Acción al alcanzar TSL por ROI", temp_op.accion_por_tsl_roi)
-                if new_action != temp_op.accion_por_tsl_roi:
-                    temp_op.accion_por_tsl_roi = new_action
-                    params_changed_in_submenu = True
-            
-            elif choice == 6: # El índice [6] ahora es la nueva Acción por Break-Even
-                new_action = get_action_menu(
-                    "Acción al alcanzar SL/TP por Break-Even", 
-                    temp_op.accion_por_be_sl_tp
-                )
-                if new_action != temp_op.accion_por_be_sl_tp:
-                    temp_op.accion_por_be_sl_tp = new_action
-                    params_changed_in_submenu = True
-            
-            elif choice == 8: # El índice [h] Ayuda ahora es 8
+            # Opción Desactivar Todo
+            elif choice == 8:
+                temp_op.roi_sl, temp_op.roi_tp, temp_op.roi_tsl, temp_op.dynamic_roi_sl, temp_op.be_sl, temp_op.be_tp = None, None, None, None, None, None
+                print("\nTodos los límites de riesgo de operación han sido desactivados.")
+                time.sleep(1.5)
+                params_changed_in_submenu = True
+
+            # Opción Ayuda
+            elif choice == 9:
                 show_help_popup('wizard_risk_operation')
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición cancelada."); time.sleep(1)
             
     return params_changed_in_submenu
+# --- FIN DE LA MODIFICACIÓN ---

@@ -237,6 +237,8 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
 
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -248,8 +250,6 @@ def _display_operation_conditions(operacion: Operacion):
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se añade el precio de transición a la razón del estado si existe
     razon_estado_str = f"\033[94m{operacion.estado_razon}\033[0m"
     precio_transicion = getattr(operacion, 'precio_de_transicion', None)
     if precio_transicion is not None:
@@ -259,13 +259,6 @@ def _display_operation_conditions(operacion: Operacion):
         "Estado Actual": f"{color}{operacion.estado}{reset}",
         "Razón de Estado": razon_estado_str
     }
-    # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
-    # estado_data = {
-    #     "Estado Actual": f"{color}{operacion.estado}{reset}",
-    #     "Razón de Estado": f"\033[94m{operacion.estado_razon}\033[0m"
-    # }
-    # --- FIN DE LA MODIFICACIÓN ---
-
     max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
     for key, value in estado_data.items():
@@ -297,43 +290,36 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
-        sl_roi_str = ""
-        if getattr(operacion, 'dynamic_roi_sl_enabled', False):
-            trail_pct = getattr(operacion, 'dynamic_roi_sl_trail_pct', 0) or 0
-            sl_roi_str = f"SL/TP por ROI (DINÁMICO): Límite móvil @ ROI Realizado - {trail_pct}%"
-        elif operacion.sl_roi_pct is not None:
-            target_price = operacion.get_roi_sl_tp_price()
-            is_sl = operacion.sl_roi_pct < 0
-            label = "SL" if is_sl else "TP"
-            color_code = "\033[91m" if is_sl else "\033[92m"
-            if target_price is not None:
-                sl_roi_str = (f"Precio Obj. {label} por ROI (MANUAL): "
-                              f"{color_code}${target_price:.4f}{reset} ({operacion.sl_roi_pct}%)")
-            else:
-                sl_roi_str = f"SL/TP por ROI (MANUAL): {operacion.sl_roi_pct}% (Esperando 1ra pos.)"
-        else:
-            sl_roi_str = "SL/TP por ROI: Desactivado"
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # La lógica para mostrar el riesgo de operación se refactoriza completamente.
         
-        print(_create_box_line(f"  - {sl_roi_str}", box_width))
+        riesgos_activos = []
 
-        tsl_roi_str = "TSL por ROI: Desactivado"
-        if operacion.tsl_roi_activacion_pct is not None and operacion.tsl_roi_distancia_pct is not None:
-            tsl_roi_str = (f"TSL por ROI: Activa a +{operacion.tsl_roi_activacion_pct}%, Distancia {operacion.tsl_roi_distancia_pct}%")
+        if operacion.dynamic_roi_sl:
+            riesgos_activos.append(f"SL Dinámico por ROI: Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})")
+        elif operacion.roi_sl:
+            riesgos_activos.append(f"SL por ROI: {operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})")
+
+        if operacion.roi_tp:
+            riesgos_activos.append(f"TP por ROI: {operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})")
+
+        if operacion.roi_tsl:
+            tsl_str = f"TSL por ROI: Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
             if operacion.tsl_roi_activo:
-                tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
-        print(_create_box_line(f"  - {tsl_roi_str}", box_width))
-        
-        be_sl_tp_str = "SL/TP por Break-Even: Desactivado"
-        if getattr(operacion, 'be_sl_tp_enabled', False):
-            sl_dist = getattr(operacion, 'be_sl_distance_pct', 'N/A')
-            tp_dist = getattr(operacion, 'be_tp_distance_pct', 'N/A')
-            accion = getattr(operacion, 'accion_por_be_sl_tp', 'N/A')
-            be_sl_tp_str = f"SL/TP por Break-Even: SL {sl_dist}% / TP {tp_dist}% (Acción: {accion})"
-        print(_create_box_line(f"  - {be_sl_tp_str}", box_width))
-        
-        print(_create_box_line(f"  - Acción por SL/TP ROI: {operacion.accion_por_sl_tp_roi}", box_width))
-        print(_create_box_line(f"  - Acción por TSL ROI: {operacion.accion_por_tsl_roi}", box_width))
+                tsl_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
+            riesgos_activos.append(tsl_str)
 
+        if operacion.be_sl:
+            riesgos_activos.append(f"SL por Break-Even: Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})")
+        if operacion.be_tp:
+            riesgos_activos.append(f"TP por Break-Even: Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']})")
+
+        if not riesgos_activos:
+            print(_create_box_line("  - Ningún límite de riesgo de operación configurado.", box_width))
+        else:
+            for riesgo in riesgos_activos:
+                print(_create_box_line(f"  - {riesgo}", box_width))
+        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -360,7 +346,7 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-            
+                
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
