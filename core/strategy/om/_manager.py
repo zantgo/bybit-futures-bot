@@ -371,6 +371,8 @@ class OperationManager:
                 "INFO"
             )
 
+# Reemplaza esta función completa en core/strategy/om/_manager.py
+
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -378,6 +380,8 @@ class OperationManager:
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
             
+            # La condición sigue siendo la misma: la transición final ocurre
+            # cuando ya no hay posiciones abiertas.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (
@@ -385,6 +389,14 @@ class OperationManager:
                 )
                 self._memory_logger.log(log_msg, "INFO")
                 
+                # --- INICIO DE LA MODIFICACIÓN ---
+                # Se limpian todas las condiciones de entrada para evitar reactivaciones no deseadas.
+                target_op.cond_entrada_above = None
+                target_op.cond_entrada_below = None
+                target_op.tiempo_espera_minutos = None
+                target_op.tiempo_inicio_espera = None
+                # --- FIN DE LA MODIFICACIÓN ---
+
                 for pos in target_op.posiciones:
                     pos.estado = 'PENDIENTE'
                     pos.entry_timestamp = None
@@ -400,8 +412,9 @@ class OperationManager:
                     pos.api_avg_fill_price = None
                     pos.api_filled_qty = None
                 
+                # Finalmente, cambiamos el estado. El resto del snapshot (PNL, etc.) se preserva.
                 target_op.estado = 'DETENIDA'
-
+                
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
