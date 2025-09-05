@@ -102,6 +102,8 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             press_enter_to_continue()
             break
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_main.py
+
 def _show_single_operation_view(side: str):
     """
     Muestra la vista de detalles y acciones para una única operación (LONG o SHORT).
@@ -179,13 +181,9 @@ def _show_single_operation_view(side: str):
                 time.sleep(2)
                 continue
             
-            # --- INICIO DE LA LÓGICA CORREGIDA Y SIMPLIFICADA ---
-            # Se construye el menú final y un mapa de acciones paralelo.
+            final_menu_items = list(menu_items)
+            final_actions = list(actions)
             
-            final_menu_items = list(menu_items) # Copia de los items dinámicos
-            final_actions = list(actions)       # Copia de las acciones dinámicas
-            
-            # Añadir las opciones estáticas
             final_menu_items.extend([
                 None,
                 "[r] Refrescar",
@@ -199,24 +197,37 @@ def _show_single_operation_view(side: str):
             main_menu = TerminalMenu(final_menu_items, title="\nAcciones:", **menu_options)
             choice_index = main_menu.show()
             
-            # Obtener la acción directamente de la lista de acciones usando el índice
             action = final_actions[choice_index] if choice_index is not None else None
-            # --- FIN DE LA LÓGICA CORREGIDA Y SIMPLIFICADA ---
 
             if action == "start_new": _wizards.operation_setup_wizard(om_api, side, is_modification=False)
             elif action == "modify": _wizards.operation_setup_wizard(om_api, side, is_modification=True)
             elif action == "manual_manage": manual_position_manager.show_manual_position_manager_screen(side)
-            elif action == "pause": om_api.pausar_operacion(side); time.sleep(0.2)
-            elif action == "resume": om_api.reanudar_operacion(side); time.sleep(0.2)
+            
+            # --- INICIO DE LA MODIFICACIÓN ---
+            elif action == "pause": om_api.pausar_operacion(side, price=current_price); time.sleep(0.2)
+            # --- (LÍNEA ORIGINAL COMENTADA) ---
+            # elif action == "pause": om_api.pausar_operacion(side); time.sleep(0.2)
+            
+            elif action == "resume": om_api.reanudar_operacion(side, price=current_price); time.sleep(0.2)
+            # --- (LÍNEA ORIGINAL COMENTADA) ---
+            # elif action == "resume": om_api.reanudar_operacion(side); time.sleep(0.2)
+            
             elif action == "force_start":
                 if TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show() == 0:
-                    om_api.forzar_activacion_manual(side); time.sleep(0.2)
+                    om_api.forzar_activacion_manual(side, price=current_price); time.sleep(0.2)
+                    # --- (LÍNEA ORIGINAL COMENTADA) ---
+                    # om_api.forzar_activacion_manual(side); time.sleep(0.2)
+            
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
                 if TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title).show() == 0:
                     print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")
-                    success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
+                    success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True, price=current_price)
+                    # --- (LÍNEA ORIGINAL COMENTADA) ---
+                    # success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
                     print(f"\nResultado: {'ÉXITO' if success else 'FALLO'} - {message}"); time.sleep(2.5)
+            # --- FIN DE LA MODIFICACIÓN ---
+
             elif action == "refresh": continue
             elif action == "help": show_help_popup("auto_mode")
             elif action == "back" or action is None: break

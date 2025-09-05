@@ -12,10 +12,9 @@ try:
     from core.logging import memory_logger
     from core.strategy.sm import api as sm_api
     from core import utils
-    from core.strategy.pm import _calculations as pm_calculations # <-- Añadir esta importación al inicio del archivo
+    from core.strategy.pm import _calculations as pm_calculations 
 
 except ImportError:
-    # ... (fallback de importaciones sin cambios) ...
     asdict = lambda x: x
     class Operacion:
         def __init__(self, id: str):
@@ -49,7 +48,6 @@ except ImportError:
     utils = type('obj', (object,), {'safe_division': lambda n, d, default=0.0: 0 if d == 0 else n / d})()
 
 class OperationManager:
-    # ... (funciones __init__ hasta activar_por_condicion sin cambios) ...
     def __init__(self, config: Any, utils: Any, trading_api: Any, memory_logger_instance: Any):
         self._config = config
         self._utils = utils
@@ -186,7 +184,10 @@ class OperationManager:
     
         return True, f"Operación {side.upper()} actualizada con éxito."
         
-    def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
+    # --- INICIO DE LA MODIFICACIÓN ---
+    def pausar_operacion(self, side: str, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
@@ -207,12 +208,15 @@ class OperationManager:
 
             target_op.estado = 'PAUSADA'
             target_op.estado_razon = reason if reason else "Pausada manualmente por el usuario."
+            target_op.precio_de_transicion = price
         
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'PAUSADA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
+    def reanudar_operacion(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'PAUSADA':
@@ -221,6 +225,7 @@ class OperationManager:
             estado_original = target_op.estado
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Reanudada manualmente por el usuario."
+            target_op.precio_de_transicion = price
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
@@ -234,7 +239,9 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
+    def forzar_activacion_manual(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
@@ -243,6 +250,7 @@ class OperationManager:
             estado_original = target_op.estado
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = "Activación forzada manualmente."
+            target_op.precio_de_transicion = price
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
@@ -253,7 +261,9 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
+    def activar_por_condicion(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
@@ -271,6 +281,7 @@ class OperationManager:
             
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = reason
+            target_op.precio_de_transicion = price
             
             now = datetime.datetime.now(datetime.timezone.utc)
             target_op.tiempo_ultimo_inicio_activo = now
@@ -281,7 +292,9 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
+    def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado == 'DETENIDA':
@@ -295,6 +308,7 @@ class OperationManager:
 
             target_op.estado = 'DETENIENDO'
             target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
+            target_op.precio_de_transicion = price
             
             log_msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'DETENIENDO'. Razón: {target_op.estado_razon}"
             self._memory_logger.log(log_msg, "WARN")
@@ -304,6 +318,7 @@ class OperationManager:
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
 
         return True, f"Proceso de detención para {side.upper()} iniciado. Esperando cierre de posiciones."
+    # --- FIN DE LA MODIFICACIÓN ---
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:
@@ -363,8 +378,6 @@ class OperationManager:
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
             
-            # La condición sigue siendo la misma: la transición final ocurre
-            # cuando ya no hay posiciones abiertas.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (
@@ -372,11 +385,6 @@ class OperationManager:
                 )
                 self._memory_logger.log(log_msg, "INFO")
                 
-                # --- INICIO DE LA NUEVA LÓGICA: RESETEAR EN LUGAR DE ELIMINAR ---
-                #
-                # En lugar de eliminar las posiciones pendientes, ahora iteramos sobre todas
-                # las posiciones existentes y las revertimos a su estado PENDIENTE original.
-                #
                 for pos in target_op.posiciones:
                     pos.estado = 'PENDIENTE'
                     pos.entry_timestamp = None
@@ -392,15 +400,9 @@ class OperationManager:
                     pos.api_avg_fill_price = None
                     pos.api_filled_qty = None
                 
-                # Finalmente, cambiamos el estado. El resto del snapshot (PNL, etc.) se preserva.
                 target_op.estado = 'DETENIDA'
 
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):
-        """
-        Gestiona la PARTE CONTABLE de un evento de liquidación o cierre forzoso.
-        En ambos casos, la pérdida registrada es el capital de las posiciones
-        que estaban abiertas en ese momento.
-        """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             
@@ -409,25 +411,17 @@ class OperationManager:
 
             estado_original = target_op.estado
             
-            # --- INICIO DE LA LÓGICA CONTABLE UNIFICADA Y CORREGIDA ---
-            
-            # No es necesario diferenciar el cálculo, solo el log.
-            # En ambos casos (liquidación o cierre forzoso), la pérdida es el capital en riesgo.
             if target_op.posiciones_abiertas:
                 capital_at_risk = sum(p.capital_asignado for p in target_op.posiciones_abiertas)
                 target_op.pnl_realizado_usdt -= capital_at_risk
                 
-                # El mensaje de log sí diferencia la causa
                 log_event_type = "liquidación" if reason and "HEARTBEAT" in reason.upper() else "cierre forzoso"
                 self._memory_logger.log(f"OM: Pérdida de ${capital_at_risk:.4f} (capital en uso) registrada por {log_event_type}.", "WARN")
 
-            # Marcamos las posiciones abiertas como 'CERRADA' para la transición.
             for p in target_op.posiciones:
                 if p.estado == 'ABIERTA':
                     p.estado = 'CERRADA'
             
-            # --- FIN DE LA LÓGICA CONTABLE ---
-
             if target_op.estado != 'DETENIENDO':
                  target_op.estado = 'DETENIENDO'
             
@@ -439,15 +433,9 @@ class OperationManager:
                 "WARN"
             )
             
-            # Llama a la función que completará la transición y el reseteo de posiciones.
             self.revisar_y_transicionar_a_detenida(side)
 
-    # Reemplaza la función finalize_forced_closure completa
     def finalize_forced_closure(self, side: str, reason: Optional[str] = None, exit_price: Optional[float] = None):
-        """
-        Gestiona la finalización de un cierre forzoso controlado (NO liquidación).
-        Calcula el PNL REAL de las posiciones cerradas y luego las resetea a PENDIENTE.
-        """
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op:
@@ -455,14 +443,11 @@ class OperationManager:
             
             self._memory_logger.log(f"OM: Finalizando cierre forzoso para {side.upper()}.", "INFO")
 
-            # --- INICIO DE LA LÓGICA DE CÁLCULO DE PNL REAL ---
             if target_op.posiciones_abiertas and exit_price is not None:
                 pnl_total_cierre = 0.0
                 comisiones_total_cierre = 0.0
                 
-                # Iteramos sobre una copia para no modificar la lista mientras la recorremos
                 for pos in list(target_op.posiciones_abiertas):
-                    # Usamos el calculador del PM para obtener el PNL neto
                     pnl_result = pm_calculations.calculate_pnl_commission_reinvestment(
                         side=side,
                         entry_price=pos.entry_price,
@@ -472,15 +457,12 @@ class OperationManager:
                     pnl_total_cierre += pnl_result.get('pnl_net_usdt', 0.0)
                     comisiones_total_cierre += pnl_result.get('commission_usdt', 0.0)
 
-                # Actualizamos los contadores de la operación
                 target_op.pnl_realizado_usdt += pnl_total_cierre
                 target_op.comisiones_totales_usdt += comisiones_total_cierre
                 target_op.comercios_cerrados_contador += len(target_op.posiciones_abiertas)
                 
                 self._memory_logger.log(f"OM: PNL Neto de ${pnl_total_cierre:+.4f} registrado por cierre forzoso.", "WARN")
-            # --- FIN DE LA LÓGICA DE CÁLCULO DE PNL REAL ---
 
-            # Marcamos las posiciones abiertas como 'CERRADA' para la transición.
             for p in target_op.posiciones:
                 if p.estado == 'ABIERTA':
                     p.estado = 'CERRADA'

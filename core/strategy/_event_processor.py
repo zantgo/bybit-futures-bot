@@ -133,6 +133,36 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR INESPERADO en el flujo de trabajo de process_event: {e}", level="ERROR")
             self._memory_logger.log(f"Traceback: {traceback.format_exc()}", level="ERROR")
+
+    def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
+        """
+        Procesa el tick para generar un evento crudo y luego usa TAManager y
+        el SignalGenerator para obtener una señal de bajo nivel.
+        """
+        increment, decrement = 0, 0
+        if not self._is_first_event and pd.notna(self._previous_raw_event_price):
+            if price > self._previous_raw_event_price: increment = 1
+            elif price < self._previous_raw_event_price: decrement = 1
+        self._is_first_event = False
+
+        raw_event = {'timestamp': timestamp, 'price': price, 'increment': increment, 'decrement': decrement}
+        
+        processed_data = None
+        if self._ta_manager and self._config.SESSION_CONFIG["TA"]["ENABLED"]:
+            processed_data = self._ta_manager.process_raw_price_event(raw_event)
+        
+        signal_data = {"signal": "HOLD_NO_TA"}
+        if self._signal_generator and processed_data:
+             signal_data = self._signal_generator.generate_signal(processed_data)
+        
+        self._latest_signal_data = signal_data
+        
+        if self._signal_logger and self._config.BOT_CONFIG["LOGGING"]["LOG_SIGNAL_OUTPUT"]:
+            self._signal_logger.log_signal_event(signal_data.copy())
+        
+        self._previous_raw_event_price = price
+        return signal_data
+
 # Reemplaza esta función completa en core/strategy/_event_processor.py
 
     def _check_operation_triggers(self, current_price: float):
@@ -176,8 +206,6 @@ class EventProcessor:
                     
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # Se añade la lógica para el nuevo modo BE-SL/TP.
                     if getattr(operacion, 'be_sl_tp_enabled', False):
                         break_even_price = operacion.get_live_break_even_price()
                         
@@ -185,40 +213,33 @@ class EventProcessor:
                             sl_dist = getattr(operacion, 'be_sl_distance_pct', None)
                             tp_dist = getattr(operacion, 'be_tp_distance_pct', None)
                             
-                            # Comprobar Stop Loss
                             if sl_dist is not None:
                                 if side == 'long':
                                     sl_price = break_even_price * (1 - sl_dist / 100)
                                     if current_price <= sl_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-SL: Precio ({current_price:.4f}) <= Stop ({sl_price:.4f})"
-                                        # Se usa la nueva variable de acción dedicada
-                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER') 
-                                else: # side == 'short'
+                                        risk_action = operacion.accion_por_be_sl_tp
+                                else:
                                     sl_price = break_even_price * (1 + sl_dist / 100)
                                     if current_price >= sl_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-SL: Precio ({current_price:.4f}) >= Stop ({sl_price:.4f})"
-                                        # Se usa la nueva variable de acción dedicada
-                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
+                                        risk_action = operacion.accion_por_be_sl_tp
 
-                            # Comprobar Take Profit (solo si el SL no se activó)
                             if not risk_condition_met and tp_dist is not None:
                                 if side == 'long':
                                     tp_price = break_even_price * (1 + tp_dist / 100)
                                     if current_price >= tp_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-TP: Precio ({current_price:.4f}) >= TP ({tp_price:.4f})"
-                                        # Se usa la nueva variable de acción dedicada
-                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
-                                else: # side == 'short'
+                                        risk_action = operacion.accion_por_be_sl_tp
+                                else:
                                     tp_price = break_even_price * (1 - tp_dist / 100)
                                     if current_price <= tp_price:
                                         risk_condition_met = True
                                         risk_reason = f"BE-TP: Precio ({current_price:.4f}) <= TP ({tp_price:.4f})"
-                                        # Se usa la nueva variable de acción dedicada
-                                        risk_action = getattr(operacion, 'accion_por_be_sl_tp', 'DETENER')
-                    # --- FIN DE LA MODIFICACIÓN ---
+                                        risk_action = operacion.accion_por_be_sl_tp
 
                     tsl_act_pct = operacion.tsl_roi_activacion_pct
                     tsl_dist_pct = operacion.tsl_roi_distancia_pct
@@ -254,8 +275,18 @@ class EventProcessor:
                     if risk_condition_met:
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        if risk_action == 'DETENER': self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
-                        else: self._om_api.pausar_operacion(side, reason=risk_reason)
+                        if risk_action == 'DETENER':
+                            # --- INICIO DE LA MODIFICACIÓN ---
+                            self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason, price=current_price)
+                            # --- (LÍNEA ORIGINAL COMENTADA) ---
+                            # self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason)
+                            # --- FIN DE LA MODIFICACIÓN ---
+                        else:
+                            # --- INICIO DE LA MODIFICACIÓN ---
+                            self._om_api.pausar_operacion(side, reason=risk_reason, price=current_price)
+                            # --- (LÍNEA ORIGINAL COMENTADA) ---
+                            # self._om_api.pausar_operacion(side, reason=risk_reason)
+                            # --- FIN DE LA MODIFICACIÓN ---
                         continue
 
                 # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
@@ -281,7 +312,11 @@ class EventProcessor:
                                 entry_condition_met = True
                     
                     if entry_condition_met:
-                        self._om_api.activar_por_condicion(side)
+                        # --- INICIO DE LA MODIFICACIÓN ---
+                        self._om_api.activar_por_condicion(side, price=current_price)
+                        # --- (LÍNEA ORIGINAL COMENTADA) ---
+                        # self._om_api.activar_por_condicion(side)
+                        # --- FIN DE LA MODIFICACIÓN ---
                         continue
                     
                 # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
@@ -298,7 +333,6 @@ class EventProcessor:
                             
                             if current_price > valor_limite:
                                 exit_triggered = True
-                                # Para un LONG, es un TP. Para un SHORT, es un SL.
                                 tipo_limite = "Take Profit" if side == 'long' else "Stop Loss"
                                 exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} > {valor_limite:.4f})"
                                 accion_final = cond.get('accion', 'PAUSAR')
@@ -310,7 +344,6 @@ class EventProcessor:
 
                             if current_price < valor_limite:
                                 exit_triggered = True
-                                # Para un LONG, es un SL. Para un SHORT, es un TP.
                                 tipo_limite = "Stop Loss" if side == 'long' else "Take Profit"
                                 exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} < {valor_limite:.4f})"
                                 accion_final = cond.get('accion', 'PAUSAR')
@@ -335,40 +368,18 @@ class EventProcessor:
                         log_msg = f"CONDICIÓN DE SALIDA ALCANZADA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
                         if accion_final == 'PAUSAR': 
-                            self._om_api.pausar_operacion(side, reason=exit_reason)
+                            # --- INICIO DE LA MODIFICACIÓN ---
+                            self._om_api.pausar_operacion(side, reason=exit_reason, price=current_price)
+                            # --- (LÍNEA ORIGINAL COMENTADA) ---
+                            # self._om_api.pausar_operacion(side, reason=exit_reason)
+                            # --- FIN DE LA MODIFICACIÓN ---
                         elif accion_final == 'DETENER': 
-                            self._om_api.detener_operacion(side, True, reason=exit_reason)
+                            # --- INICIO DE LA MODIFICACIÓN ---
+                            self._om_api.detener_operacion(side, True, reason=exit_reason, price=current_price)
+                            # --- (LÍNEA ORIGINAL COMENTADA) ---
+                            # self._om_api.detener_operacion(side, True, reason=exit_reason)
+                            # --- FIN DE LA MODIFICACIÓN ---
                         continue      
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-            
-
-    def _process_tick_and_generate_signal(self, timestamp: datetime.datetime, price: float) -> Dict[str, Any]:
-        """
-        Procesa el tick para generar un evento crudo y luego usa TAManager y
-        el SignalGenerator para obtener una señal de bajo nivel.
-        """
-        increment, decrement = 0, 0
-        if not self._is_first_event and pd.notna(self._previous_raw_event_price):
-            if price > self._previous_raw_event_price: increment = 1
-            elif price < self._previous_raw_event_price: decrement = 1
-        self._is_first_event = False
-
-        raw_event = {'timestamp': timestamp, 'price': price, 'increment': increment, 'decrement': decrement}
-        
-        processed_data = None
-        if self._ta_manager and self._config.SESSION_CONFIG["TA"]["ENABLED"]:
-            processed_data = self._ta_manager.process_raw_price_event(raw_event)
-        
-        signal_data = {"signal": "HOLD_NO_TA"}
-        if self._signal_generator and processed_data:
-             signal_data = self._signal_generator.generate_signal(processed_data)
-        
-        self._latest_signal_data = signal_data
-        
-        if self._signal_logger and self._config.BOT_CONFIG["LOGGING"]["LOG_SIGNAL_OUTPUT"]:
-            self._signal_logger.log_signal_event(signal_data.copy())
-        
-        self._previous_raw_event_price = price
-        return signal_data

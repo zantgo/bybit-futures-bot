@@ -1,3 +1,5 @@
+# core/strategy/om/_api.py
+
 """
 Interfaz Pública del Operation Manager (OM API).
 
@@ -54,35 +56,58 @@ def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool,
         return False, "OM no instanciado"
     return _om_instance.create_or_update_operation(side, params)
 
-def pausar_operacion(side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
+# --- INICIO DE LA MODIFICACIÓN ---
+def pausar_operacion(side: str, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
+# --- (LÍNEA ORIGINAL COMENTADA) ---
+# def pausar_operacion(side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para pausar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.pausar_operacion(side, reason)
+    return _om_instance.pausar_operacion(side, reason, price)
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # return _om_instance.pausar_operacion(side, reason)
 
-def reanudar_operacion(side: str) -> Tuple[bool, str]:
+def reanudar_operacion(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+# --- (LÍNEA ORIGINAL COMENTADA) ---
+# def reanudar_operacion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para reanudar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.reanudar_operacion(side)
+    return _om_instance.reanudar_operacion(side, price)
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # return _om_instance.reanudar_operacion(side)
 
-def forzar_activacion_manual(side: str) -> Tuple[bool, str]:
+def forzar_activacion_manual(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+# --- (LÍNEA ORIGINAL COMENTADA) ---
+# def forzar_activacion_manual(side: str) -> Tuple[bool, str]:
     """Delega la llamada para forzar la activación manual de la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.forzar_activacion_manual(side)
+    return _om_instance.forzar_activacion_manual(side, price)
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # return _om_instance.forzar_activacion_manual(side)
 
-def activar_por_condicion(side: str) -> Tuple[bool, str]:
+def activar_por_condicion(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+# --- (LÍNEA ORIGINAL COMENTADA) ---
+# def activar_por_condicion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para activar la operación cuando se cumple una condición."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.activar_por_condicion(side)
+    return _om_instance.activar_por_condicion(side, price)
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # return _om_instance.activar_por_condicion(side)
 
-def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
+def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
+# --- (LÍNEA ORIGINAL COMENTADA) ---
+# def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para detener completamente la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason)
+    return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason, price)
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason)
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 # --- Funciones de Actualización de Estado ---
 
@@ -106,7 +131,6 @@ def revisar_y_transicionar_a_detenida(side: str):
     if _om_instance:
         _om_instance.revisar_y_transicionar_a_detenida(side)
 
-# --- INICIO DE LA MODIFICACIÓN (NUEVOS PROXIES) ---
 def actualizar_reinvestable_profit(side: str, amount: float):
     """Delega la llamada para añadir ganancias al bote de reinversión."""
     if _om_instance:
@@ -116,21 +140,12 @@ def distribuir_reinvestable_profits(side: str):
     """Delega la llamada para distribuir las ganancias acumuladas para reinversión."""
     if _om_instance:
         _om_instance.distribuir_reinvestable_profits(side)
-# --- FIN DE LA MODIFICACIÓN ---
-
-# ==============================================================================
-# --- INICIO DE LA NUEVA FUNCIONALIDAD: PROXY PARA MANEJADOR DE LIQUIDACIÓN ---
-# ==============================================================================
 
 def handle_liquidation_event(side: str, reason: str):
     """Delega la llamada para manejar un evento de liquidación de forma controlada."""
     if _om_instance:
         _om_instance.handle_liquidation_event(side, reason)
 
-# ==============================================================================
-# --- FIN DE LA NUEVA FUNCIONALIDAD ---
-# ==============================================================================
-# Reemplaza el proxy de finalize_forced_closure
 def finalize_forced_closure(side: str, reason: Optional[str] = None, exit_price: Optional[float] = None):
     """
     Delega la llamada para finalizar un cierre forzoso controlado,

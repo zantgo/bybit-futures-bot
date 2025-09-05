@@ -234,7 +234,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
-        
+
 # Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 
 def _display_operation_conditions(operacion: Operacion):
@@ -248,10 +248,24 @@ def _display_operation_conditions(operacion: Operacion):
     color = status_color_map.get(operacion.estado, "")
     reset = "\033[0m"
     
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se añade el precio de transición a la razón del estado si existe
+    razon_estado_str = f"\033[94m{operacion.estado_razon}\033[0m"
+    precio_transicion = getattr(operacion, 'precio_de_transicion', None)
+    if precio_transicion is not None:
+        razon_estado_str += f" @ ${precio_transicion:.4f}"
+
     estado_data = {
         "Estado Actual": f"{color}{operacion.estado}{reset}",
-        "Razón de Estado": f"\033[94m{operacion.estado_razon}\033[0m"
+        "Razón de Estado": razon_estado_str
     }
+    # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
+    # estado_data = {
+    #     "Estado Actual": f"{color}{operacion.estado}{reset}",
+    #     "Razón de Estado": f"\033[94m{operacion.estado_razon}\033[0m"
+    # }
+    # --- FIN DE LA MODIFICACIÓN ---
+
     max_key_len = max(len(_clean_ansi_codes(k)) for k in estado_data.keys())
 
     for key, value in estado_data.items():
@@ -309,7 +323,6 @@ def _display_operation_conditions(operacion: Operacion):
                 tsl_roi_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
         print(_create_box_line(f"  - {tsl_roi_str}", box_width))
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         be_sl_tp_str = "SL/TP por Break-Even: Desactivado"
         if getattr(operacion, 'be_sl_tp_enabled', False):
             sl_dist = getattr(operacion, 'be_sl_distance_pct', 'N/A')
@@ -317,7 +330,6 @@ def _display_operation_conditions(operacion: Operacion):
             accion = getattr(operacion, 'accion_por_be_sl_tp', 'N/A')
             be_sl_tp_str = f"SL/TP por Break-Even: SL {sl_dist}% / TP {tp_dist}% (Acción: {accion})"
         print(_create_box_line(f"  - {be_sl_tp_str}", box_width))
-        # --- FIN DE LA MODIFICACIÓN ---
         
         print(_create_box_line(f"  - Acción por SL/TP ROI: {operacion.accion_por_sl_tp_roi}", box_width))
         print(_create_box_line(f"  - Acción por TSL ROI: {operacion.accion_por_tsl_roi}", box_width))
@@ -348,7 +360,8 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-
+            
+# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
