@@ -11,6 +11,7 @@ los paquetes 'pm' y 'om', asegurando un flujo de dependencias unidireccional
 y robusto.
 """
 import datetime
+import config
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any 
 
@@ -364,9 +365,12 @@ class Operacion:
         self.reinvestable_profit_balance = 0.0
         # --- FIN DE LA MODIFICACIÓN ---
 
+# Reemplaza la función get_live_break_even_price completa con esta versión mejorada
+
     def get_live_break_even_price(self) -> Optional[float]:
         """
-        Calcula el precio de mercado al cual el PNL total (realizado + no realizado) sería cero.
+        Calcula el precio de mercado al cual el PNL total (realizado + no realizado)
+        sería cero, incluyendo el coste estimado de las comisiones de cierre.
         """
         open_positions = self.posiciones_abiertas
         if not open_positions:
@@ -376,19 +380,42 @@ class Operacion:
         if total_size <= 1e-12:
             return None
 
-        pnl_unrealized_target = -self.pnl_realizado_usdt
-        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # 1. Obtener la tasa de comisión desde la configuración
+        # (Necesitamos importar 'config' al principio del archivo)
+        # import config
+        commission_rate = config.SESSION_CONFIG["PROFIT"]["COMMISSION_RATE"]
+
+        # 2. Calcular el PNL objetivo para cubrir el PNL realizado Y las comisiones de cierre
+        # El valor nominal actual de la posición abierta
         avg_entry = self.avg_entry_price
         if avg_entry is None:
             return None
-
-        price_change_needed = safe_division(pnl_unrealized_target, total_size)
-
+        
+        # El PNL no realizado necesario para anular el PNL realizado
+        pnl_unrealized_target = -self.pnl_realizado_usdt
+        
+        # 3. Calcular la fórmula que relaciona el precio de BE con las comisiones
+        # PNL_Bruto - Comision_Apertura - Comision_Cierre = PNL_Neto
+        # (Precio_BE - Precio_Prom) * Tamaño - (Precio_Prom * Tamaño * Tasa) - (Precio_BE * Tamaño * Tasa) = PNL_Objetivo
+        # Despejando Precio_BE:
+        # Precio_BE * Tamaño - Precio_BE * Tamaño * Tasa = PNL_Objetivo + Precio_Prom * Tamaño + Precio_Prom * Tamaño * Tasa
+        # Precio_BE * (Tamaño * (1 - Tasa)) = PNL_Objetivo + Precio_Prom * Tamaño * (1 + Tasa)
+        # Precio_BE = (PNL_Objetivo + Precio_Prom * Tamaño * (1 + Tasa)) / (Tamaño * (1 - Tasa))
+        
+        # Para SHORTs, la lógica de PNL es (Precio_Prom - Precio_BE), lo que invierte los signos.
+        # Precio_BE = (Precio_Prom * Tamaño * (1 - Tasa) - PNL_Objetivo) / (Tamaño * (1 + Tasa))
+        
         if self.tendencia == 'LONG_ONLY':
-            break_even_price = avg_entry + price_change_needed
+            numerator = pnl_unrealized_target + (avg_entry * total_size * (1 + commission_rate))
+            denominator = total_size * (1 - commission_rate)
+            break_even_price = safe_division(numerator, denominator)
         elif self.tendencia == 'SHORT_ONLY':
-            break_even_price = avg_entry - price_change_needed
+            numerator = (avg_entry * total_size * (1 - commission_rate)) - pnl_unrealized_target
+            denominator = total_size * (1 + commission_rate)
+            break_even_price = safe_division(numerator, denominator)
         else:
             return None
+        # --- FIN DE LA MODIFICACIÓN ---
 
         return break_even_price if break_even_price > 0 else None
