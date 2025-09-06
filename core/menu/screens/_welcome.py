@@ -203,7 +203,7 @@ def show_welcome_screen(bot_controller: Any):
             "[5] Ver Logs de la Aplicación",
             None,
             "[h] Ayuda", # Botón de Ayuda añadido
-            "[6] Salir del Bot"
+            "[q] Salir del Bot"
         ]
         
         action_map = {
