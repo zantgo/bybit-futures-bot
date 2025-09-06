@@ -125,110 +125,6 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
         
     return params_changed_in_submenu
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
-def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
-    action = "Modificando" if is_modification else "Creando Nueva"
-    tendencia = "LONG" if operacion.tendencia == 'LONG_ONLY' else "SHORT"
-    print(f"\n{action} Operación {tendencia}:")
-    print("┌" + "─" * (box_width - 2) + "┐")
-
-    def _print_line(label, value, key_len):
-        content = f"  {label:<{key_len}} : {value}"
-        print(_create_config_box_line(content, box_width))
-
-    def _print_section_header(title):
-        print(_create_config_box_line(f"\033[96m{title.center(box_width - 6)}\033[0m", box_width))
-
-    _print_section_header("Capital y Posiciones")
-    capital_data = { "Capital Operativo Total": f"${operacion.capital_operativo_logico_actual:.2f} USDT", "Total de Posiciones": f"{len(operacion.posiciones)} ({operacion.posiciones_abiertas_count} Abiertas, {len(operacion.posiciones_pendientes)} Pendientes)", }
-    max_key = max(len(k) for k in capital_data.keys()) if capital_data else 0
-    for label, value in capital_data.items(): _print_line(label, value, max_key)
-
-    print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Estrategia Global")
-    strategy_data = { "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x", "Distancia Promediación (%)": f"{operacion.averaging_distance_pct:.2f}%" if isinstance(operacion.averaging_distance_pct, (int, float)) else "Desactivado", "Reinvertir Ganancias": "Activado" if getattr(operacion, 'auto_reinvest_enabled', False) else "Desactivado", }
-    max_key = max(len(k) for k in strategy_data.keys()) if strategy_data else 0
-    for label, value in strategy_data.items(): _print_line(label, value, max_key)
-
-    print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Riesgo por Posición Individual")
-    leverage = operacion.apalancamiento if operacion.apalancamiento > 0 else 1.0
-    sl_ind_str = f"{operacion.sl_posicion_individual_pct}% (Mov. Precio: {operacion.sl_posicion_individual_pct / leverage:.4f}%)" if operacion.sl_posicion_individual_pct is not None else "Desactivado"
-    tsl_act_str = f"{operacion.tsl_activacion_pct}% (Mov. Precio: {operacion.tsl_activacion_pct / leverage:.4f}%)" if operacion.tsl_activacion_pct is not None else "Desactivado"
-    risk_data = { "SL Individual (%)": sl_ind_str, "Activación TSL (%)": tsl_act_str, "Distancia TSL (%)": f"{operacion.tsl_distancia_pct}% (Mov. Precio: {operacion.tsl_distancia_pct / leverage:.4f}%)" if operacion.tsl_activacion_pct else "N/A", }
-    max_key = max(len(k) for k in risk_data.keys()) if risk_data else 0
-    for label, value in risk_data.items(): _print_line(label, value, max_key)
-    
-    print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Gestión de Riesgo de Operación")
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # La lógica para mostrar el riesgo de operación se refactoriza completamente
-    op_risk_data = {}
-    
-    if operacion.dynamic_roi_sl:
-        op_risk_data["SL Dinámico por ROI"] = f"Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})"
-    if operacion.roi_sl:
-        op_risk_data["Stop Loss por ROI"] = f"{operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})"
-    if operacion.roi_tp:
-        op_risk_data["Take Profit por ROI"] = f"{operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})"
-    if operacion.roi_tsl:
-        op_risk_data["TSL por ROI"] = f"Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
-    if operacion.be_sl:
-        op_risk_data["SL por Break-Even"] = f"Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})"
-    if operacion.be_tp:
-        op_risk_data["TP por Break-Even"] = f"Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']})"
-        
-    if not op_risk_data:
-        _print_line("Límites de Riesgo", "Ninguno configurado", 20)
-    else:
-        max_key = max(len(k) for k in op_risk_data.keys())
-        for label, value in op_risk_data.items():
-            _print_line(label, value, max_key)
-    # --- FIN DE LA MODIFICACIÓN ---
-    
-    print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Condiciones de Entrada")
-    
-    max_key_entry = len("Precio SUPERIOR a")
-    if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
-        _print_line("Modo de Entrada", "Inmediata (Market)", max_key_entry)
-    else:
-        if operacion.cond_entrada_above is not None: _print_line("Precio SUPERIOR a", f"{operacion.cond_entrada_above:.4f}", max_key_entry)
-        if operacion.cond_entrada_below is not None: _print_line("Precio INFERIOR a", f"{operacion.cond_entrada_below:.4f}", max_key_entry)
-        if operacion.tiempo_espera_minutos: _print_line("Temporizador", f"{operacion.tiempo_espera_minutos} min", max_key_entry)
-
-    print("├" + "─" * (box_width - 2) + "┤")
-    _print_section_header("Condiciones de Salida")
-    
-    exit_labels = []
-    if operacion.cond_salida_above: exit_labels.append("Salida Superior")
-    if operacion.cond_salida_below: exit_labels.append("Salida Inferior")
-    exit_labels.extend(["Límite Duración (min)", "Límite Máx. Trades"])
-    max_key_exit = max(len(k) for k in exit_labels) if exit_labels else 20
-
-    has_exit_cond = False
-    if operacion.cond_salida_above:
-        has_exit_cond = True
-        _print_line("Salida Superior", f"Precio > {operacion.cond_salida_above['valor']:.4f} (Acción: {operacion.cond_salida_above['accion']})", max_key_exit)
-    if operacion.cond_salida_below:
-        has_exit_cond = True
-        _print_line("Salida Inferior", f"Precio < {operacion.cond_salida_below['valor']:.4f} (Acción: {operacion.cond_salida_below['accion']})", max_key_exit)
-    if operacion.tiempo_maximo_min:
-        has_exit_cond = True
-        _print_line("Límite Duración (min)", f"{operacion.tiempo_maximo_min} (Acción: {operacion.accion_por_limite_tiempo})", max_key_exit)
-    if operacion.max_comercios:
-        has_exit_cond = True
-        _print_line("Límite Máx. Trades", f"{operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})", max_key_exit)
-        
-    if not has_exit_cond:
-        _print_line("Límites de Salida", "Ninguno configurado", max_key_exit)
-
-    print("└" + "─" * (box_width - 2) + "┘")
-
-# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
-
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     from ...._helpers import show_help_popup
     config_module = _deps.get("config_module")
@@ -406,3 +302,109 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                     print("\nAsistente cancelado."); time.sleep(1.5); break
         except UserInputCancelled:
             print("\nEdición de campo cancelada."); time.sleep(1)
+
+def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
+    action = "Modificando" if is_modification else "Creando Nueva"
+    tendencia = "LONG" if operacion.tendencia == 'LONG_ONLY' else "SHORT"
+    print(f"\n{action} Operación {tendencia}:")
+    print("┌" + "─" * (box_width - 2) + "┐")
+
+    def _print_line(label, value, key_len):
+        content = f"  {label:<{key_len}} : {value}"
+        print(_create_config_box_line(content, box_width))
+
+    def _print_section_header(title):
+        print(_create_config_box_line(f"\033[96m{title.center(box_width - 6)}\033[0m", box_width))
+
+    _print_section_header("Capital y Posiciones")
+    capital_data = { "Capital Operativo Total": f"${operacion.capital_operativo_logico_actual:.2f} USDT", "Total de Posiciones": f"{len(operacion.posiciones)} ({operacion.posiciones_abiertas_count} Abiertas, {len(operacion.posiciones_pendientes)} Pendientes)", }
+    max_key = max(len(k) for k in capital_data.keys()) if capital_data else 0
+    for label, value in capital_data.items(): _print_line(label, value, max_key)
+
+    print("├" + "─" * (box_width - 2) + "┤")
+    _print_section_header("Estrategia Global")
+    strategy_data = { "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x", "Distancia Promediación (%)": f"{operacion.averaging_distance_pct:.2f}%" if isinstance(operacion.averaging_distance_pct, (int, float)) else "Desactivado", "Reinvertir Ganancias": "Activado" if getattr(operacion, 'auto_reinvest_enabled', False) else "Desactivado", }
+    max_key = max(len(k) for k in strategy_data.keys()) if strategy_data else 0
+    for label, value in strategy_data.items(): _print_line(label, value, max_key)
+
+    print("├" + "─" * (box_width - 2) + "┤")
+    _print_section_header("Riesgo por Posición Individual")
+    leverage = operacion.apalancamiento if operacion.apalancamiento > 0 else 1.0
+    sl_ind_str = f"{operacion.sl_posicion_individual_pct}% (Mov. Precio: {operacion.sl_posicion_individual_pct / leverage:.4f}%)" if operacion.sl_posicion_individual_pct is not None else "Desactivado"
+    tsl_act_str = f"{operacion.tsl_activacion_pct}% (Mov. Precio: {operacion.tsl_activacion_pct / leverage:.4f}%)" if operacion.tsl_activacion_pct is not None else "Desactivado"
+    risk_data = { "SL Individual (%)": sl_ind_str, "Activación TSL (%)": tsl_act_str, "Distancia TSL (%)": f"{operacion.tsl_distancia_pct}% (Mov. Precio: {operacion.tsl_distancia_pct / leverage:.4f}%)" if operacion.tsl_activacion_pct else "N/A", }
+    max_key = max(len(k) for k in risk_data.keys()) if risk_data else 0
+    for label, value in risk_data.items(): _print_line(label, value, max_key)
+    
+    print("├" + "─" * (box_width - 2) + "┤")
+    _print_section_header("Gestión de Riesgo de Operación")
+
+    # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
+    op_risk_data = {}
+    
+    if operacion.dynamic_roi_sl:
+        op_risk_data["SL Dinámico por ROI"] = f"Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})"
+    if operacion.roi_sl:
+        op_risk_data["Stop Loss por ROI"] = f"{operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})"
+    if operacion.roi_tp:
+        op_risk_data["Take Profit por ROI"] = f"{operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})"
+    if operacion.roi_tsl:
+        op_risk_data["TSL por ROI"] = f"Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
+    if operacion.be_sl:
+        op_risk_data["SL por Break-Even"] = f"Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})"
+    if operacion.be_tp:
+        op_risk_data["TP por Break-Even"] = f"Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']})"
+        
+    if not op_risk_data:
+        _print_line("Límites de Riesgo", "Ninguno configurado", 20)
+    else:
+        # Ordenamos las claves del diccionario según la lógica deseada (SL -> TSL -> TP)
+        sorted_risk_keys = sorted(op_risk_data.keys(), key=lambda k: (
+            'SL' not in k,
+            'TSL' in k,
+            'TP' in k
+        ))
+        
+        max_key = max(len(k) for k in sorted_risk_keys)
+        for label in sorted_risk_keys:
+            _print_line(label, op_risk_data[label], max_key)
+    # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
+    
+    print("├" + "─" * (box_width - 2) + "┤")
+    _print_section_header("Condiciones de Entrada")
+    
+    max_key_entry = len("Precio SUPERIOR a")
+    if all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos]):
+        _print_line("Modo de Entrada", "Inmediata (Market)", max_key_entry)
+    else:
+        if operacion.cond_entrada_above is not None: _print_line("Precio SUPERIOR a", f"{operacion.cond_entrada_above:.4f}", max_key_entry)
+        if operacion.cond_entrada_below is not None: _print_line("Precio INFERIOR a", f"{operacion.cond_entrada_below:.4f}", max_key_entry)
+        if operacion.tiempo_espera_minutos: _print_line("Temporizador", f"{operacion.tiempo_espera_minutos} min", max_key_entry)
+
+    print("├" + "─" * (box_width - 2) + "┤")
+    _print_section_header("Condiciones de Salida")
+    
+    exit_labels = []
+    if operacion.cond_salida_above: exit_labels.append("Salida Superior")
+    if operacion.cond_salida_below: exit_labels.append("Salida Inferior")
+    exit_labels.extend(["Límite Duración (min)", "Límite Máx. Trades"])
+    max_key_exit = max(len(k) for k in exit_labels) if exit_labels else 20
+
+    has_exit_cond = False
+    if operacion.cond_salida_above:
+        has_exit_cond = True
+        _print_line("Salida Superior", f"Precio > {operacion.cond_salida_above['valor']:.4f} (Acción: {operacion.cond_salida_above['accion']})", max_key_exit)
+    if operacion.cond_salida_below:
+        has_exit_cond = True
+        _print_line("Salida Inferior", f"Precio < {operacion.cond_salida_below['valor']:.4f} (Acción: {operacion.cond_salida_below['accion']})", max_key_exit)
+    if operacion.tiempo_maximo_min:
+        has_exit_cond = True
+        _print_line("Límite Duración (min)", f"{operacion.tiempo_maximo_min} (Acción: {operacion.accion_por_limite_tiempo})", max_key_exit)
+    if operacion.max_comercios:
+        has_exit_cond = True
+        _print_line("Límite Máx. Trades", f"{operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})", max_key_exit)
+        
+    if not has_exit_cond:
+        _print_line("Límites de Salida", "Ninguno configurado", max_key_exit)
+
+    print("└" + "─" * (box_width - 2) + "┘")
