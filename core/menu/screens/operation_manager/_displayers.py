@@ -447,15 +447,24 @@ def _display_operation_conditions(operacion: Operacion):
                 tp_price = be_price * (1 + tp_dist / 100) if operacion.tendencia == 'LONG_ONLY' else be_price * (1 - tp_dist / 100)
             riesgos_activos.append(f"TP por Break-Even: Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']}) {format_price(tp_price)}")
 
+        # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
         if not riesgos_activos:
             print(_create_box_line("  - Ningún límite de riesgo de operación configurado.", box_width))
         else:
+            # Ordenamos la lista 'riesgos_activos' antes de imprimirla
+            riesgos_activos.sort(key=lambda x: (
+                'SL' not in x,      # Pone las cadenas que contienen 'SL' al principio
+                'TSL' in x,         # Pone las cadenas con 'TSL' después de las de 'SL'
+                'TP' in x           # Pone las cadenas con 'TP' al final
+            ))
+            
             for riesgo in riesgos_activos:
                 print(_create_box_line(f"  - {riesgo}", box_width))
+        # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
-        print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
+        print(_create_box_line("\033[96mLímites de Salida (por Sesión Activa)\033[0m", box_width, 'center'))
         
         exit_limits = []
         if operacion.cond_salida_above:
@@ -465,8 +474,6 @@ def _display_operation_conditions(operacion: Operacion):
         if operacion.cond_salida_below:
             cond = operacion.cond_salida_below
             exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
-        
-        # --- INICIO DE LA SECCIÓN CORREGIDA ---
         
         # Límite de Duración (por Sesión Activa)
         if operacion.tiempo_maximo_min is not None:
@@ -489,8 +496,6 @@ def _display_operation_conditions(operacion: Operacion):
             trades_restantes = max(0, operacion.max_comercios - trades_actuales_sesion)
             
             exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Restantes: {trades_restantes}) (Acción: {operacion.accion_por_limite_trades})")
-        
-        # --- FIN DE LA SECCIÓN CORREGIDA ---
         
         if not exit_limits:
             print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
