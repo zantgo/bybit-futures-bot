@@ -211,60 +211,6 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
     
-def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
-    box_width = _get_unified_box_width()
-    print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
-    print("├" + "─" * (box_width - 2) + "┤")
-
-    if not operacion:
-        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
-        print("└" + "─" * (box_width - 2) + "┘")
-        return
-
-    tendencia = operacion.tendencia
-    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
-    color, reset = color_map.get(tendencia, ""), "\033[0m"
-    
-    pos_abiertas = operacion.posiciones_abiertas_count
-    pos_total = len(operacion.posiciones)
-
-    data = {
-        "Tendencia": f"{color}{tendencia}{reset}",
-        "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
-        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
-    }
-    
-    if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tiempo_espera_minutos:
-        if getattr(operacion, 'tiempo_inicio_espera', None):
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
-            time_left = end_time - now_utc
-            if time_left.total_seconds() > 0:
-                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
-    
-    # --- (INICIO DE LA MODIFICACIÓN) ---
-    # Se actualiza la lógica para mostrar el tiempo de la sesión activa.
-    tiempo_sesion_activa_str = "00:00:00 (Pausado)"
-    if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
-        # Se calcula el tiempo transcurrido desde el inicio de la sesión activa
-        total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds()
-        hours, remainder = divmod(int(total_seconds_active), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-    
-    # Se añade la nueva línea al diccionario de datos a mostrar
-    data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
-
-    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
-    for key, value in data.items():
-        content = f"{key:<{max_key_len}} : {value}"
-        print(_create_box_line(content, box_width))
-
-    print("└" + "─" * (box_width - 2) + "┘")
-
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -502,5 +448,67 @@ def _display_operation_conditions(operacion: Operacion):
         else:
             for limit in exit_limits:
                 print(_create_box_line(f"  - {limit}", box_width))
+
+    print("└" + "─" * (box_width - 2) + "┘")
+def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
+    box_width = _get_unified_box_width()
+    print("┌" + "─" * (box_width - 2) + "┐")
+    print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
+    print("├" + "─" * (box_width - 2) + "┤")
+
+    if not operacion:
+        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
+        print("└" + "─" * (box_width - 2) + "┘")
+        return
+
+    tendencia = operacion.tendencia
+    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
+    color, reset = color_map.get(tendencia, ""), "\033[0m"
+    
+    pos_abiertas = operacion.posiciones_abiertas_count
+    pos_total = len(operacion.posiciones)
+
+    data = {
+        "Tendencia": f"{color}{tendencia}{reset}",
+        "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
+        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
+    }
+    
+    if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tiempo_espera_minutos:
+        if getattr(operacion, 'tiempo_inicio_espera', None):
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
+            time_left = end_time - now_utc
+            if time_left.total_seconds() > 0:
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    # --- INICIO DE LA SECCIÓN CORREGIDA ---
+    
+    # Lógica de visualización del tiempo de la sesión activa
+    tiempo_sesion_activa_str = ""
+    if operacion.estado == 'ACTIVA':
+        start_time = getattr(operacion, 'tiempo_inicio_sesion_activa', None)
+        if start_time:
+            total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds()
+            hours, remainder = divmod(int(total_seconds_active), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+        else:
+            # Caso raro: estado ACTIVA pero sin timestamp de inicio.
+            tiempo_sesion_activa_str = "Calculando..." 
+    else:
+        # Para cualquier otro estado (PAUSADA, DETENIDA, etc.), mostramos "Pausado".
+        tiempo_sesion_activa_str = "00:00:00 (Pausado)"
+
+    data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
+    
+    # --- FIN DE LA SECCIÓN CORREGIDA ---
+
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
+    for key, value in data.items():
+        content = f"{key:<{max_key_len}} : {value}"
+        print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
