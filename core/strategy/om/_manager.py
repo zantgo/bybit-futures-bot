@@ -184,10 +184,7 @@ class OperationManager:
     
         return True, f"Operación {side.upper()} actualizada con éxito."
         
-    # --- INICIO DE LA MODIFICACIÓN ---
     def pausar_operacion(self, side: str, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # def pausar_operacion(self, side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['ACTIVA', 'EN_ESPERA']:
@@ -199,6 +196,12 @@ class OperationManager:
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
             
             target_op.tiempo_ultimo_inicio_activo = None
+            
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se resetean los contadores de sesión activa al pausar.
+            target_op.tiempo_inicio_sesion_activa = None
+            target_op.trades_en_sesion_activa = 0
+            # --- (FIN DE LA MODIFICACIÓN) ---
             
             target_op.cond_entrada_above = None
             target_op.cond_entrada_below = None
@@ -215,8 +218,6 @@ class OperationManager:
         return True, msg
 
     def reanudar_operacion(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # def reanudar_operacion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado != 'PAUSADA':
@@ -231,6 +232,12 @@ class OperationManager:
             target_op.tiempo_ultimo_inicio_activo = now
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
+
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se inician los contadores de sesión activa al reanudar.
+            target_op.tiempo_inicio_sesion_activa = now
+            target_op.trades_en_sesion_activa = 0
+            # --- (FIN DE LA MODIFICACIÓN) ---
             
             target_op.tsl_roi_activo = False
             target_op.tsl_roi_peak_pct = 0.0
@@ -240,8 +247,6 @@ class OperationManager:
         return True, msg
 
     def forzar_activacion_manual(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # def forzar_activacion_manual(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
@@ -256,14 +261,18 @@ class OperationManager:
             target_op.tiempo_ultimo_inicio_activo = now
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
+
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se inician los contadores de sesión activa al forzar activación.
+            target_op.tiempo_inicio_sesion_activa = now
+            target_op.trades_en_sesion_activa = 0
+            # --- (FIN DE LA MODIFICACIÓN) ---
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
     def activar_por_condicion(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # def activar_por_condicion(self, side: str) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
@@ -287,14 +296,18 @@ class OperationManager:
             target_op.tiempo_ultimo_inicio_activo = now
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
+
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se inician los contadores de sesión activa al activar por condición.
+            target_op.tiempo_inicio_sesion_activa = now
+            target_op.trades_en_sesion_activa = 0
+            # --- (FIN DE LA MODIFICACIÓN) ---
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
     def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado == 'DETENIDA':
@@ -305,6 +318,12 @@ class OperationManager:
                 elapsed_seconds = (datetime.datetime.now(datetime.timezone.utc) - target_op.tiempo_ultimo_inicio_activo).total_seconds()
                 target_op.tiempo_acumulado_activo_seg += elapsed_seconds
                 target_op.tiempo_ultimo_inicio_activo = None
+            
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se resetean los contadores de sesión activa al detener.
+            target_op.tiempo_inicio_sesion_activa = None
+            target_op.trades_en_sesion_activa = 0
+            # --- (FIN DE LA MODIFICACIÓN) ---
 
             target_op.estado = 'DETENIENDO'
             target_op.estado_razon = reason if reason else "Detenida manualmente por el usuario."
@@ -318,13 +337,17 @@ class OperationManager:
                 return True, f"Operación {side.upper()} detenida y reseteada (sin posiciones abiertas)."
 
         return True, f"Proceso de detención para {side.upper()} iniciado. Esperando cierre de posiciones."
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def actualizar_pnl_realizado(self, side: str, pnl_amount: float):
         with self._lock:
             op = self._get_operation_by_side_internal(side)
             if op:
                 op.pnl_realizado_usdt += pnl_amount
+                # --- (INICIO DE LA MODIFICACIÓN) ---
+                # Se incrementa el contador de trades de la sesión activa solo si la operación está activa.
+                if op.estado == 'ACTIVA':
+                    op.trades_en_sesion_activa += 1
+                # --- (FIN DE LA MODIFICACIÓN) ---
 
     def actualizar_total_reinvertido(self, side: str, amount: float):
         with self._lock:
@@ -371,8 +394,6 @@ class OperationManager:
                 "INFO"
             )
 
-# Reemplaza esta función completa en core/strategy/om/_manager.py
-
     def revisar_y_transicionar_a_detenida(self, side: str):
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -380,8 +401,6 @@ class OperationManager:
             if not target_op or target_op.estado != 'DETENIENDO':
                 return
             
-            # La condición sigue siendo la misma: la transición final ocurre
-            # cuando ya no hay posiciones abiertas.
             if not target_op.posiciones_abiertas:
                 estado_original = target_op.estado
                 log_msg = (
@@ -389,13 +408,10 @@ class OperationManager:
                 )
                 self._memory_logger.log(log_msg, "INFO")
                 
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Se limpian todas las condiciones de entrada para evitar reactivaciones no deseadas.
                 target_op.cond_entrada_above = None
                 target_op.cond_entrada_below = None
                 target_op.tiempo_espera_minutos = None
                 target_op.tiempo_inicio_espera = None
-                # --- FIN DE LA MODIFICACIÓN ---
 
                 for pos in target_op.posiciones:
                     pos.estado = 'PENDIENTE'
@@ -412,7 +428,6 @@ class OperationManager:
                     pos.api_avg_fill_price = None
                     pos.api_filled_qty = None
                 
-                # Finalmente, cambiamos el estado. El resto del snapshot (PNL, etc.) se preserva.
                 target_op.estado = 'DETENIDA'
                 
     def handle_liquidation_event(self, side: str, reason: Optional[str] = None):

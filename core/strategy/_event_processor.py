@@ -86,8 +86,6 @@ class EventProcessor:
         """Devuelve una copia de la última señal generada."""
         return self._latest_signal_data.copy()
 
-    # Reemplaza la función process_event completa en core/strategy/_event_processor.py
-
     def process_event(self, intermediate_ticks_info: list, final_price_info: dict):
         """
         Orquesta el flujo de trabajo completo para procesar un único evento de precio.
@@ -109,11 +107,7 @@ class EventProcessor:
         try:
             # 1. Heartbeat de Sincronización Proactiva
             for side in ['long', 'short']:
-                # --- INICIO DE LA SOLUCIÓN: Corregir la llamada ---
-                # La llamada debe ser a la fachada de la API (_pm_api) que a su vez
-                # llama a la instancia. Esto respeta la arquitectura del bot.
                 self._pm_api.sync_physical_positions(side)
-                # --- FIN DE LA SOLUCIÓN ---
 
             # 2. Comprobar Triggers de la Operación (lógica predictiva de liquidación, SL/TP, etc.)
             self._check_operation_triggers(current_price)
@@ -163,10 +157,8 @@ class EventProcessor:
         self._previous_raw_event_price = price
         return signal_data
 
-# Reemplaza esta función completa en core/strategy/_event_processor.py
-
-# Reemplaza esta función completa en core/strategy/_event_processor.py
-
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    # Se reemplaza la función _check_operation_triggers completa con la nueva versión reestructurada.
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -183,7 +175,9 @@ class EventProcessor:
                 if not operacion or operacion.estado == 'DETENIDA':
                     continue
 
-                # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas)
+                # --- (SECCIÓN 1 - CÓDIGO NUEVO) ---
+                # 1. VIGILANCIA DE RIESGO (Solo si hay posiciones abiertas)
+                # Toda esta lógica ahora está correctamente encapsulada aquí.
                 if operacion.posiciones_abiertas_count > 0:
                     
                     open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
@@ -274,8 +268,9 @@ class EventProcessor:
                             self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason, price=current_price)
                         else: # PAUSAR
                             self._om_api.pausar_operacion(side, reason=risk_reason, price=current_price)
-                        continue
-
+                        continue # Salta al siguiente lado, ya que se ha tomado una acción importante
+                
+                # --- (SECCIÓN 2 - CÓDIGO ORIGINAL SIN CAMBIOS) ---
                 # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
                     entry_condition_met = False
@@ -301,40 +296,31 @@ class EventProcessor:
                     if entry_condition_met:
                         self._om_api.activar_por_condicion(side, price=current_price)
                         continue
-                    
-                # --- (INICIO DE LA MODIFICACIÓN) ---
-                # 3. Lógica de LÍMITES DE SALIDA (Ahora se ejecuta si está ACTIVA o PAUSADA)
-                # --- (LÍNEA ORIGINAL COMENTADA) ---
-                # if operacion.estado == 'ACTIVA':
-                # --- (LÍNEA CORREGIDA) ---
+                
+                # --- (SECCIÓN 3 - CÓDIGO NUEVO Y REUBICADO) ---
+                # 3. Lógica de LÍMITES DE SALIDA (Se ejecuta siempre que no esté DETENIDA)
+                # Esta sección ha sido movida fuera del if de posiciones_abiertas.
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
-                # --- (FIN DE LA MODIFICACIÓN) ---
                     exit_triggered, exit_reason, accion_final = False, "", ""
+                    
+                    # 3.1 GESTIÓN DE SALIDA POR PRECIO FIJO
+                    if not exit_triggered and operacion.cond_salida_above:
+                        cond = operacion.cond_salida_above
+                        valor_limite = cond.get('valor', float('inf'))
+                        if current_price > valor_limite:
+                            exit_triggered = True
+                            exit_reason = f"Límite de Salida por precio > {valor_limite:.4f} alcanzado"
+                            accion_final = cond.get('accion', 'PAUSAR')
+                    
+                    if not exit_triggered and operacion.cond_salida_below:
+                        cond = operacion.cond_salida_below
+                        valor_limite = cond.get('valor', 0.0)
+                        if current_price < valor_limite:
+                            exit_triggered = True
+                            exit_reason = f"Límite de Salida por precio < {valor_limite:.4f} alcanzado"
+                            accion_final = cond.get('accion', 'PAUSAR')
 
-                    # 3.1 GESTIÓN DE RIESGO POR PRECIO FIJO: Solo se evalúa si hay posiciones abiertas.
-                    if operacion.posiciones_abiertas_count > 0:
-                        
-                        if not exit_triggered and operacion.cond_salida_above:
-                            cond = operacion.cond_salida_above
-                            valor_limite = cond.get('valor', float('inf'))
-                            
-                            if current_price > valor_limite:
-                                exit_triggered = True
-                                tipo_limite = "Take Profit" if side == 'long' else "Stop Loss"
-                                exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} > {valor_limite:.4f})"
-                                accion_final = cond.get('accion', 'PAUSAR')
-                        
-                        if not exit_triggered and operacion.cond_salida_below:
-                            cond = operacion.cond_salida_below
-                            valor_limite = cond.get('valor', 0.0)
-
-                            if current_price < valor_limite:
-                                exit_triggered = True
-                                tipo_limite = "Stop Loss" if side == 'long' else "Take Profit"
-                                exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} < {valor_limite:.4f})"
-                                accion_final = cond.get('accion', 'PAUSAR')
-
-                    # 3.2 LÍMITES OPERATIVOS: Se evalúan siempre que la operación esté ACTIVA o PAUSADA.
+                    # 3.2 LÍMITES OPERATIVOS
                     if not exit_triggered and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_triggered = True
                         exit_reason = f"Límite de {operacion.max_comercios} trades alcanzado"
@@ -342,32 +328,25 @@ class EventProcessor:
 
                     if not exit_triggered and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
                         elapsed_seconds = operacion.tiempo_acumulado_activo_seg
-                        # --- (INICIO DE LA MODIFICACIÓN) ---
-                        # Se calcula el tiempo transcurrido solo si la operación está ACTIVA.
-                        # En PAUSA, solo se usa el tiempo acumulado hasta la última pausa.
                         if operacion.estado == 'ACTIVA':
                             elapsed_seconds += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-                        # --- (FIN DE LA MODIFICACIÓN) ---
                         
                         if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
                             exit_triggered = True
                             exit_reason = f"Límite de tiempo de operación ({operacion.tiempo_maximo_min} min) alcanzado"
                             accion_final = operacion.accion_por_limite_tiempo
                     
-                    # 3.3 EJECUCIÓN: Si cualquier condición de salida se cumplió, se actúa.
+                    # 3.3 EJECUCIÓN DE ACCIÓN DE SALIDA
                     if exit_triggered:
                         log_msg = f"CONDICIÓN DE SALIDA ALCANZADA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
                         
-                        # --- (INICIO DE LA MODIFICACIÓN) ---
-                        # Se implementa la lógica de prioridad.
                         if accion_final == 'DETENER': 
                             self._om_api.detener_operacion(side, True, reason=exit_reason, price=current_price)
-                        # Si la acción es PAUSAR, solo se ejecuta si la operación no está ya en proceso de detención.
                         elif accion_final == 'PAUSAR' and operacion.estado not in ['DETENIENDO', 'DETENIDA']:
                             self._om_api.pausar_operacion(side, reason=exit_reason, price=current_price)
-                        # --- (FIN DE LA MODIFICACIÓN) ---
                         continue      
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
+    # --- (FIN DE LA MODIFICACIÓN) ---

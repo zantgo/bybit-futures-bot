@@ -22,9 +22,6 @@ except ImportError:
     class Operacion:
         def __init__(self):
             self.estado, self.tendencia = 'DESCONOCIDO', 'N/A'
-            # --- ATRIBUTOS ELIMINADOS DE LA ENTIDAD REAL ---
-            # self.condiciones_entrada, self.condiciones_salida_precio = [], []
-            # --- NUEVOS ATRIBUTOS EN LA ENTIDAD REAL ---
             self.cond_entrada_above: Optional[float] = None
             self.cond_entrada_below: Optional[float] = None
             self.cond_salida_above: Optional[Dict[str, Any]] = None
@@ -33,7 +30,6 @@ except ImportError:
             self.tiempo_inicio_espera: Optional[datetime.datetime] = None
             self.accion_por_sl_tp_roi = 'DETENER'
             self.accion_por_tsl_roi = 'PAUSAR'
-            # --- FIN DE CAMBIOS EN LA ENTIDAD ---
             self.estado_razon = "Razón no disponible (fallback)."
             self.apalancamiento, self.pnl_realizado_usdt = 10.0, 0.0
             self.capital_inicial_usdt, self.comisiones_totales_usdt = 0.0, 0.0
@@ -85,8 +81,6 @@ def _get_terminal_width():
     except:
         return 90
 
-# Reemplaza la función _get_unified_box_width completa en el archivo mencionado
-
 def _get_unified_box_width() -> int:
     """
     Calcula un ancho de caja unificado y dinámico.
@@ -96,25 +90,15 @@ def _get_unified_box_width() -> int:
     """
     terminal_width = _get_terminal_width()
     
-    # Se mantienen los cálculos de ancho de contenido como referencia mínima.
     open_pos_content_width = 8 + 10 + 11 + 12 + 10 + 10 + 20 
     pending_pos_content_width = 12 + 22 + 22
     content_width = max(open_pos_content_width, pending_pos_content_width) + 4
     
-    # --- INICIO DE LA LÓGICA CORREGIDA ---
-    # 1. El ancho base ahora es el ancho del terminal, menos los márgenes.
     base_width = terminal_width - 2
     
-    # 2. El ancho final será el más grande entre el ancho del terminal y
-    #    el ancho mínimo requerido por el contenido, pero sin superar un máximo de 120.
-    #    Esto asegura que la caja se expanda si hay espacio, pero no se
-    #    haga más pequeña que el contenido si la ventana es muy estrecha.
     box_width = max(base_width, content_width)
     box_width = min(box_width, 120)
-    # --- FIN DE LA LÓGICA CORREGIDA ---
     
-    # Si la ventana es muy estrecha y ni siquiera cabe el contenido mínimo,
-    # forzamos a que el ancho sea el del terminal.
     if box_width > terminal_width - 2:
         box_width = terminal_width - 2
         
@@ -171,11 +155,9 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
         for pos in open_positions:
             pnl = 0.0
             
-            # --- INICIO DE LA CORRECCIÓN: Manejo seguro de valores None ---
             entry_price = pos.entry_price if pos.entry_price is not None else 0.0
             size = pos.size_contracts if pos.size_contracts is not None else 0.0
             margin = pos.margin_usdt if pos.margin_usdt is not None else 0.0
-            # --- FIN DE LA CORRECCIÓN ---
 
             if current_price > 0 and entry_price > 0:
                 pnl = (current_price - entry_price) * size if side == 'long' else (entry_price - current_price) * size
@@ -198,9 +180,7 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             line = (
                 f"  {str(pos.id)[-6:]:<7} "
                 f"{entry_price:>9.4f} "
-                # --- INICIO DE LA CORRECCIÓN: Formateo seguro ---
-                f"{margin:>10.2f} " # Ahora 'margin' es un float (0.0 si era None)
-                # --- FIN DE LA CORRECCIÓN ---
+                f"{margin:>10.2f} "
                 f"{pnl_color}{pnl:>+11.4f}{reset} "
                 f"{sl_str:>9} "
                 f"{tp_act_str:>9} "
@@ -220,23 +200,19 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
         print("├" + "─" * (box_width - 2) + "┤")
 
         for pos in pending_positions:
-            # --- INICIO DE LA CORRECCIÓN: Manejo seguro de valores None ---
             capital_asignado = pos.capital_asignado if pos.capital_asignado is not None else 0.0
             valor_nominal = pos.valor_nominal if pos.valor_nominal is not None else 0.0
-            # --- FIN DE LA CORRECCIÓN ---
             
             line = (
                 f"  {str(pos.id)[-6:]:<10} "
-                # --- INICIO DE LA CORRECCIÓN: Formateo seguro ---
                 f"{capital_asignado:>20.2f} USDT"
                 f"{valor_nominal:>20.2f} USDT"
-                # --- FIN DE LA CORRECCIÓN ---
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
-
+# --- (INICIO DE LA MODIFICACIÓN) ---
+# Se reemplaza la función _display_operation_conditions completa.
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -288,13 +264,11 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
-        # --- LÓGICA NUEVA Y CORREGIDA ---
         riesgos_activos = []
         
         def format_price(price):
             return f"@ ${price:.4f}" if price is not None else ""
 
-        # Usamos la función de cálculo para posiciones activas
         active_roi_price = operacion.get_active_sl_tp_price()
         
         if operacion.dynamic_roi_sl:
@@ -330,7 +304,6 @@ def _display_operation_conditions(operacion: Operacion):
         else:
             for riesgo in riesgos_activos:
                 print(_create_box_line(f"  - {riesgo}", box_width))
-        # --- FIN DE LA MODIFICACIÓN ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -345,10 +318,28 @@ def _display_operation_conditions(operacion: Operacion):
             cond = operacion.cond_salida_below
             exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
         
+        # --- (INICIO DE LA MODIFICACIÓN) ---
+        # Se actualiza cómo se muestran los límites de duración y trades
         if operacion.tiempo_maximo_min is not None:
-            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")
+            # Se calcula el tiempo transcurrido en la sesión activa actual
+            tiempo_actual_min = 0
+            if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
+                tiempo_actual_min = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds() / 60
+            
+            # --- (LÍNEA ORIGINAL COMENTADA) ---
+            # exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")
+            # --- (LÍNEA CORREGIDA) ---
+            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Progreso: {tiempo_actual_min:.1f}/{operacion.tiempo_maximo_min} min) (Acción: {operacion.accion_por_limite_tiempo})")
+        
         if operacion.max_comercios is not None:
-            exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})")
+            # Se usa el nuevo contador de trades de la sesión activa
+            trades_actuales = getattr(operacion, 'trades_en_sesion_activa', 0)
+            
+            # --- (LÍNEA ORIGINAL COMENTADA) ---
+            # exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})")
+            # --- (LÍNEA CORREGIDA) ---
+            exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Progreso: {trades_actuales}/{operacion.max_comercios}) (Acción: {operacion.accion_por_limite_trades})")
+        # --- (FIN DE LA MODIFICACIÓN) ---
         
         if not exit_limits:
             print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
@@ -364,17 +355,10 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
     print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
     print("├" + "─" * (box_width - 2) + "┤")
 
-    # --- INICIO DE LA CORRECCIÓN: Mostrar snapshot en estado DETENIDA ---
-    #
-    # La lógica original fue reemplazada para manejar el estado DETENIDA
-    # sin dejar de mostrar el resto de los parámetros de la operación.
-    #
     if not operacion:
-        # Se mantiene un zfallback por si el objeto 'operacion' fuera None
         print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
         print("└" + "─" * (box_width - 2) + "┘")
         return
-    # --- FIN DE LA CORRECCIÓN ---
 
     tendencia = operacion.tendencia
     color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
@@ -399,20 +383,35 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
                 minutes, seconds = divmod(remainder, 60)
                 data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
     
-    if operacion.tiempo_maximo_min is not None:
-        total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
-        if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
-            total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-        
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    # Se actualiza la lógica para mostrar el tiempo de la sesión activa.
+    tiempo_sesion_activa_str = "00:00:00 (Pausado)"
+    if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
+        # Se calcula el tiempo transcurrido desde el inicio de la sesión activa
+        total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds()
         hours, remainder = divmod(int(total_seconds_active), 3600)
         minutes, seconds = divmod(remainder, 60)
-        tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+        tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    # Se añade la nueva línea al diccionario de datos a mostrar
+    data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
+    
+    # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
+    # if operacion.tiempo_maximo_min is not None:
+    #     total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
+    #     if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
+    #         total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
         
-        label = "Tiempo Activo"
-        if operacion.estado == 'PAUSADA':
-            label += " (Pausado)"
+    #     hours, remainder = divmod(int(total_seconds_active), 3600)
+    #     minutes, seconds = divmod(remainder, 60)
+    #     tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+        
+    #     label = "Tiempo Activo"
+    #     if operacion.estado == 'PAUSADA':
+    #         label += " (Pausado)"
             
-        data[label] = f"{tiempo_ejecucion_str} / {operacion.tiempo_maximo_min} min"
+    #     data[label] = f"{tiempo_ejecucion_str} / {operacion.tiempo_maximo_min} min"
+    # --- (FIN DE LA MODIFICACIÓN) ---
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
     for key, value in data.items():
@@ -420,8 +419,6 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
         print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
 
 def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
     box_width = _get_unified_box_width()
@@ -441,16 +438,12 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return
 
     from core.strategy.pm import _calculations as pm_calculations
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se extraen cálculos y se preparan las nuevas métricas de distancia
     
     aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
         open_positions=operacion.posiciones_abiertas,
         leverage=operacion.apalancamiento,
         side=side
     )
-    # Se usa el break-even en vivo, que es más preciso que el avg_entry_price
     live_break_even_price = operacion.get_live_break_even_price()
     
     live_performance = operacion.get_live_performance(current_price, utils_module)
@@ -475,21 +468,19 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         return "\033[92m" if value >= 0 else "\033[91m"
     reset = "\033[0m"
     
-    # Cálculo y formateo de la distancia al Break-Even
     dist_to_be_str = "N/A"
     if live_break_even_price is not None and current_price > 0:
         if side == 'long':
             dist_pct = ((current_price - live_break_even_price) / live_break_even_price) * 100
-        else: # short
+        else:
             dist_pct = ((live_break_even_price - current_price) / live_break_even_price) * 100
         dist_to_be_str = f"{get_color(dist_pct)}{dist_pct:+.2f}%{reset}"
 
-    # Cálculo y formateo de la distancia a la Liquidación
     dist_to_liq_str = "N/A"
     if aggr_liq_price is not None and current_price > 0:
         if side == 'long':
             dist_pct = ((current_price - aggr_liq_price) / current_price) * 100
-        else: # short
+        else:
             dist_pct = ((aggr_liq_price - current_price) / current_price) * 100
         
         color_dist = "\033[91m" if dist_pct < 20 else ("\033[93m" if dist_pct < 50 else "\033[92m")
@@ -516,7 +507,6 @@ def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: 
         "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
         "Trades Cerrados": str(operacion.comercios_cerrados_contador),
     }
-    # --- FIN DE LA MODIFICACIÓN ---
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
     for key, value in data.items():

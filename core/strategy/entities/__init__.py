@@ -127,6 +127,8 @@ class Operacion:
         # Banderas de Estado de Salida
         self.tsl_roi_activo: bool = False
         self.tsl_roi_peak_pct: float = 0.0
+        self.tiempo_inicio_sesion_activa: Optional[datetime.datetime] = None
+        self.trades_en_sesion_activa: int = 0
 
     @property
     def capital_operativo_logico_actual(self) -> float:
@@ -248,6 +250,8 @@ class Operacion:
         self.tsl_roi_peak_pct = 0.0
         self.reinvestable_profit_balance = 0.0
         self.precio_de_transicion = None
+        self.tiempo_inicio_sesion_activa = None
+        self.trades_en_sesion_activa = 0
 
     def get_live_break_even_price(self) -> Optional[float]:
         open_positions = self.posiciones_abiertas
