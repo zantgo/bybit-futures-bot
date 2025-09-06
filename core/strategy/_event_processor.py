@@ -165,6 +165,8 @@ class EventProcessor:
 
 # Reemplaza esta función completa en core/strategy/_event_processor.py
 
+# Reemplaza esta función completa en core/strategy/_event_processor.py
+
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -184,10 +186,6 @@ class EventProcessor:
                 # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas)
                 if operacion.posiciones_abiertas_count > 0:
                     
-                    # --- INICIO DE LA MODIFICACIÓN ---
-                    # La lógica de riesgo se refactoriza completamente para seguir el nuevo modelo.
-                    
-                    # 1.1. Máxima Prioridad: Liquidación
                     open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
                     estimated_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
                         open_positions=open_positions_dicts,
@@ -200,7 +198,7 @@ class EventProcessor:
                             reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
                             self._memory_logger.log(reason, "WARN")
                             self._om_api.handle_liquidation_event(side, reason)
-                            continue # Salta al siguiente lado del bucle
+                            continue 
 
                     live_performance = operacion.get_live_performance(current_price, self._utils)
                     roi = live_performance.get("roi_twrr_vivo", 0.0)
@@ -208,8 +206,6 @@ class EventProcessor:
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
                     # 1.2. Prioridad 2: Comprobación de todos los Stop Loss
-                    
-                    # BE-SL
                     if not risk_condition_met and operacion.be_sl:
                         break_even_price = operacion.get_live_break_even_price()
                         if break_even_price:
@@ -220,7 +216,6 @@ class EventProcessor:
                                 risk_reason = f"BE-SL: Precio ({current_price:.4f}) cruzó Stop ({sl_price:.4f})"
                                 risk_action = operacion.be_sl['accion']
                     
-                    # ROI-SL (Manual)
                     if not risk_condition_met and operacion.roi_sl:
                         sl_roi_pct = operacion.roi_sl['valor']
                         if roi <= sl_roi_pct:
@@ -228,7 +223,6 @@ class EventProcessor:
                             risk_reason = f"ROI-SL: ROI ({roi:.2f}%) <= Límite ({sl_roi_pct}%)"
                             risk_action = operacion.roi_sl['accion']
                     
-                    # ROI-SL (Dinámico)
                     if not risk_condition_met and operacion.dynamic_roi_sl:
                         realized_roi = operacion.realized_twrr_roi
                         sl_roi_target = realized_roi - operacion.dynamic_roi_sl['distancia']
@@ -238,13 +232,11 @@ class EventProcessor:
                             risk_action = operacion.dynamic_roi_sl['accion']
                     
                     # 1.3. Prioridad 3: Comprobación de Take Profits y Trailings
-                    
-                    # TSL-ROI (debe actualizarse primero)
                     if not risk_condition_met and operacion.roi_tsl:
                         tsl_config = operacion.roi_tsl
                         if not operacion.tsl_roi_activo and roi >= tsl_config['activacion']:
                             self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
-                            operacion = self._om_api.get_operation_by_side(side) # Recargar estado
+                            operacion = self._om_api.get_operation_by_side(side)
                         
                         if operacion.tsl_roi_activo:
                             if roi > operacion.tsl_roi_peak_pct:
@@ -257,7 +249,6 @@ class EventProcessor:
                                 risk_reason = f"TSL-ROI: ROI ({roi:.2f}%) <= Stop ({umbral_disparo:.2f}%)"
                                 risk_action = tsl_config['accion']
                     
-                    # BE-TP
                     if not risk_condition_met and operacion.be_tp:
                         break_even_price = operacion.get_live_break_even_price()
                         if break_even_price:
@@ -268,7 +259,6 @@ class EventProcessor:
                                 risk_reason = f"BE-TP: Precio ({current_price:.4f}) cruzó TP ({tp_price:.4f})"
                                 risk_action = operacion.be_tp['accion']
 
-                    # ROI-TP (Manual)
                     if not risk_condition_met and operacion.roi_tp:
                         tp_roi_pct = operacion.roi_tp['valor']
                         if roi >= tp_roi_pct:
@@ -284,8 +274,7 @@ class EventProcessor:
                             self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason, price=current_price)
                         else: # PAUSAR
                             self._om_api.pausar_operacion(side, reason=risk_reason, price=current_price)
-                        continue # Salta al siguiente lado del bucle
-                    # --- FIN DE LA MODIFICACIÓN ---
+                        continue
 
                 # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
@@ -313,14 +302,18 @@ class EventProcessor:
                         self._om_api.activar_por_condicion(side, price=current_price)
                         continue
                     
-                # 3. Lógica de LÍMITES DE SALIDA (Solo se ejecuta si está ACTIVA)
-                if operacion.estado == 'ACTIVA':
+                # --- (INICIO DE LA MODIFICACIÓN) ---
+                # 3. Lógica de LÍMITES DE SALIDA (Ahora se ejecuta si está ACTIVA o PAUSADA)
+                # --- (LÍNEA ORIGINAL COMENTADA) ---
+                # if operacion.estado == 'ACTIVA':
+                # --- (LÍNEA CORREGIDA) ---
+                if operacion.estado in ['ACTIVA', 'PAUSADA']:
+                # --- (FIN DE LA MODIFICACIÓN) ---
                     exit_triggered, exit_reason, accion_final = False, "", ""
 
                     # 3.1 GESTIÓN DE RIESGO POR PRECIO FIJO: Solo se evalúa si hay posiciones abiertas.
                     if operacion.posiciones_abiertas_count > 0:
                         
-                        # Evaluar la condición de salida por precio SUPERIOR
                         if not exit_triggered and operacion.cond_salida_above:
                             cond = operacion.cond_salida_above
                             valor_limite = cond.get('valor', float('inf'))
@@ -331,7 +324,6 @@ class EventProcessor:
                                 exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} > {valor_limite:.4f})"
                                 accion_final = cond.get('accion', 'PAUSAR')
                         
-                        # Evaluar la condición de salida por precio INFERIOR
                         if not exit_triggered and operacion.cond_salida_below:
                             cond = operacion.cond_salida_below
                             valor_limite = cond.get('valor', 0.0)
@@ -342,16 +334,21 @@ class EventProcessor:
                                 exit_reason = f"Límite de {tipo_limite} por precio alcanzado ({current_price:.4f} < {valor_limite:.4f})"
                                 accion_final = cond.get('accion', 'PAUSAR')
 
-                    # 3.2 LÍMITES OPERATIVOS: Se evalúan siempre que la operación esté ACTIVA.
-                    # Lógica para límite de trades
+                    # 3.2 LÍMITES OPERATIVOS: Se evalúan siempre que la operación esté ACTIVA o PAUSADA.
                     if not exit_triggered and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_triggered = True
                         exit_reason = f"Límite de {operacion.max_comercios} trades alcanzado"
                         accion_final = operacion.accion_por_limite_trades
 
-                    # Lógica para límite de tiempo
                     if not exit_triggered and operacion.tiempo_maximo_min is not None and operacion.tiempo_ultimo_inicio_activo:
-                        elapsed_seconds = operacion.tiempo_acumulado_activo_seg + (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                        elapsed_seconds = operacion.tiempo_acumulado_activo_seg
+                        # --- (INICIO DE LA MODIFICACIÓN) ---
+                        # Se calcula el tiempo transcurrido solo si la operación está ACTIVA.
+                        # En PAUSA, solo se usa el tiempo acumulado hasta la última pausa.
+                        if operacion.estado == 'ACTIVA':
+                            elapsed_seconds += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+                        # --- (FIN DE LA MODIFICACIÓN) ---
+                        
                         if (elapsed_seconds / 60.0) >= operacion.tiempo_maximo_min:
                             exit_triggered = True
                             exit_reason = f"Límite de tiempo de operación ({operacion.tiempo_maximo_min} min) alcanzado"
@@ -361,10 +358,15 @@ class EventProcessor:
                     if exit_triggered:
                         log_msg = f"CONDICIÓN DE SALIDA ALCANZADA ({side.upper()}): {exit_reason}. Acción: {accion_final.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
-                        if accion_final == 'PAUSAR': 
-                            self._om_api.pausar_operacion(side, reason=exit_reason, price=current_price)
-                        elif accion_final == 'DETENER': 
+                        
+                        # --- (INICIO DE LA MODIFICACIÓN) ---
+                        # Se implementa la lógica de prioridad.
+                        if accion_final == 'DETENER': 
                             self._om_api.detener_operacion(side, True, reason=exit_reason, price=current_price)
+                        # Si la acción es PAUSAR, solo se ejecuta si la operación no está ya en proceso de detención.
+                        elif accion_final == 'PAUSAR' and operacion.estado not in ['DETENIENDO', 'DETENIDA']:
+                            self._om_api.pausar_operacion(side, reason=exit_reason, price=current_price)
+                        # --- (FIN DE LA MODIFICACIÓN) ---
                         continue      
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
