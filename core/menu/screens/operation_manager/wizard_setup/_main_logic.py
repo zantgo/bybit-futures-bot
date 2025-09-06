@@ -125,6 +125,8 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
         
     return params_changed_in_submenu
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+
 def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bool):
     action = "Modificando" if is_modification else "Creando Nueva"
     tendencia = "LONG" if operacion.tendencia == 'LONG_ONLY' else "SHORT"
@@ -165,20 +167,14 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     # La lógica para mostrar el riesgo de operación se refactoriza completamente
     op_risk_data = {}
     
-    # ROI SL/TP y Dynamic SL
     if operacion.dynamic_roi_sl:
         op_risk_data["SL Dinámico por ROI"] = f"Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']})"
-    elif operacion.roi_sl:
+    if operacion.roi_sl:
         op_risk_data["Stop Loss por ROI"] = f"{operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']})"
-    
     if operacion.roi_tp:
         op_risk_data["Take Profit por ROI"] = f"{operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']})"
-        
-    # TSL por ROI
     if operacion.roi_tsl:
         op_risk_data["TSL por ROI"] = f"Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
-
-    # Break-Even SL/TP
     if operacion.be_sl:
         op_risk_data["SL por Break-Even"] = f"Dist: {operacion.be_sl['distancia']}% (Acción: {operacion.be_sl['accion']})"
     if operacion.be_tp:
@@ -191,7 +187,7 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         for label, value in op_risk_data.items():
             _print_line(label, value, max_key)
     # --- FIN DE LA MODIFICACIÓN ---
-
+    
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Entrada")
     
