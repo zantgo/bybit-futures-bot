@@ -213,7 +213,6 @@ def display_strategy_parameters(operacion: Operacion):
         print(_create_box_line(line, box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
@@ -236,19 +235,9 @@ def display_risk_panel(
     direction = "caída" if side == 'long' else "subida"
     
     coverage_pct = metrics.get('coverage_pct', 0.0)
-    range_start = metrics.get('covered_price_range_start')
     range_end = metrics.get('covered_price_range_end')
-    
-    # --- (INICIO DE LA MODIFICACIÓN) ---
     coverage_str = f"{coverage_pct:.2f}% de {direction}"
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # if range_start and range_end:
-    #     coverage_str += f" (de {range_start:,.2f} a {range_end:,.2f})"
-
-    # --- (LÍNEA AÑADIDA) ---
-    # Se crea una nueva variable para mostrar el precio final de la cobertura.
     coverage_end_price_str = f"${range_end:.4f} USDT" if range_end else "N/A"
-    # --- (FIN DE LA MODIFICACIÓN) ---
 
     liq_dist_pct = metrics.get('liquidation_distance_pct')
     liq_dist_pct_str = "N/A"
@@ -280,6 +269,11 @@ def display_risk_panel(
     price_sl_roi_manual_proj = metrics.get('projected_roi_sl_manual_price')
     price_tp_roi_proj = metrics.get('projected_roi_tp_price')
     price_roi_actual = operacion.get_active_sl_tp_price()
+    
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    # Se añade la lectura del nuevo valor calculado
+    price_tsl_roi_activation_proj = metrics.get('projected_roi_tsl_activation_price')
+    # --- (FIN DE LA MODIFICACIÓN) ---
 
     if operacion.dynamic_roi_sl:
         active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_dynamic_proj:.4f}{reset_code}" if price_sl_roi_dynamic_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_dynamic_proj, is_tp=False) })
@@ -292,6 +286,15 @@ def display_risk_panel(
     if operacion.roi_tp:
         active_risk_lines_proj.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_tp_roi_proj:.4f}{reset_code}" if price_tp_roi_proj else "N/A", "dist": calculate_distance_and_format(price_tp_roi_proj, is_tp=True) })
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_roi_actual:.4f}{reset_code}" })
+        
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    # Se añade el bloque para construir las líneas del TSL.
+    if operacion.roi_tsl:
+        label_tsl = "Precio Activación TSL (ROI)"
+        price_str_tsl = f"\033[92m${price_tsl_roi_activation_proj:.4f}{reset_code}" if price_tsl_roi_activation_proj else "N/A"
+        dist_str_tsl = calculate_distance_and_format(price_tsl_roi_activation_proj, is_tp=True)
+        active_risk_lines_proj.append({ "label": label_tsl, "price": price_str_tsl, "dist": dist_str_tsl })
+    # --- (FIN DE LA MODIFICACIÓN) ---
 
     # -- Riesgo por Break-Even --
     be_price_proj = metrics.get('projected_break_even_price')
@@ -331,24 +334,27 @@ def display_risk_panel(
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- RIESGO PROYECTADO (Todas las Posiciones) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Capital Total en Juego      : {total_capital_str}", box_width + 2))
-    
-    # --- (INICIO DE LA MODIFICACIÓN) ---
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
-    # --- (LÍNEA AÑADIDA) ---
-    # Se añade la nueva línea para mostrar el precio final, alineada con el resto.
     print(_create_box_line(f"  Último Precio de Cobertura  : {coverage_end_price_str}", box_width + 2))
-    # --- (FIN DE LA MODIFICACIÓN) ---
-
     print(_create_box_line(f"  Precio Liq. Proyectado      : \033[91m{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
     
     if active_risk_lines_proj:
+        # --- (INICIO DE LA MODIFICACIÓN) ---
+        # Se ordena la lista para una visualización más lógica: SLs primero, luego TSL, luego TPs
+        active_risk_lines_proj.sort(key=lambda x: (
+            'SL' not in x['label'], # Pone los que tienen 'SL' al principio
+            'TSL' in x['label'],   # Pone 'TSL' después de los 'SL'
+            'TP' in x['label']     # Pone 'TP' al final
+        ))
+        # --- (FIN DE LA MODIFICACIÓN) ---
+
         max_label_len_proj = max(len(_clean_ansi_codes(line['label'])) for line in active_risk_lines_proj)
         for line_data in active_risk_lines_proj:
             label = line_data['label']
             price = line_data['price']
             dist = line_data['dist']
-            dist_label = label.replace("Precio Obj.", "Distancia a")
+            dist_label = label.replace("Precio Obj.", "Distancia a").replace("Precio Activación", "Distancia a")
             
             print(_create_box_line(f"  {label:<{max_label_len_proj}} : {price}", box_width + 2))
             print(_create_box_line(f"  {dist_label:<{max_label_len_proj}} : {dist}", box_width + 2))

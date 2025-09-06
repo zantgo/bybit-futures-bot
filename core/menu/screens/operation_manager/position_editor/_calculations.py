@@ -123,7 +123,6 @@ def simulate_max_positions(
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/position_editor/_calculations.py
 def calculate_projected_risk_metrics(
     operacion: 'Operacion',
     current_market_price: float,
@@ -200,7 +199,6 @@ def calculate_projected_risk_metrics(
         else:
             projected_break_even_price = sim_avg_price - price_change_needed
     
-    # --- INICIO DE LA MODIFICACIÓN ---
     projected_roi_sl_manual_price = None
     projected_roi_sl_dynamic_price = None
     projected_roi_tp_price = None
@@ -222,7 +220,14 @@ def calculate_projected_risk_metrics(
         tp_roi_pct_target = operacion.roi_tp.get('valor')
         if tp_roi_pct_target is not None:
             projected_roi_tp_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tp_roi_pct_target)
-    # --- FIN DE LA MODIFICACIÓN ---
+
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    projected_roi_tsl_activation_price = None
+    if operacion.roi_tsl:
+        tsl_activation_target = operacion.roi_tsl.get('activacion')
+        if tsl_activation_target is not None:
+            projected_roi_tsl_activation_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tsl_activation_target)
+    # --- (FIN DE LA MODIFICACIÓN) ---
     
     # --- 6. Simulación de Cobertura Máxima Teórica ---
     avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
@@ -239,12 +244,13 @@ def calculate_projected_risk_metrics(
         'projected_break_even_price': projected_break_even_price,
         'projected_liquidation_price': projected_liq_price,
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se añaden las nuevas claves separadas al diccionario
         'projected_roi_sl_manual_price': projected_roi_sl_manual_price,
         'projected_roi_sl_dynamic_price': projected_roi_sl_dynamic_price,
         'projected_roi_tp_price': projected_roi_tp_price,
-        # --- FIN DE LA MODIFICACIÓN ---
+        
+        # --- (INICIO DE LA MODIFICACIÓN) ---
+        'projected_roi_tsl_activation_price': projected_roi_tsl_activation_price,
+        # --- (FIN DE LA MODIFICACIÓN) ---
         
         'liquidation_distance_pct': liquidation_distance_pct,
         'total_capital_at_risk': sum(p.capital_asignado for p in all_positions),
