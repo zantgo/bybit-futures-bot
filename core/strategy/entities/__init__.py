@@ -79,37 +79,16 @@ class Operacion:
         self.tendencia: Optional[str] = None
         self.apalancamiento: float = 10.0
         self.averaging_distance_pct: float = 0.5
-        self.sl_posicion_individual_pct: float = 10.0
-        self.tsl_activacion_pct: float = 0.4
-        self.tsl_distancia_pct: float = 0.1
+        self.sl_posicion_individual_pct: Optional[float] = 10.0
+        self.tsl_activacion_pct: Optional[float] = 0.4
+        self.tsl_distancia_pct: Optional[float] = 0.1
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Atributos de riesgo de operación refactorizados a una estructura de diccionario
-        
-        # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
-        # self.tsl_roi_activacion_pct: Optional[float] = None
-        # self.tsl_roi_distancia_pct: Optional[float] = None
-        # self.sl_roi_pct: Optional[float] = None
-        # self.dynamic_roi_sl_enabled: bool = False
-        # self.dynamic_roi_sl_trail_pct: Optional[float] = None
-        # self.be_sl_tp_enabled: bool = False
-        # self.be_sl_distance_pct: Optional[float] = None
-        # self.be_tp_distance_pct: Optional[float] = None
-        # self.accion_por_sl_tp_roi: str = 'DETENER'
-        # self.accion_por_tsl_roi: str = 'PAUSAR'
-        # self.accion_por_be_sl_tp: str = 'DETENER'
-
-        # --- Gestión de Riesgo por ROI ---
-        self.roi_sl: Optional[Dict[str, Any]] = None         # ej: {'valor': -25.0, 'accion': 'DETENER'}
-        self.roi_tp: Optional[Dict[str, Any]] = None         # ej: {'valor': 50.0, 'accion': 'PAUSAR'}
-        self.roi_tsl: Optional[Dict[str, Any]] = None        # ej: {'activacion': 25.0, 'distancia': 5.0, 'accion': 'PAUSAR'}
-        self.dynamic_roi_sl: Optional[Dict[str, Any]] = None # ej: {'distancia': 10.0, 'accion': 'DETENER'}
-
-        # --- Gestión de Riesgo por Break-Even ---
-        self.be_sl: Optional[Dict[str, Any]] = None          # ej: {'distancia': 10.0, 'accion': 'DETENER'}
-        self.be_tp: Optional[Dict[str, Any]] = None          # ej: {'distancia': 20.0, 'accion': 'PAUSAR'}
-        
-        # --- FIN DE LA MODIFICACIÓN ---
+        self.roi_sl: Optional[Dict[str, Any]] = None
+        self.roi_tp: Optional[Dict[str, Any]] = None
+        self.roi_tsl: Optional[Dict[str, Any]] = None
+        self.dynamic_roi_sl: Optional[Dict[str, Any]] = None
+        self.be_sl: Optional[Dict[str, Any]] = None
+        self.be_tp: Optional[Dict[str, Any]] = None
         
         self.tiempo_maximo_min: Optional[int] = None
         self.max_comercios: Optional[int] = None
@@ -117,8 +96,8 @@ class Operacion:
         self.cond_entrada_above: Optional[float] = None
         self.cond_entrada_below: Optional[float] = None
         
-        self.cond_salida_above: Optional[Dict[str, Any]] = None # ej: {'valor': 100.0, 'accion': 'PAUSAR'}
-        self.cond_salida_below: Optional[Dict[str, Any]] = None # ej: {'valor': 50.0, 'accion': 'DETENER'}
+        self.cond_salida_above: Optional[Dict[str, Any]] = None
+        self.cond_salida_below: Optional[Dict[str, Any]] = None
         
         self.accion_por_limite_tiempo: str = 'PAUSAR'
         self.accion_por_limite_trades: str = 'PAUSAR'
@@ -151,22 +130,18 @@ class Operacion:
 
     @property
     def capital_operativo_logico_actual(self) -> float:
-        """Suma el capital de todas las posiciones lógicas (abiertas o no). Es la base de capital actual de la operación."""
         return sum(p.capital_asignado for p in self.posiciones)
 
     @property
     def capital_en_uso(self) -> float:
-        """Suma el capital de las posiciones que están actualmente abiertas en el mercado."""
         return sum(p.capital_asignado for p in self.posiciones if p.estado == 'ABIERTA')
 
     @property
     def capital_disponible(self) -> float:
-        """Calcula el capital que aún no ha sido asignado a posiciones abiertas."""
         return self.capital_operativo_logico_actual - self.capital_en_uso
 
     @property
     def valor_nominal_total(self) -> float:
-        """Suma el valor nominal (tamaño * precio) de todas las posiciones abiertas."""
         return sum(p.valor_nominal for p in self.posiciones_abiertas)
 
     @property
@@ -179,21 +154,17 @@ class Operacion:
     
     @property
     def avg_entry_price(self) -> Optional[float]:
-        """Calcula el precio de entrada promedio ponderado de todas las posiciones abiertas."""
         open_positions = self.posiciones_abiertas
         if not open_positions:
             return None
-
         total_value = 0.0
         total_size = 0.0
         for pos in open_positions:
             if pos.entry_price is not None and pos.size_contracts is not None and pos.size_contracts > 1e-12:
                  total_value += pos.entry_price * pos.size_contracts
                  total_size += pos.size_contracts
-
         if total_size <= 1e-12:
             return None
-        
         return safe_division(total_value, total_size)
     
     @property
@@ -206,65 +177,129 @@ class Operacion:
         
     @property
     def equity_total_usdt(self) -> float:
-        """Calcula el Equity Histórico (contable) de la operación."""
         return self.capital_inicial_usdt + self.pnl_realizado_usdt
 
     @property
     def realized_twrr_roi(self) -> float:
-        """
-        Calcula el Time-Weighted Rate of Return (TWRR) basado únicamente en el PNL realizado
-        y los flujos de capital.
-        """
         equity_inicial_periodo_actual = self.capital_inicial_usdt
         if self.capital_flows:
             last_flow = self.capital_flows[-1]
             equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
-
         pnl_periodo_actual = self.equity_total_usdt - equity_inicial_periodo_actual
         retorno_periodo_actual = safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
-        
         total_return_factor = 1.0
         for r in self.sub_period_returns:
             total_return_factor *= r
-        
         total_return_factor *= (1 + retorno_periodo_actual)
-        
         return (total_return_factor - 1) * 100
 
-    def get_roi_sl_tp_price(self) -> Optional[float]:
-        """
-        Calcula el precio de mercado al que se alcanzaría el SL/TP por ROI configurado.
-        """
-        sl_roi_pct_target = None
-        if self.dynamic_roi_sl:
-            sl_roi_pct_target = self.realized_twrr_roi - self.dynamic_roi_sl.get('distancia', 0)
-        elif self.roi_sl:
-            sl_roi_pct_target = self.roi_sl.get('valor')
-        elif self.roi_tp:
-            sl_roi_pct_target = self.roi_tp.get('valor')
-
-        if sl_roi_pct_target is None or not self.posiciones_abiertas:
-            return None
-
-        total_value = 0.0
-        total_size = 0.0
+    def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
+        if not isinstance(current_price, (int, float)) or current_price <= 0:
+            current_price = 0.0
+        pnl_no_realizado = 0.0
+        side = 'long' if self.tendencia == 'LONG_ONLY' else 'short'
         for pos in self.posiciones_abiertas:
-            if pos.entry_price is not None and pos.entry_price > 0 and pos.capital_asignado > 0:
-                size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
-                if size > 1e-12:
-                    total_value += pos.entry_price * size
-                    total_size += size
-        
+            if pos.entry_price is not None and pos.entry_price > 0 and pos.size_contracts is not None and pos.size_contracts > 0:
+                if side == 'long':
+                    pnl_no_realizado += (current_price - pos.entry_price) * pos.size_contracts
+                else:
+                    pnl_no_realizado += (pos.entry_price - current_price) * pos.size_contracts
+        pnl_total = self.pnl_realizado_usdt + pnl_no_realizado
+        equity_actual_vivo = self.capital_operativo_logico_actual + pnl_no_realizado
+        equity_inicial_periodo_actual = self.capital_inicial_usdt
+        if self.capital_flows:
+            last_flow = self.capital_flows[-1]
+            equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
+        pnl_periodo_actual = (self.equity_total_usdt + pnl_no_realizado) - equity_inicial_periodo_actual
+        retorno_periodo_actual = utils_module.safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
+        total_return_factor = 1.0
+        for r in self.sub_period_returns:
+            total_return_factor *= r
+        total_return_factor *= (1 + retorno_periodo_actual)
+        roi_twrr_vivo = (total_return_factor - 1) * 100
+        return {
+            "pnl_no_realizado": pnl_no_realizado,
+            "pnl_total": pnl_total,
+            "equity_actual_vivo": equity_actual_vivo,
+            "roi_twrr_vivo": roi_twrr_vivo
+        }
+
+    def reset(self):
+        self.capital_inicial_usdt = 0.0
+        self.total_reinvertido_usdt = 0.0
+        self.comercios_cerrados_contador = 0
+        self.profit_balance_acumulado = 0.0
+        self.auto_reinvest_enabled = False
+        self.posiciones = []
+        self.capital_flows = []
+        self.sub_period_returns = []
+        self.tiempo_espera_minutos = None
+        self.tiempo_inicio_espera = None
+        self.tiempo_inicio_ejecucion = None
+        self.tiempo_acumulado_activo_seg = 0.0
+        self.tiempo_ultimo_inicio_activo = None
+        self.roi_sl = None
+        self.roi_tp = None
+        self.roi_tsl = None
+        self.dynamic_roi_sl = None
+        self.be_sl = None
+        self.be_tp = None
+        self.tsl_roi_activo = False
+        self.tsl_roi_peak_pct = 0.0
+        self.reinvestable_profit_balance = 0.0
+        self.precio_de_transicion = None
+
+    def get_live_break_even_price(self) -> Optional[float]:
+        open_positions = self.posiciones_abiertas
+        if not open_positions:
+            return None
+        total_size = sum(p.size_contracts for p in open_positions if p.size_contracts is not None)
         if total_size <= 1e-12:
             return None
-            
-        avg_entry_price = safe_division(total_value, total_size)
+        commission_rate = config.SESSION_CONFIG["PROFIT"]["COMMISSION_RATE"]
+        avg_entry = self.avg_entry_price
+        if avg_entry is None:
+            return None
+        pnl_unrealized_target = -self.pnl_realizado_usdt
+        if self.tendencia == 'LONG_ONLY':
+            numerator = pnl_unrealized_target + (avg_entry * total_size * (1 + commission_rate))
+            denominator = total_size * (1 - commission_rate)
+            break_even_price = safe_division(numerator, denominator)
+        elif self.tendencia == 'SHORT_ONLY':
+            numerator = (avg_entry * total_size * (1 - commission_rate)) - pnl_unrealized_target
+            denominator = total_size * (1 + commission_rate)
+            break_even_price = safe_division(numerator, denominator)
+        else:
+            return None
+        return break_even_price if break_even_price > 0 else None
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Se elimina la función get_roi_sl_tp_price y se reemplaza por las dos siguientes
+    
+    def get_active_sl_tp_price(self) -> Optional[float]:
+        """
+        Calcula el precio de mercado al que se alcanzaría el SL/TP de la operación,
+        basándose únicamente en las posiciones ACTUALMENTE ABIERTAS.
+        """
+        target_roi_pct = None
+        if self.dynamic_roi_sl:
+            target_roi_pct = self.realized_twrr_roi - self.dynamic_roi_sl.get('distancia', 0)
+        elif self.roi_sl:
+            target_roi_pct = self.roi_sl.get('valor')
+        elif self.roi_tp:
+            target_roi_pct = self.roi_tp.get('valor')
+
+        if target_roi_pct is None or not self.posiciones_abiertas:
+            return None
+
+        avg_entry_price = self.avg_entry_price
+        total_size = sum(p.size_contracts for p in self.posiciones_abiertas if p.size_contracts)
         base_capital = self.capital_en_uso
         
-        if base_capital <= 0:
+        if not all([avg_entry_price, total_size > 1e-12, base_capital > 0]):
             return None
             
-        pnl_target = (sl_roi_pct_target / 100) * base_capital
+        pnl_target = (target_roi_pct / 100) * base_capital
         price_change_per_contract = safe_division(pnl_target, total_size)
 
         if self.tendencia == 'LONG_ONLY':
@@ -276,146 +311,53 @@ class Operacion:
             
         return target_price if target_price > 0 else None
 
-    def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
+    def get_projected_sl_tp_price(self, start_price_for_sim: float, target_roi_pct: float) -> Optional[float]:
         """
-        Calcula y devuelve las métricas de rendimiento "en vivo".
+        Calcula el precio de mercado objetivo al que se alcanzaría un ROI específico,
+        simulando que TODAS las posiciones (abiertas + pendientes) están activas.
         """
-        if not isinstance(current_price, (int, float)) or current_price <= 0:
-            current_price = 0.0
+        if target_roi_pct is None:
+            return None
 
-        pnl_no_realizado = 0.0
-        side = 'long' if self.tendencia == 'LONG_ONLY' else 'short'
-
+        # --- Lógica de Simulación (movida desde _calculations.py) ---
+        sim_total_value = 0.0
+        sim_total_size = 0.0
+        
+        # Simular posiciones ya abiertas
         for pos in self.posiciones_abiertas:
-            if pos.entry_price is not None and pos.entry_price > 0 and pos.size_contracts is not None and pos.size_contracts > 0:
-                if side == 'long':
-                    pnl_no_realizado += (current_price - pos.entry_price) * pos.size_contracts
-                else:
-                    pnl_no_realizado += (pos.entry_price - current_price) * pos.size_contracts
+            if pos.entry_price and pos.capital_asignado:
+                size = safe_division(pos.capital_asignado * self.apalancamiento, pos.entry_price)
+                if size > 0:
+                    sim_total_value += pos.entry_price * size
+                    sim_total_size += size
         
-        pnl_total = self.pnl_realizado_usdt + pnl_no_realizado
-        equity_actual_vivo = self.capital_operativo_logico_actual + pnl_no_realizado
-        
-        equity_inicial_periodo_actual = self.capital_inicial_usdt
-        if self.capital_flows:
-            last_flow = self.capital_flows[-1]
-            equity_inicial_periodo_actual = last_flow.equity_before_flow + last_flow.flow_amount
+        # Simular posiciones pendientes
+        last_sim_price = start_price_for_sim
+        if self.averaging_distance_pct is not None and self.averaging_distance_pct > 0:
+            for pos in self.posiciones_pendientes:
+                next_entry = last_sim_price * (1 - self.averaging_distance_pct / 100) if self.tendencia == 'LONG_ONLY' else last_sim_price * (1 + self.averaging_distance_pct / 100)
+                size = safe_division(pos.capital_asignado * self.apalancamiento, next_entry)
+                if size <= 0: continue
+                
+                sim_total_value += next_entry * size
+                sim_total_size += size
+                last_sim_price = next_entry
 
-        pnl_periodo_actual = (self.equity_total_usdt + pnl_no_realizado) - equity_inicial_periodo_actual
-        retorno_periodo_actual = utils_module.safe_division(pnl_periodo_actual, equity_inicial_periodo_actual)
-        
-        total_return_factor = 1.0
-        for r in self.sub_period_returns:
-            total_return_factor *= r
-        total_return_factor *= (1 + retorno_periodo_actual)
-        
-        roi_twrr_vivo = (total_return_factor - 1) * 100
+        projected_avg_price = safe_division(sim_total_value, sim_total_size)
+        projected_base_capital = sum(p.capital_asignado for p in self.posiciones)
 
-        return {
-            "pnl_no_realizado": pnl_no_realizado,
-            "pnl_total": pnl_total,
-            "equity_actual_vivo": equity_actual_vivo,
-            "roi_twrr_vivo": roi_twrr_vivo
-        }
-
-    def reset(self):
-        """
-        Limpia la operación para una nueva configuración.
-        """
-        self.capital_inicial_usdt = 0.0
-        self.total_reinvertido_usdt = 0.0
-        self.comercios_cerrados_contador = 0
-        self.profit_balance_acumulado = 0.0
-        self.auto_reinvest_enabled = False
-        
-        self.posiciones = []
-        self.capital_flows = []
-        self.sub_period_returns = []
-        
-        self.tiempo_espera_minutos = None
-        self.tiempo_inicio_espera = None
-        
-        self.tiempo_inicio_ejecucion = None
-        self.tiempo_acumulado_activo_seg = 0.0
-        self.tiempo_ultimo_inicio_activo = None
-
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
-        # self.tsl_roi_activo = False
-        # self.tsl_roi_peak_pct = 0.0
-        # self.reinvestable_profit_balance = 0.0
-        # self.dynamic_roi_sl_enabled = False
-        # self.dynamic_roi_sl_trail_pct = None
-        # self.be_sl_tp_enabled = False
-        # self.be_sl_distance_pct = None
-        # self.be_tp_distance_pct = None
-        # self.accion_por_be_sl_tp = 'DETENER'
-        # self.precio_de_transicion = None
-        
-        # Se resetean los nuevos atributos de riesgo
-        self.roi_sl = None
-        self.roi_tp = None
-        self.roi_tsl = None
-        self.dynamic_roi_sl = None
-        self.be_sl = None
-        self.be_tp = None
-        
-        self.tsl_roi_activo = False
-        self.tsl_roi_peak_pct = 0.0
-        self.reinvestable_profit_balance = 0.0
-        # --- FIN DE LA MODIFICACIÓN ---
-
-# Reemplaza la función get_live_break_even_price completa con esta versión mejorada
-
-    def get_live_break_even_price(self) -> Optional[float]:
-        """
-        Calcula el precio de mercado al cual el PNL total (realizado + no realizado)
-        sería cero, incluyendo el coste estimado de las comisiones de cierre.
-        """
-        open_positions = self.posiciones_abiertas
-        if not open_positions:
+        if not all([projected_avg_price > 0, sim_total_size > 1e-12, projected_base_capital > 0]):
             return None
 
-        total_size = sum(p.size_contracts for p in open_positions if p.size_contracts is not None)
-        if total_size <= 1e-12:
-            return None
+        pnl_target = (target_roi_pct / 100) * projected_base_capital
+        price_change_per_contract = safe_division(pnl_target, sim_total_size)
 
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # 1. Obtener la tasa de comisión desde la configuración
-        # (Necesitamos importar 'config' al principio del archivo)
-        # import config
-        commission_rate = config.SESSION_CONFIG["PROFIT"]["COMMISSION_RATE"]
-
-        # 2. Calcular el PNL objetivo para cubrir el PNL realizado Y las comisiones de cierre
-        # El valor nominal actual de la posición abierta
-        avg_entry = self.avg_entry_price
-        if avg_entry is None:
-            return None
-        
-        # El PNL no realizado necesario para anular el PNL realizado
-        pnl_unrealized_target = -self.pnl_realizado_usdt
-        
-        # 3. Calcular la fórmula que relaciona el precio de BE con las comisiones
-        # PNL_Bruto - Comision_Apertura - Comision_Cierre = PNL_Neto
-        # (Precio_BE - Precio_Prom) * Tamaño - (Precio_Prom * Tamaño * Tasa) - (Precio_BE * Tamaño * Tasa) = PNL_Objetivo
-        # Despejando Precio_BE:
-        # Precio_BE * Tamaño - Precio_BE * Tamaño * Tasa = PNL_Objetivo + Precio_Prom * Tamaño + Precio_Prom * Tamaño * Tasa
-        # Precio_BE * (Tamaño * (1 - Tasa)) = PNL_Objetivo + Precio_Prom * Tamaño * (1 + Tasa)
-        # Precio_BE = (PNL_Objetivo + Precio_Prom * Tamaño * (1 + Tasa)) / (Tamaño * (1 - Tasa))
-        
-        # Para SHORTs, la lógica de PNL es (Precio_Prom - Precio_BE), lo que invierte los signos.
-        # Precio_BE = (Precio_Prom * Tamaño * (1 - Tasa) - PNL_Objetivo) / (Tamaño * (1 + Tasa))
-        
         if self.tendencia == 'LONG_ONLY':
-            numerator = pnl_unrealized_target + (avg_entry * total_size * (1 + commission_rate))
-            denominator = total_size * (1 - commission_rate)
-            break_even_price = safe_division(numerator, denominator)
+            target_price = projected_avg_price + price_change_per_contract
         elif self.tendencia == 'SHORT_ONLY':
-            numerator = (avg_entry * total_size * (1 - commission_rate)) - pnl_unrealized_target
-            denominator = total_size * (1 + commission_rate)
-            break_even_price = safe_division(numerator, denominator)
+            target_price = projected_avg_price - price_change_per_contract
         else:
             return None
-        # --- FIN DE LA MODIFICACIÓN ---
-
-        return break_even_price if break_even_price > 0 else None
+            
+        return target_price if target_price > 0 else None
+    # --- FIN DE LA MODIFICACIÓN ---

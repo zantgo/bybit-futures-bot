@@ -115,10 +115,17 @@ OPERATION_DEFAULTS = {
     # La acción al cumplirse (PAUSAR o DETENER) se configura en el config.py
     "OPERATION_RISK": {
         "AFTER_STATE": 'DETENER', # PAUSAR O DETENER DEFAULT PARA TODOS LOS RIESGOS SE PUEDE EDITAR EN LA TUI
-        "ROI_SL_TP": {
-            "ENABLED": False, 
-            "PERCENTAGE": -25.0, 
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se separan SL y TP en diccionarios independientes
+        "ROI_SL": {
+            "ENABLED": False,
+            "PERCENTAGE": -25.0 # Valor negativo para Stop Loss
         },
+        "ROI_TP": {
+            "ENABLED": False,
+            "PERCENTAGE": 50.0 # Valor positivo para Take Profit
+        },
+        # --- FIN DE LA MODIFICACIÓN ---
         "ROI_TSL": {
             "ENABLED": False,
             "ACTIVATION_PCT": 25.0,

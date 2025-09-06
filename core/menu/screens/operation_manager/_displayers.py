@@ -288,32 +288,28 @@ def _display_operation_conditions(operacion: Operacion):
         print("├" + "─" * (box_width - 2) + "┤")
         print(_create_box_line("\033[96mGestión de Riesgo de Operación\033[0m", box_width, 'center'))
         
-        # --- INICIO DE LA MODIFICACIÓN ---
+        # --- LÓGICA NUEVA Y CORREGIDA ---
         riesgos_activos = []
         
-        # Helper para formatear el precio o mostrar N/A
         def format_price(price):
             return f"@ ${price:.4f}" if price is not None else ""
 
-        # SL/TP por ROI y Dinámico
-        roi_sl_tp_price = operacion.get_roi_sl_tp_price()
+        # Usamos la función de cálculo para posiciones activas
+        active_roi_price = operacion.get_active_sl_tp_price()
         
         if operacion.dynamic_roi_sl:
-            riesgos_activos.append(f"SL Dinámico por ROI: Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']}) {format_price(roi_sl_tp_price)}")
-        elif operacion.roi_sl:
-            riesgos_activos.append(f"SL por ROI: {operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']}) {format_price(roi_sl_tp_price)}")
-        
+            riesgos_activos.append(f"SL Dinámico por ROI: Dist: {operacion.dynamic_roi_sl['distancia']}% (Acción: {operacion.dynamic_roi_sl['accion']}) {format_price(active_roi_price)}")
+        if operacion.roi_sl:
+            riesgos_activos.append(f"SL por ROI: {operacion.roi_sl['valor']}% (Acción: {operacion.roi_sl['accion']}) {format_price(active_roi_price)}")
         if operacion.roi_tp:
-            riesgos_activos.append(f"TP por ROI: {operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']}) {format_price(roi_sl_tp_price)}")
+            riesgos_activos.append(f"TP por ROI: {operacion.roi_tp['valor']}% (Acción: {operacion.roi_tp['accion']}) {format_price(active_roi_price)}")
 
-        # TSL por ROI
         if operacion.roi_tsl:
             tsl_str = f"TSL por ROI: Act: {operacion.roi_tsl['activacion']}%, Dist: {operacion.roi_tsl['distancia']}% (Acción: {operacion.roi_tsl['accion']})"
             if operacion.tsl_roi_activo:
                 tsl_str += f" (\033[92mACTIVO\033[0m | Pico: {operacion.tsl_roi_peak_pct:.2f}%)"
             riesgos_activos.append(tsl_str)
 
-        # SL/TP por Break-Even
         be_price = operacion.get_live_break_even_price()
         if operacion.be_sl:
             sl_price = None
@@ -361,7 +357,7 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_displayers.py
+    
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")

@@ -227,6 +227,8 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
 
     print("└" + "─" * (box_width - 2) + "┘")
 
+# Reemplaza esta función completa en core/menu/screens/operation_manager/wizard_setup/_main_logic.py
+
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
     from ...._helpers import show_help_popup
     config_module = _deps.get("config_module")
@@ -269,14 +271,21 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         op_risk_defaults = defaults["OPERATION_RISK"]
         default_action = op_risk_defaults.get("AFTER_STATE", 'DETENER')
 
-        # ROI SL/TP (Manual)
-        roi_sl_tp_config = op_risk_defaults.get("ROI_SL_TP", {})
-        if roi_sl_tp_config.get("ENABLED", False):
-            val = roi_sl_tp_config.get("PERCENTAGE", 0)
-            if val < 0:
-                temp_op.roi_sl = {'valor': val, 'accion': default_action}
-            else:
-                temp_op.roi_tp = {'valor': val, 'accion': default_action}
+        # ROI SL (Manual)
+        roi_sl_config = op_risk_defaults.get("ROI_SL", {})
+        if roi_sl_config.get("ENABLED", False):
+            temp_op.roi_sl = {
+                'valor': roi_sl_config.get("PERCENTAGE"),
+                'accion': default_action
+            }
+
+        # ROI TP (Manual)
+        roi_tp_config = op_risk_defaults.get("ROI_TP", {})
+        if roi_tp_config.get("ENABLED", False):
+            temp_op.roi_tp = {
+                'valor': roi_tp_config.get("PERCENTAGE"),
+                'accion': default_action
+            }
 
         # ROI TSL
         roi_tsl_config = op_risk_defaults.get("ROI_TSL", {})
@@ -309,9 +318,9 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
         temp_op.tiempo_maximo_min = defaults["OPERATION_LIMITS"]["MAX_DURATION"].get("MINUTES") if defaults["OPERATION_LIMITS"]["MAX_DURATION"]["ENABLED"] else None
-        default_action = defaults["OPERATION_LIMITS"]["AFTER_STATE"]
-        temp_op.accion_por_limite_tiempo = default_action
-        temp_op.accion_por_limite_trades = default_action
+        default_action_limits = defaults["OPERATION_LIMITS"]["AFTER_STATE"]
+        temp_op.accion_por_limite_tiempo = default_action_limits
+        temp_op.accion_por_limite_trades = default_action_limits
         base_size = defaults["CAPITAL"]["BASE_SIZE_USDT"]
         max_pos = defaults["CAPITAL"]["MAX_POSITIONS"]
         for _ in range(max_pos): temp_op.posiciones.append(LogicalPosition(id=f"pos_{uuid.uuid4().hex[:8]}", estado='PENDIENTE', capital_asignado=base_size, valor_nominal=base_size * temp_op.apalancamiento))

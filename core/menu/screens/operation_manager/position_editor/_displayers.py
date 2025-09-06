@@ -229,7 +229,7 @@ def display_risk_panel(
     box_width = _get_terminal_width() - 4
     reset_code = "\033[0m"
     
-    # --- 1. Extracción de Métricas Generales (sin cambios) ---
+    # --- 1. Extracción de Métricas Generales ---
     avg_price_actual_str = f"${metrics.get('avg_entry_price_actual'):.4f}" if metrics.get('avg_entry_price_actual') else "N/A"
     liq_price_actual_str = f"${metrics.get('liquidation_price_actual'):.4f}" if metrics.get('liquidation_price_actual') else "N/A"
     
@@ -253,8 +253,9 @@ def display_risk_panel(
     max_pos_str = f"{metrics.get('max_positions', 0):.0f}"
     max_coverage_str = f"{metrics.get('max_coverage_pct', 0.0):.2f}% de {direction}"
 
-    # --- 2. Lógica de Cálculo y Formateo para TODOS los Riesgos Activos (Refactorizada) ---
-    active_risk_lines = []
+    # --- 2. Lógica de Cálculo y Formateo para TODOS los Riesgos Activos ---
+    active_risk_lines_proj = []
+    active_risk_lines_actual = []
 
     def calculate_distance_and_format(target_price, is_tp):
         if current_market_price > 0 and target_price is not None:
@@ -269,42 +270,42 @@ def display_risk_panel(
         return "N/A"
 
     # -- Riesgo por ROI (Manual y Dinámico) --
-    price_obj_roi = metrics.get('projected_roi_target_price')
-    if price_obj_roi:
-        if operacion.dynamic_roi_sl:
-            active_risk_lines.append({
-                "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_obj_roi:.4f}{reset_code}",
-                "dist": calculate_distance_and_format(price_obj_roi, is_tp=False)
-            })
-        if operacion.roi_sl:
-            active_risk_lines.append({
-                "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_obj_roi:.4f}{reset_code}",
-                "dist": calculate_distance_and_format(price_obj_roi, is_tp=False)
-            })
-        if operacion.roi_tp:
-            active_risk_lines.append({
-                "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_obj_roi:.4f}{reset_code}",
-                "dist": calculate_distance_and_format(price_obj_roi, is_tp=True)
-            })
+    price_sl_roi_proj = metrics.get('projected_roi_sl_price')
+    price_tp_roi_proj = metrics.get('projected_roi_tp_price')
+    price_roi_actual = operacion.get_active_sl_tp_price()
+
+    if operacion.dynamic_roi_sl:
+        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
+    if operacion.roi_sl:
+        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
+    if operacion.roi_tp:
+        active_risk_lines_proj.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_tp_roi_proj:.4f}{reset_code}" if price_tp_roi_proj else "N/A", "dist": calculate_distance_and_format(price_tp_roi_proj, is_tp=True) })
+        if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_roi_actual:.4f}{reset_code}" })
 
     # -- Riesgo por Break-Even --
     be_price_proj = metrics.get('projected_break_even_price')
+    be_price_actual = operacion.get_live_break_even_price()
     if be_price_proj:
         if operacion.be_sl:
             sl_dist = operacion.be_sl['distancia']
             sl_price = be_price_proj * (1 - sl_dist / 100) if side == 'long' else be_price_proj * (1 + sl_dist / 100)
-            active_risk_lines.append({
-                "label": "Precio Obj. SL (Break-Even)", "price": f"\033[91m${sl_price:.4f}{reset_code}",
-                "dist": calculate_distance_and_format(sl_price, is_tp=False)
-            })
+            active_risk_lines_proj.append({ "label": "Precio Obj. SL (Break-Even)", "price": f"\033[91m${sl_price:.4f}{reset_code}", "dist": calculate_distance_and_format(sl_price, is_tp=False) })
         if operacion.be_tp:
             tp_dist = operacion.be_tp['distancia']
             tp_price = be_price_proj * (1 + tp_dist / 100) if side == 'long' else be_price_proj * (1 - tp_dist / 100)
-            active_risk_lines.append({
-                "label": "Precio Obj. TP (Break-Even)", "price": f"\033[92m${tp_price:.4f}{reset_code}",
-                "dist": calculate_distance_and_format(tp_price, is_tp=True)
-            })
-
+            active_risk_lines_proj.append({ "label": "Precio Obj. TP (Break-Even)", "price": f"\033[92m${tp_price:.4f}{reset_code}", "dist": calculate_distance_and_format(tp_price, is_tp=True) })
+    if be_price_actual:
+        if operacion.be_sl:
+            sl_dist = operacion.be_sl['distancia']
+            sl_price = be_price_actual * (1 - sl_dist / 100) if side == 'long' else be_price_actual * (1 + sl_dist / 100)
+            active_risk_lines_actual.append({ "label": "Precio Obj. SL (Break-Even)", "price": f"\033[91m${sl_price:.4f}{reset_code}" })
+        if operacion.be_tp:
+            tp_dist = operacion.be_tp['distancia']
+            tp_price = be_price_actual * (1 + tp_dist / 100) if side == 'long' else be_price_actual * (1 - tp_dist / 100)
+            active_risk_lines_actual.append({ "label": "Precio Obj. TP (Break-Even)", "price": f"\033[92m${tp_price:.4f}{reset_code}" })
+            
     # --- 3. Renderizado del Panel ---
     print("\n┌" + "─" * box_width + "┐")
     print(_create_box_line("Panel de Riesgo: Realidad vs. Proyección", box_width + 2, 'center'))
@@ -313,7 +314,11 @@ def display_risk_panel(
     print(_create_box_line(f"\033[96m--- RIESGO ACTUAL (Solo Posiciones Abiertas) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Precio Promedio             : {avg_price_actual_str}", box_width + 2))
     print(_create_box_line(f"  Precio Liquidación          : \033[91m{liq_price_actual_str}{reset_code}", box_width + 2))
-    
+    if active_risk_lines_actual:
+        max_label_len_actual = max(len(_clean_ansi_codes(line['label'])) for line in active_risk_lines_actual)
+        for line_data in active_risk_lines_actual:
+            print(_create_box_line(f"  {line_data['label']:<{max_label_len_actual}} : {line_data['price']}", box_width + 2))
+
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- RIESGO PROYECTADO (Todas las Posiciones) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Capital Total en Juego      : {total_capital_str}", box_width + 2))
@@ -321,17 +326,16 @@ def display_risk_panel(
     print(_create_box_line(f"  Precio Liq. Proyectado      : \033[91m{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
     
-    # Renderizado dinámico de todas las líneas de riesgo activas
-    if active_risk_lines:
-        max_label_len = max(len(_clean_ansi_codes(line['label'])) for line in active_risk_lines)
-        for line_data in active_risk_lines:
+    if active_risk_lines_proj:
+        max_label_len_proj = max(len(_clean_ansi_codes(line['label'])) for line in active_risk_lines_proj)
+        for line_data in active_risk_lines_proj:
             label = line_data['label']
             price = line_data['price']
             dist = line_data['dist']
             dist_label = label.replace("Precio Obj.", "Distancia a")
             
-            print(_create_box_line(f"  {label:<{max_label_len}} : {price}", box_width + 2))
-            print(_create_box_line(f"  {dist_label:<{max_label_len}} : {dist}", box_width + 2))
+            print(_create_box_line(f"  {label:<{max_label_len_proj}} : {price}", box_width + 2))
+            print(_create_box_line(f"  {dist_label:<{max_label_len_proj}} : {dist}", box_width + 2))
     
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- SIMULACIÓN MÁXIMA TEÓRICA --- \033[0m", box_width + 2))
@@ -339,3 +343,4 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
+    

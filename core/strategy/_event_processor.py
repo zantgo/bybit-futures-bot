@@ -183,6 +183,7 @@ class EventProcessor:
 
                 # 1. VIGILANCIA DE RIESGO UNIVERSAL (Se ejecuta siempre que hay posiciones abiertas)
                 if operacion.posiciones_abiertas_count > 0:
+                    
                     # --- INICIO DE LA MODIFICACIÓN ---
                     # La lógica de riesgo se refactoriza completamente para seguir el nuevo modelo.
                     
