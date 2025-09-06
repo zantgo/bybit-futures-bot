@@ -455,7 +455,7 @@ def _display_operation_conditions(operacion: Operacion):
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
-        print(_create_box_line("\033[96mLímites de Salida (por Sesión Activa)\033[0m", box_width, 'center'))
+        print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
         
         exit_limits = []
         if operacion.cond_salida_above:
