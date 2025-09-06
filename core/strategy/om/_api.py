@@ -87,15 +87,13 @@ def forzar_activacion_manual(side: str, price: Optional[float] = None) -> Tuple[
     # --- (LÍNEA ORIGINAL COMENTADA) ---
     # return _om_instance.forzar_activacion_manual(side)
 
-def activar_por_condicion(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-# --- (LÍNEA ORIGINAL COMENTADA) ---
-# def activar_por_condicion(side: str) -> Tuple[bool, str]:
+# Reemplaza esta línea en core/strategy/om/_api.py
+
+def activar_por_condicion(side: str, price: Optional[float] = None, razon_activacion: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para activar la operación cuando se cumple una condición."""
     if not _om_instance:
         return False, "OM no instanciado"
-    return _om_instance.activar_por_condicion(side, price)
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # return _om_instance.activar_por_condicion(side)
+    return _om_instance.activar_por_condicion(side, price, razon_activacion)
 
 def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
 # --- (LÍNEA ORIGINAL COMENTADA) ---

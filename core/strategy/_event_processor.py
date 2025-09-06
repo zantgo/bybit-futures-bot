@@ -156,9 +156,8 @@ class EventProcessor:
         
         self._previous_raw_event_price = price
         return signal_data
+# Reemplaza esta función completa en core/strategy/_event_processor.py
 
-    # --- (INICIO DE LA MODIFICACIÓN) ---
-    # Se reemplaza la función _check_operation_triggers completa con la nueva versión reestructurada.
     def _check_operation_triggers(self, current_price: float):
         """
         Evalúa las condiciones de riesgo y salida para las operaciones en cada tick
@@ -175,9 +174,7 @@ class EventProcessor:
                 if not operacion or operacion.estado == 'DETENIDA':
                     continue
 
-                # --- (SECCIÓN 1 - CÓDIGO NUEVO) ---
                 # 1. VIGILANCIA DE RIESGO (Solo si hay posiciones abiertas)
-                # Toda esta lógica ahora está correctamente encapsulada aquí.
                 if operacion.posiciones_abiertas_count > 0:
                     
                     open_positions_dicts = [p.__dict__ for p in operacion.posiciones_abiertas]
@@ -268,42 +265,66 @@ class EventProcessor:
                             self._om_api.detener_operacion(side, forzar_cierre_posiciones=True, reason=risk_reason, price=current_price)
                         else: # PAUSAR
                             self._om_api.pausar_operacion(side, reason=risk_reason, price=current_price)
-                        continue # Salta al siguiente lado, ya que se ha tomado una acción importante
+                        continue
                 
-                # --- (SECCIÓN 2 - CÓDIGO ORIGINAL SIN CAMBIOS) ---
                 # 2. Lógica de ENTRADA (Solo se ejecuta si está EN_ESPERA)
                 if operacion.estado == 'EN_ESPERA':
                     entry_condition_met = False
+                    
+                    # --- (INICIO DE LA MODIFICACIÓN) ---
+                    activation_reason = ""
+                    # --- (FIN DE LA MODIFICACIÓN) ---
                     
                     is_market_entry = all(v is None for v in [operacion.cond_entrada_above, operacion.cond_entrada_below, operacion.tiempo_espera_minutos])
 
                     if is_market_entry:
                         entry_condition_met = True
+                        # --- (INICIO DE LA MODIFICACIÓN) ---
+                        activation_reason = "Activada por condición de mercado (inmediata)."
+                        # --- (FIN DE LA MODIFICACIÓN) ---
                     else:
                         if operacion.cond_entrada_below is not None:
                             if current_price < operacion.cond_entrada_below:
                                 entry_condition_met = True
+                                # --- (INICIO DE LA MODIFICACIÓN) ---
+                                activation_reason = f"Activada por precio < {operacion.cond_entrada_below:.4f}"
+                                # --- (FIN DE LA MODIFICACIÓN) ---
 
                         if not entry_condition_met and operacion.cond_entrada_above is not None:
                             if current_price > operacion.cond_entrada_above:
                                 entry_condition_met = True
+                                # --- (INICIO DE LA MODIFICACIÓN) ---
+                                activation_reason = f"Activada por precio > {operacion.cond_entrada_above:.4f}"
+                                # --- (FIN DE LA MODIFICACIÓN) ---
                         
                         if not entry_condition_met and operacion.tiempo_inicio_espera and operacion.tiempo_espera_minutos:
                             elapsed_minutes = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_espera).total_seconds() / 60.0
                             if elapsed_minutes >= operacion.tiempo_espera_minutos:
                                 entry_condition_met = True
+                                # --- (INICIO DE LA MODIFICACIÓN) ---
+                                activation_reason = f"Activada por tiempo ({operacion.tiempo_espera_minutos} min)."
+                                # --- (FIN DE LA MODIFICACIÓN) ---
                     
                     if entry_condition_met:
-                        self._om_api.activar_por_condicion(side, price=current_price)
+                        # --- (INICIO DE LA MODIFICACIÓN) ---
+                        # --- (LÍNEA ORIGINAL COMENTADA) ---
+                        # self._om_api.activar_por_condicion(side, price=current_price)
+                        # --- (LÍNEA CORREGIDA) ---
+                        self._om_api.activar_por_condicion(side, price=current_price, razon_activacion=activation_reason)
+                        # --- (FIN DE LA MODIFICACIÓN) ---
                         continue
                 
-                # --- (SECCIÓN 3 - CÓDIGO NUEVO Y REUBICADO) ---
                 # 3. Lógica de LÍMITES DE SALIDA (Se ejecuta siempre que no esté DETENIDA)
-                # Esta sección ha sido movida fuera del if de posiciones_abiertas.
                 if operacion.estado in ['ACTIVA', 'PAUSADA']:
                     exit_triggered, exit_reason, accion_final = False, "", ""
                     
                     # 3.1 GESTIÓN DE SALIDA POR PRECIO FIJO
+                    # --- (INICIO DE LA MODIFICACIÓN) ---
+                    # Se mueve la condición `if operacion.posiciones_abiertas_count > 0:`
+                    # para que envuelva solo las salidas por precio, no las operativas.
+                    # --- (LÍNEA ORIGINAL ELIMINADA) ---
+                    # if operacion.posiciones_abiertas_count > 0:
+                    
                     if not exit_triggered and operacion.cond_salida_above:
                         cond = operacion.cond_salida_above
                         valor_limite = cond.get('valor', float('inf'))
@@ -320,7 +341,8 @@ class EventProcessor:
                             exit_reason = f"Límite de Salida por precio < {valor_limite:.4f} alcanzado"
                             accion_final = cond.get('accion', 'PAUSAR')
 
-                    # 3.2 LÍMITES OPERATIVOS
+                    # 3.2 LÍMITES OPERATIVOS (Se evalúan siempre)
+                    # --- (FIN DE LA MODIFICACIÓN) ---
                     if not exit_triggered and operacion.max_comercios is not None and operacion.comercios_cerrados_contador >= operacion.max_comercios:
                         exit_triggered = True
                         exit_reason = f"Límite de {operacion.max_comercios} trades alcanzado"
@@ -349,4 +371,3 @@ class EventProcessor:
         except Exception as e:
             self._memory_logger.log(f"ERROR CRÍTICO [Check Triggers]: {e}", level="ERROR")
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
-    # --- (FIN DE LA MODIFICACIÓN) ---

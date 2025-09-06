@@ -272,7 +272,9 @@ class OperationManager:
         self._memory_logger.log(msg, "WARN")
         return True, msg
 
-    def activar_por_condicion(self, side: str, price: Optional[float] = None) -> Tuple[bool, str]:
+# Reemplaza esta función completa en core/strategy/om/_manager.py
+
+    def activar_por_condicion(self, side: str, price: Optional[float] = None, razon_activacion: Optional[str] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
             if not target_op or target_op.estado not in ['EN_ESPERA', 'PAUSADA']:
@@ -280,13 +282,19 @@ class OperationManager:
 
             estado_original = target_op.estado
             
-            reason = "Condición de entrada alcanzada."
-            if target_op.tiempo_espera_minutos is not None:
-                 reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
-            elif target_op.cond_entrada_above is not None:
-                 reason = f"Activada por precio > {target_op.cond_entrada_above:.4f}."
-            elif target_op.cond_entrada_below is not None:
-                 reason = f"Activada por precio < {target_op.cond_entrada_below:.4f}."
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # Se utiliza la razón proporcionada. Si no se proporciona ninguna, se usa una genérica.
+            reason = razon_activacion if razon_activacion else "Condición de entrada alcanzada."
+            # --- (FIN DE LA MODIFICACIÓN) ---
+
+            # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
+            # reason = "Condición de entrada alcanzada."
+            # if target_op.tiempo_espera_minutos is not None:
+            #      reason = f"Activada por tiempo ({target_op.tiempo_espera_minutos} min)."
+            # elif target_op.cond_entrada_above is not None:
+            #      reason = f"Activada por precio > {target_op.cond_entrada_above:.4f}."
+            # elif target_op.cond_entrada_below is not None:
+            #      reason = f"Activada por precio < {target_op.cond_entrada_below:.4f}."
             
             target_op.estado = 'ACTIVA'
             target_op.estado_razon = reason
@@ -297,16 +305,12 @@ class OperationManager:
             if not target_op.tiempo_inicio_ejecucion:
                 target_op.tiempo_inicio_ejecucion = now
 
-            # --- (INICIO DE LA MODIFICACIÓN) ---
-            # Se inician los contadores de sesión activa al activar por condición.
             target_op.tiempo_inicio_sesion_activa = now
             target_op.trades_en_sesion_activa = 0
-            # --- (FIN DE LA MODIFICACIÓN) ---
             
         msg = f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> 'ACTIVA'. Razón: {target_op.estado_razon}"
         self._memory_logger.log(msg, "WARN")
         return True, msg
-
     def detener_operacion(self, side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
