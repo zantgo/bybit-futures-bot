@@ -211,19 +211,19 @@ def calculate_projected_risk_metrics(
         dynamic_sl_target = realized_roi - operacion.dynamic_roi_sl.get('distancia', 0)
         projected_roi_sl_dynamic_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, dynamic_sl_target)
 
-    # Cálculo para SL Manual
+    # Cálculo para SL Manual (ahora independiente)
     if operacion.roi_sl:
         manual_sl_target = operacion.roi_sl.get('valor')
         if manual_sl_target is not None:
             projected_roi_sl_manual_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, manual_sl_target)
 
-    # Cálculo para TP Manual
+    # Cálculo para TP Manual (ahora independiente)
     if operacion.roi_tp:
         tp_roi_pct_target = operacion.roi_tp.get('valor')
         if tp_roi_pct_target is not None:
             projected_roi_tp_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tp_roi_pct_target)
     # --- FIN DE LA MODIFICACIÓN ---
-
+    
     # --- 6. Simulación de Cobertura Máxima Teórica ---
     avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
     max_sim_metrics = {}
