@@ -215,7 +215,6 @@ def display_strategy_parameters(operacion: Operacion):
     print("└" + "─" * box_width + "┘")
 
 # Reemplaza esta función completa en core/menu/screens/operation_manager/position_editor/_displayers.py
-
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
@@ -270,16 +269,40 @@ def display_risk_panel(
         return "N/A"
 
     # -- Riesgo por ROI (Manual y Dinámico) --
-    price_sl_roi_proj = metrics.get('projected_roi_sl_price')
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # price_sl_roi_proj = metrics.get('projected_roi_sl_price')
+    
+    # --- (LÍNEAS CORREGIDAS) ---
+    # Se leen las dos claves de SL por separado desde el diccionario de métricas.
+    price_sl_roi_dynamic_proj = metrics.get('projected_roi_sl_dynamic_price')
+    price_sl_roi_manual_proj = metrics.get('projected_roi_sl_manual_price')
+    # --- (FIN DE LA CORRECCIÓN) ---
+    
     price_tp_roi_proj = metrics.get('projected_roi_tp_price')
     price_roi_actual = operacion.get_active_sl_tp_price()
 
     if operacion.dynamic_roi_sl:
-        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        # --- (LÍNEA ORIGINAL COMENTADA) ---
+        # active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        
+        # --- (LÍNEA CORREGIDA) ---
+        # Ahora se usa la variable específica para el SL dinámico.
+        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_dynamic_proj:.4f}{reset_code}" if price_sl_roi_dynamic_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_dynamic_proj, is_tp=False) })
+        # --- (FIN DE LA CORRECCIÓN) ---
+
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
+    
     if operacion.roi_sl:
-        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        # --- (LÍNEA ORIGINAL COMENTADA) ---
+        # active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
+        
+        # --- (LÍNEA CORREGIDA) ---
+        # Ahora se usa la variable específica para el SL manual.
+        active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_manual_proj:.4f}{reset_code}" if price_sl_roi_manual_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_manual_proj, is_tp=False) })
+        # --- (FIN DE LA CORRECCIÓN) ---
+
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
+    
     if operacion.roi_tp:
         active_risk_lines_proj.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_tp_roi_proj:.4f}{reset_code}" if price_tp_roi_proj else "N/A", "dist": calculate_distance_and_format(price_tp_roi_proj, is_tp=True) })
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. TP (ROI-Manual)", "price": f"\033[92m${price_roi_actual:.4f}{reset_code}" })
@@ -343,4 +366,3 @@ def display_risk_panel(
     print(_create_box_line(f"  Cobertura Máxima Teórica    : {max_coverage_str}", box_width + 2))
 
     print("└" + "─" * box_width + "┘")
-    
