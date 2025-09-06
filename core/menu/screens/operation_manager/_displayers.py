@@ -455,7 +455,7 @@ def _display_operation_conditions(operacion: Operacion):
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
-        print(_create_box_line("\033[96mLímites de Salida\033[0m", box_width, 'center'))
+        print(_create_box_line("\033[96mLímites de Salida (por Sesión Activa)\033[0m", box_width, 'center'))
         
         exit_limits = []
         if operacion.cond_salida_above:
@@ -466,46 +466,31 @@ def _display_operation_conditions(operacion: Operacion):
             cond = operacion.cond_salida_below
             exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
         
-        if operacion.tiempo_maximo_min is not None:
-            # --- (INICIO DE LA MODIFICACIÓN) ---
-            # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
-            # # Se calcula el tiempo transcurrido en la sesión activa actual
-            # tiempo_actual_min = 0
-            # if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
-            #     tiempo_actual_min = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds() / 60
-            
-            # exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Progreso: {tiempo_actual_min:.1f}/{operacion.tiempo_maximo_min} min) (Acción: {operacion.accion_por_limite_tiempo})")
-            
-            # --- (CÓDIGO CORREGIDO) ---
-            # 1. Se calcula el tiempo transcurrido usando el contador GLOBAL que persiste entre pausas.
-            total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
-            if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
-                total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-            
-            # 2. Se calcula el tiempo restante en segundos.
-            total_seconds_limit = operacion.tiempo_maximo_min * 60
-            remaining_seconds = max(0, total_seconds_limit - total_seconds_active)
-            
-            # 3. Se formatea a HH:MM:SS.
-            hours, remainder = divmod(int(remaining_seconds), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            tiempo_restante_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-            
-            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Restante: {tiempo_restante_str}) (Acción: {operacion.accion_por_limite_tiempo})")
-            # --- (FIN DE LA MODIFICACIÓN) ---
+        # --- INICIO DE LA SECCIÓN CORREGIDA ---
         
+        # Límite de Duración (por Sesión Activa)
+        if operacion.tiempo_maximo_min is not None:
+            # Usamos el contador temporal que se reinicia con cada pausa/reanudación
+            tiempo_actual_min = 0.0
+            if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
+                tiempo_actual_min = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds() / 60
+            
+            # Calculamos el tiempo restante para esta sesión activa
+            tiempo_restante_min = max(0, operacion.tiempo_maximo_min - tiempo_actual_min)
+            
+            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Restante: {tiempo_restante_min:.1f} min) (Acción: {operacion.accion_por_limite_tiempo})")
+        
+        # Límite de Trades (por Sesión Activa)
         if operacion.max_comercios is not None:
-            # --- (INICIO DE LA MODIFICACIÓN) ---
-            # --- (LÍNEA ORIGINAL COMENTADA) ---
-            # # Se usa el nuevo contador de trades de la sesión activa
-            # trades_actuales = getattr(operacion, 'trades_en_sesion_activa', 0)
+            # Usamos el contador temporal que se reinicia con cada pausa/reanudación
+            trades_actuales_sesion = getattr(operacion, 'trades_en_sesion_activa', 0)
             
-            # --- (LÍNEA CORREGIDA) ---
-            # Se usa el contador GLOBAL de trades, que persiste entre pausas.
-            trades_actuales = operacion.comercios_cerrados_contador
+            # Calculamos los trades restantes para esta sesión activa
+            trades_restantes = max(0, operacion.max_comercios - trades_actuales_sesion)
             
-            exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Progreso: {trades_actuales}/{operacion.max_comercios}) (Acción: {operacion.accion_por_limite_trades})")
-            # --- (FIN DE LA MODIFICACIÓN) ---
+            exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Restantes: {trades_restantes}) (Acción: {operacion.accion_por_limite_trades})")
+        
+        # --- FIN DE LA SECCIÓN CORREGIDA ---
         
         if not exit_limits:
             print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
