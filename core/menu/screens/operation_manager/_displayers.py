@@ -210,9 +210,157 @@ def _display_positions_tables(summary: Dict[str, Any], operacion: Operacion, cur
             )
             print(_create_box_line(_truncate_text(line, box_width - 2), box_width))
         print("└" + "─" * (box_width - 2) + "┘")
+    
+def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
+    box_width = _get_unified_box_width()
+    print("┌" + "─" * (box_width - 2) + "┐")
+    print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
+    print("├" + "─" * (box_width - 2) + "┤")
 
-# --- (INICIO DE LA MODIFICACIÓN) ---
-# Se reemplaza la función _display_operation_conditions completa.
+    if not operacion:
+        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
+        print("└" + "─" * (box_width - 2) + "┘")
+        return
+
+    tendencia = operacion.tendencia
+    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
+    color, reset = color_map.get(tendencia, ""), "\033[0m"
+    
+    pos_abiertas = operacion.posiciones_abiertas_count
+    pos_total = len(operacion.posiciones)
+
+    data = {
+        "Tendencia": f"{color}{tendencia}{reset}",
+        "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
+        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
+    }
+    
+    if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tiempo_espera_minutos:
+        if getattr(operacion, 'tiempo_inicio_espera', None):
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
+            time_left = end_time - now_utc
+            if time_left.total_seconds() > 0:
+                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    # --- (INICIO DE LA MODIFICACIÓN) ---
+    # Se actualiza la lógica para mostrar el tiempo de la sesión activa.
+    tiempo_sesion_activa_str = "00:00:00 (Pausado)"
+    if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
+        # Se calcula el tiempo transcurrido desde el inicio de la sesión activa
+        total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds()
+        hours, remainder = divmod(int(total_seconds_active), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+    
+    # Se añade la nueva línea al diccionario de datos a mostrar
+    data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
+
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
+    for key, value in data.items():
+        content = f"{key:<{max_key_len}} : {value}"
+        print(_create_box_line(content, box_width))
+
+    print("└" + "─" * (box_width - 2) + "┘")
+
+def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
+    box_width = _get_unified_box_width()
+    print("┌" + "─" * (box_width - 2) + "┐")
+    print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
+    print("├" + "─" * (box_width - 2) + "┤")
+
+    if not operacion:
+        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
+        print("└" + "─" * (box_width - 2) + "┘")
+        return
+    
+    utils_module = _deps.get("utils_module")
+    if not utils_module:
+        print(_create_box_line("Error: Módulo utils no disponible", box_width, 'center'))
+        print("└" + "─" * (box_width - 2) + "┘")
+        return
+
+    from core.strategy.pm import _calculations as pm_calculations
+    
+    aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
+        open_positions=operacion.posiciones_abiertas,
+        leverage=operacion.apalancamiento,
+        side=side
+    )
+    live_break_even_price = operacion.get_live_break_even_price()
+    
+    live_performance = operacion.get_live_performance(current_price, utils_module)
+    
+    pnl_realizado = operacion.pnl_realizado_usdt
+    pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
+    equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
+    roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
+
+    if operacion.estado == 'DETENIDA':
+        pnl_no_realizado = 0.0
+        equity_actual_vivo = operacion.equity_total_usdt
+        roi_twrr_vivo = operacion.realized_twrr_roi
+
+    capital_inicial = operacion.capital_inicial_usdt
+    equity_total_historico = operacion.equity_total_usdt
+    comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
+    total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
+    total_transferido = getattr(operacion, 'profit_balance_acumulado', 0.0)
+
+    def get_color(value): 
+        return "\033[92m" if value >= 0 else "\033[91m"
+    reset = "\033[0m"
+    
+    dist_to_be_str = "N/A"
+    if live_break_even_price is not None and current_price > 0:
+        if side == 'long':
+            dist_pct = ((current_price - live_break_even_price) / live_break_even_price) * 100
+        else:
+            dist_pct = ((live_break_even_price - current_price) / live_break_even_price) * 100
+        dist_to_be_str = f"{get_color(dist_pct)}{dist_pct:+.2f}%{reset}"
+
+    dist_to_liq_str = "N/A"
+    if aggr_liq_price is not None and current_price > 0:
+        if side == 'long':
+            dist_pct = ((current_price - aggr_liq_price) / current_price) * 100
+        else:
+            dist_pct = ((aggr_liq_price - current_price) / current_price) * 100
+        
+        color_dist = "\033[91m" if dist_pct < 20 else ("\033[93m" if dist_pct < 50 else "\033[92m")
+        dist_to_liq_str = f"{color_dist}{dist_pct:.2f}%{reset}"
+
+    data = {
+        "--- CAPITAL ---": "",
+        "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
+        "Capital Operativo (Lógico)": f"${operacion.capital_operativo_logico_actual:.2f}",
+        "Capital en Uso": f"${operacion.capital_en_uso:.2f}",
+        "Capital Disponible": f"${operacion.capital_disponible:.2f}",
+        "--- RENDIMIENTO Y RIESGO ---": "",
+        "Equity Total (Histórico)": f"${equity_total_historico:.2f}",
+        "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
+        "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
+        "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
+        "Precio Break-Even (Est.)": f"\033[96m${live_break_even_price:.4f}\033[0m" if live_break_even_price else "N/A",
+        "Distancia a Break-Even": dist_to_be_str,
+        "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
+        "Distancia a Liquidación": dist_to_liq_str,
+        "--- CONTADORES ---": "",
+        "Total Reinvertido": f"${total_reinvertido:.4f}",
+        "Comisiones Totales": f"${comisiones_totales:.4f}",
+        "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
+        "Trades Cerrados": str(operacion.comercios_cerrados_contador),
+    }
+
+    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
+    for key, value in data.items():
+        if "---" in key: 
+            print(_create_box_line(f"\033[96m{key.center(box_width - 6)}\033[0m", box_width))
+        else: 
+            print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
+    print("└" + "─" * (box_width - 2) + "┘")
+
 def _display_operation_conditions(operacion: Operacion):
     box_width = _get_unified_box_width()
 
@@ -318,28 +466,46 @@ def _display_operation_conditions(operacion: Operacion):
             cond = operacion.cond_salida_below
             exit_limits.append(f"Precio Salida: < {cond['valor']:.4f} (Acción: {cond['accion']})")
         
-        # --- (INICIO DE LA MODIFICACIÓN) ---
-        # Se actualiza cómo se muestran los límites de duración y trades
         if operacion.tiempo_maximo_min is not None:
-            # Se calcula el tiempo transcurrido en la sesión activa actual
-            tiempo_actual_min = 0
-            if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
-                tiempo_actual_min = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds() / 60
+            # --- (INICIO DE LA MODIFICACIÓN) ---
+            # --- (LÍNEAS ORIGINALES COMENTADAS PARA REFERENCIA) ---
+            # # Se calcula el tiempo transcurrido en la sesión activa actual
+            # tiempo_actual_min = 0
+            # if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
+            #     tiempo_actual_min = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds() / 60
             
-            # --- (LÍNEA ORIGINAL COMENTADA) ---
-            # exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Acción: {operacion.accion_por_limite_tiempo})")
-            # --- (LÍNEA CORREGIDA) ---
-            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Progreso: {tiempo_actual_min:.1f}/{operacion.tiempo_maximo_min} min) (Acción: {operacion.accion_por_limite_tiempo})")
+            # exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Progreso: {tiempo_actual_min:.1f}/{operacion.tiempo_maximo_min} min) (Acción: {operacion.accion_por_limite_tiempo})")
+            
+            # --- (CÓDIGO CORREGIDO) ---
+            # 1. Se calcula el tiempo transcurrido usando el contador GLOBAL que persiste entre pausas.
+            total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
+            if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
+                total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
+            
+            # 2. Se calcula el tiempo restante en segundos.
+            total_seconds_limit = operacion.tiempo_maximo_min * 60
+            remaining_seconds = max(0, total_seconds_limit - total_seconds_active)
+            
+            # 3. Se formatea a HH:MM:SS.
+            hours, remainder = divmod(int(remaining_seconds), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            tiempo_restante_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+            
+            exit_limits.append(f"Duración Máx: {operacion.tiempo_maximo_min} min (Restante: {tiempo_restante_str}) (Acción: {operacion.accion_por_limite_tiempo})")
+            # --- (FIN DE LA MODIFICACIÓN) ---
         
         if operacion.max_comercios is not None:
-            # Se usa el nuevo contador de trades de la sesión activa
-            trades_actuales = getattr(operacion, 'trades_en_sesion_activa', 0)
-            
+            # --- (INICIO DE LA MODIFICACIÓN) ---
             # --- (LÍNEA ORIGINAL COMENTADA) ---
-            # exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Acción: {operacion.accion_por_limite_trades})")
+            # # Se usa el nuevo contador de trades de la sesión activa
+            # trades_actuales = getattr(operacion, 'trades_en_sesion_activa', 0)
+            
             # --- (LÍNEA CORREGIDA) ---
+            # Se usa el contador GLOBAL de trades, que persiste entre pausas.
+            trades_actuales = operacion.comercios_cerrados_contador
+            
             exit_limits.append(f"Máx. Trades: {operacion.max_comercios} (Progreso: {trades_actuales}/{operacion.max_comercios}) (Acción: {operacion.accion_por_limite_trades})")
-        # --- (FIN DE LA MODIFICACIÓN) ---
+            # --- (FIN DE LA MODIFICACIÓN) ---
         
         if not exit_limits:
             print(_create_box_line("  - Ningún límite de salida configurado.", box_width))
@@ -347,171 +513,4 @@ def _display_operation_conditions(operacion: Operacion):
             for limit in exit_limits:
                 print(_create_box_line(f"  - {limit}", box_width))
 
-    print("└" + "─" * (box_width - 2) + "┘")
-    
-def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
-    box_width = _get_unified_box_width()
-    print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line("Parámetros de la Operación", box_width, 'center'))
-    print("├" + "─" * (box_width - 2) + "┤")
-
-    if not operacion:
-        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
-        print("└" + "─" * (box_width - 2) + "┘")
-        return
-
-    tendencia = operacion.tendencia
-    color_map = {'LONG_ONLY': "\033[92m", 'SHORT_ONLY': "\033[91m"}
-    color, reset = color_map.get(tendencia, ""), "\033[0m"
-    
-    pos_abiertas = operacion.posiciones_abiertas_count
-    pos_total = len(operacion.posiciones)
-
-    data = {
-        "Tendencia": f"{color}{tendencia}{reset}",
-        "Posiciones (Abiertas/Total)": f"{pos_abiertas} / {pos_total}",
-        "Apalancamiento (Fijo)": f"{operacion.apalancamiento:.1f}x",
-    }
-    
-    if operacion.estado in ['EN_ESPERA', 'PAUSADA'] and operacion.tiempo_espera_minutos:
-        if getattr(operacion, 'tiempo_inicio_espera', None):
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            end_time = operacion.tiempo_inicio_espera + datetime.timedelta(minutes=operacion.tiempo_espera_minutos)
-            time_left = end_time - now_utc
-            if time_left.total_seconds() > 0:
-                hours, remainder = divmod(int(time_left.total_seconds()), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
-    
-    # --- (INICIO DE LA MODIFICACIÓN) ---
-    # Se actualiza la lógica para mostrar el tiempo de la sesión activa.
-    tiempo_sesion_activa_str = "00:00:00 (Pausado)"
-    if operacion.estado == 'ACTIVA' and hasattr(operacion, 'tiempo_inicio_sesion_activa') and operacion.tiempo_inicio_sesion_activa:
-        # Se calcula el tiempo transcurrido desde el inicio de la sesión activa
-        total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_inicio_sesion_activa).total_seconds()
-        hours, remainder = divmod(int(total_seconds_active), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-    
-    # Se añade la nueva línea al diccionario de datos a mostrar
-    data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
-    
-    # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
-    # if operacion.tiempo_maximo_min is not None:
-    #     total_seconds_active = getattr(operacion, 'tiempo_acumulado_activo_seg', 0.0)
-    #     if operacion.estado == 'ACTIVA' and getattr(operacion, 'tiempo_ultimo_inicio_activo', None):
-    #         total_seconds_active += (datetime.datetime.now(datetime.timezone.utc) - operacion.tiempo_ultimo_inicio_activo).total_seconds()
-        
-    #     hours, remainder = divmod(int(total_seconds_active), 3600)
-    #     minutes, seconds = divmod(remainder, 60)
-    #     tiempo_ejecucion_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-        
-    #     label = "Tiempo Activo"
-    #     if operacion.estado == 'PAUSADA':
-    #         label += " (Pausado)"
-            
-    #     data[label] = f"{tiempo_ejecucion_str} / {operacion.tiempo_maximo_min} min"
-    # --- (FIN DE LA MODIFICACIÓN) ---
-
-    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
-    for key, value in data.items():
-        content = f"{key:<{max_key_len}} : {value}"
-        print(_create_box_line(content, box_width))
-
-    print("└" + "─" * (box_width - 2) + "┘")
-
-def _display_capital_stats(summary: Dict[str, Any], operacion: Operacion, side: str, current_price: float):
-    box_width = _get_unified_box_width()
-    print("┌" + "─" * (box_width - 2) + "┐")
-    print(_create_box_line("Capital y Rendimiento", box_width, 'center'))
-    print("├" + "─" * (box_width - 2) + "┤")
-
-    if not operacion:
-        print(_create_box_line(f"No hay datos para la operación {side.upper()}", box_width, 'center'))
-        print("└" + "─" * (box_width - 2) + "┘")
-        return
-    
-    utils_module = _deps.get("utils_module")
-    if not utils_module:
-        print(_create_box_line("Error: Módulo utils no disponible", box_width, 'center'))
-        print("└" + "─" * (box_width - 2) + "┘")
-        return
-
-    from core.strategy.pm import _calculations as pm_calculations
-    
-    aggr_liq_price = pm_calculations.calculate_aggregate_liquidation_price(
-        open_positions=operacion.posiciones_abiertas,
-        leverage=operacion.apalancamiento,
-        side=side
-    )
-    live_break_even_price = operacion.get_live_break_even_price()
-    
-    live_performance = operacion.get_live_performance(current_price, utils_module)
-    
-    pnl_realizado = operacion.pnl_realizado_usdt
-    pnl_no_realizado = live_performance.get("pnl_no_realizado", 0.0)
-    equity_actual_vivo = live_performance.get("equity_actual_vivo", 0.0)
-    roi_twrr_vivo = live_performance.get("roi_twrr_vivo", 0.0)
-
-    if operacion.estado == 'DETENIDA':
-        pnl_no_realizado = 0.0
-        equity_actual_vivo = operacion.equity_total_usdt
-        roi_twrr_vivo = operacion.realized_twrr_roi
-
-    capital_inicial = operacion.capital_inicial_usdt
-    equity_total_historico = operacion.equity_total_usdt
-    comisiones_totales = getattr(operacion, 'comisiones_totales_usdt', 0.0)
-    total_reinvertido = getattr(operacion, 'total_reinvertido_usdt', 0.0)
-    total_transferido = getattr(operacion, 'profit_balance_acumulado', 0.0)
-
-    def get_color(value): 
-        return "\033[92m" if value >= 0 else "\033[91m"
-    reset = "\033[0m"
-    
-    dist_to_be_str = "N/A"
-    if live_break_even_price is not None and current_price > 0:
-        if side == 'long':
-            dist_pct = ((current_price - live_break_even_price) / live_break_even_price) * 100
-        else:
-            dist_pct = ((live_break_even_price - current_price) / live_break_even_price) * 100
-        dist_to_be_str = f"{get_color(dist_pct)}{dist_pct:+.2f}%{reset}"
-
-    dist_to_liq_str = "N/A"
-    if aggr_liq_price is not None and current_price > 0:
-        if side == 'long':
-            dist_pct = ((current_price - aggr_liq_price) / current_price) * 100
-        else:
-            dist_pct = ((aggr_liq_price - current_price) / current_price) * 100
-        
-        color_dist = "\033[91m" if dist_pct < 20 else ("\033[93m" if dist_pct < 50 else "\033[92m")
-        dist_to_liq_str = f"{color_dist}{dist_pct:.2f}%{reset}"
-
-    data = {
-        "--- CAPITAL ---": "",
-        "Capital Inicial (Base ROI)": f"${capital_inicial:.2f}",
-        "Capital Operativo (Lógico)": f"${operacion.capital_operativo_logico_actual:.2f}",
-        "Capital en Uso": f"${operacion.capital_en_uso:.2f}",
-        "Capital Disponible": f"${operacion.capital_disponible:.2f}",
-        "--- RENDIMIENTO Y RIESGO ---": "",
-        "Equity Total (Histórico)": f"${equity_total_historico:.2f}",
-        "Equity Actual (Vivo)": f"{get_color(pnl_no_realizado)}{equity_actual_vivo:.2f}${reset}",
-        "PNL Realizado / No Realiz.": f"{get_color(pnl_realizado)}{pnl_realizado:+.4f}${reset} / {get_color(pnl_no_realizado)}{pnl_no_realizado:+.4f}${reset}",
-        "ROI (TWRR)": f"{get_color(roi_twrr_vivo)}{roi_twrr_vivo:+.2f}%{reset}",
-        "Precio Break-Even (Est.)": f"\033[96m${live_break_even_price:.4f}\033[0m" if live_break_even_price else "N/A",
-        "Distancia a Break-Even": dist_to_be_str,
-        "Precio Liq. Actual (Est.)": f"\033[91m${aggr_liq_price:.4f}\033[0m" if aggr_liq_price else "N/A",
-        "Distancia a Liquidación": dist_to_liq_str,
-        "--- CONTADORES ---": "",
-        "Total Reinvertido": f"${total_reinvertido:.4f}",
-        "Comisiones Totales": f"${comisiones_totales:.4f}",
-        "Total Transferido a PROFIT": f"{get_color(total_transferido)}{total_transferido:+.4f}${reset}",
-        "Trades Cerrados": str(operacion.comercios_cerrados_contador),
-    }
-
-    max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys())
-    for key, value in data.items():
-        if "---" in key: 
-            print(_create_box_line(f"\033[96m{key.center(box_width - 6)}\033[0m", box_width))
-        else: 
-            print(_create_box_line(f"{key:<{max_key_len}} : {value}", box_width))
     print("└" + "─" * (box_width - 2) + "┘")
