@@ -214,7 +214,6 @@ def display_strategy_parameters(operacion: Operacion):
 
     print("└" + "─" * box_width + "┘")
 
-# Reemplaza esta función completa en core/menu/screens/operation_manager/position_editor/_displayers.py
 def display_risk_panel(
     metrics: Dict[str, Optional[float]],
     current_market_price: float,
@@ -239,9 +238,17 @@ def display_risk_panel(
     coverage_pct = metrics.get('coverage_pct', 0.0)
     range_start = metrics.get('covered_price_range_start')
     range_end = metrics.get('covered_price_range_end')
+    
+    # --- (INICIO DE LA MODIFICACIÓN) ---
     coverage_str = f"{coverage_pct:.2f}% de {direction}"
-    if range_start and range_end:
-        coverage_str += f" (de {range_start:,.2f} a {range_end:,.2f})"
+    # --- (LÍNEA ORIGINAL COMENTADA) ---
+    # if range_start and range_end:
+    #     coverage_str += f" (de {range_start:,.2f} a {range_end:,.2f})"
+
+    # --- (LÍNEA AÑADIDA) ---
+    # Se crea una nueva variable para mostrar el precio final de la cobertura.
+    coverage_end_price_str = f"${range_end:.4f} USDT" if range_end else "N/A"
+    # --- (FIN DE LA MODIFICACIÓN) ---
 
     liq_dist_pct = metrics.get('liquidation_distance_pct')
     liq_dist_pct_str = "N/A"
@@ -269,38 +276,17 @@ def display_risk_panel(
         return "N/A"
 
     # -- Riesgo por ROI (Manual y Dinámico) --
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # price_sl_roi_proj = metrics.get('projected_roi_sl_price')
-    
-    # --- (LÍNEAS CORREGIDAS) ---
-    # Se leen las dos claves de SL por separado desde el diccionario de métricas.
     price_sl_roi_dynamic_proj = metrics.get('projected_roi_sl_dynamic_price')
     price_sl_roi_manual_proj = metrics.get('projected_roi_sl_manual_price')
-    # --- (FIN DE LA CORRECCIÓN) ---
-    
     price_tp_roi_proj = metrics.get('projected_roi_tp_price')
     price_roi_actual = operacion.get_active_sl_tp_price()
 
     if operacion.dynamic_roi_sl:
-        # --- (LÍNEA ORIGINAL COMENTADA) ---
-        # active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
-        
-        # --- (LÍNEA CORREGIDA) ---
-        # Ahora se usa la variable específica para el SL dinámico.
         active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_sl_roi_dynamic_proj:.4f}{reset_code}" if price_sl_roi_dynamic_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_dynamic_proj, is_tp=False) })
-        # --- (FIN DE LA CORRECCIÓN) ---
-
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Dinámico)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
     
     if operacion.roi_sl:
-        # --- (LÍNEA ORIGINAL COMENTADA) ---
-        # active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_proj:.4f}{reset_code}" if price_sl_roi_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_proj, is_tp=False) })
-        
-        # --- (LÍNEA CORREGIDA) ---
-        # Ahora se usa la variable específica para el SL manual.
         active_risk_lines_proj.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_sl_roi_manual_proj:.4f}{reset_code}" if price_sl_roi_manual_proj else "N/A", "dist": calculate_distance_and_format(price_sl_roi_manual_proj, is_tp=False) })
-        # --- (FIN DE LA CORRECCIÓN) ---
-
         if price_roi_actual: active_risk_lines_actual.append({ "label": "Precio Obj. SL (ROI-Manual)", "price": f"\033[91m${price_roi_actual:.4f}{reset_code}" })
     
     if operacion.roi_tp:
@@ -345,7 +331,14 @@ def display_risk_panel(
     print("├" + "─" * box_width + "┤")
     print(_create_box_line(f"\033[96m--- RIESGO PROYECTADO (Todas las Posiciones) ---\033[0m", box_width + 2))
     print(_create_box_line(f"  Capital Total en Juego      : {total_capital_str}", box_width + 2))
+    
+    # --- (INICIO DE LA MODIFICACIÓN) ---
     print(_create_box_line(f"  Cobertura Operativa         : {coverage_str}", box_width + 2))
+    # --- (LÍNEA AÑADIDA) ---
+    # Se añade la nueva línea para mostrar el precio final, alineada con el resto.
+    print(_create_box_line(f"  Último Precio de Cobertura  : {coverage_end_price_str}", box_width + 2))
+    # --- (FIN DE LA MODIFICACIÓN) ---
+
     print(_create_box_line(f"  Precio Liq. Proyectado      : \033[91m{liq_price_proj_str}{reset_code}", box_width + 2))
     print(_create_box_line(f"  Distancia a Liq. Proyectada : {liq_dist_pct_str}", box_width + 2))
     
