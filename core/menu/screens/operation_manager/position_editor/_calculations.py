@@ -6,10 +6,8 @@ import numpy as np
 try:
     from core.strategy.entities import Operacion, LogicalPosition
     from core import utils
-    # Añadimos la importación de pm_calculations para que el archivo sea autocontenido
     from core.strategy.pm import _calculations as pm_calculations
 except ImportError:
-    # Fallback para análisis estático y para evitar errores si las importaciones fallan
     utils = type('obj', (object,), {'safe_division': lambda n, d, default=0.0: (n / d) if d != 0 else default})()
     class Operacion: pass
     class LogicalPosition:
@@ -19,8 +17,6 @@ except ImportError:
             self.entry_price = entry_price
             self.size_contracts = size_contracts
             self.estado = estado
-
-# --- Función de Cálculo Base ---
 
 def calculate_avg_entry_and_liquidation(
     positions: List[LogicalPosition], 
@@ -50,17 +46,12 @@ def calculate_avg_entry_and_liquidation(
         'liquidation_price': liquidation_price
     }
 
-# --- Funciones de Simulación y Cobertura (Corregidas) ---
-
 def calculate_coverage_metrics(
     pending_positions: List[LogicalPosition],
     averaging_distance_pct: float,
     start_price: float,
     side: str
 ) -> Dict[str, Optional[float]]:
-    """
-    Calcula la cobertura porcentual y el rango de precios que cubren las posiciones pendientes.
-    """
     if not pending_positions or not isinstance(averaging_distance_pct, (int, float)) or averaging_distance_pct <= 0 or not start_price:
         return {
             'coverage_pct': 0.0,
@@ -89,9 +80,6 @@ def simulate_max_positions(
     distance_pct: float,
     side: str
 ) -> Dict[str, Optional[float]]:
-    """
-    Simula cuántas posiciones se pueden abrir antes de la liquidación y qué cobertura ofrecen.
-    """
     if not all([leverage > 0, start_price > 0, avg_capital_per_pos > 0, distance_pct > 0]):
         return {'max_positions': 0, 'max_coverage_pct': 0.0}
 
@@ -135,7 +123,7 @@ def simulate_max_positions(
     
     return {'max_positions': max_positions, 'max_coverage_pct': max_coverage_pct}
 
-
+# Reemplaza esta función completa en core/menu/screens/operation_manager/position_editor/_calculations.py
 def calculate_projected_risk_metrics(
     operacion: 'Operacion',
     current_market_price: float,
@@ -212,25 +200,29 @@ def calculate_projected_risk_metrics(
         else:
             projected_break_even_price = sim_avg_price - price_change_needed
     
-    projected_roi_sl_price = None
+    # --- INICIO DE LA MODIFICACIÓN ---
+    projected_roi_sl_manual_price = None
+    projected_roi_sl_dynamic_price = None
     projected_roi_tp_price = None
 
-    # Cálculo para SL (Dinámico o Manual)
-    sl_roi_pct_target = None
+    # Cálculo para SL Dinámico
     if operacion.dynamic_roi_sl:
         realized_roi = operacion.realized_twrr_roi
-        sl_roi_pct_target = realized_roi - operacion.dynamic_roi_sl.get('distancia', 0)
-    elif operacion.roi_sl:
-        sl_roi_pct_target = operacion.roi_sl.get('valor')
-    
-    if sl_roi_pct_target is not None:
-        projected_roi_sl_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, sl_roi_pct_target)
+        dynamic_sl_target = realized_roi - operacion.dynamic_roi_sl.get('distancia', 0)
+        projected_roi_sl_dynamic_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, dynamic_sl_target)
 
-    # Cálculo para TP (Manual)
+    # Cálculo para SL Manual
+    if operacion.roi_sl:
+        manual_sl_target = operacion.roi_sl.get('valor')
+        if manual_sl_target is not None:
+            projected_roi_sl_manual_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, manual_sl_target)
+
+    # Cálculo para TP Manual
     if operacion.roi_tp:
         tp_roi_pct_target = operacion.roi_tp.get('valor')
         if tp_roi_pct_target is not None:
             projected_roi_tp_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tp_roi_pct_target)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # --- 6. Simulación de Cobertura Máxima Teórica ---
     avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
@@ -242,18 +234,17 @@ def calculate_projected_risk_metrics(
     final_metrics = {
         'avg_entry_price_actual': live_avg_price,
         'liquidation_price_actual': live_liq_price,
-        
-        # --- INICIO DE LA MODIFICACIÓN ---
         'roi_sl_tp_target_price_actual': operacion.get_active_sl_tp_price(),
-        # --- (LÍNEA ORIGINAL COMENTADA) ---
-        # 'roi_sl_tp_target_price_actual': operacion.get_roi_sl_tp_price(),
-        # --- FIN DE LA MODIFICACIÓN ---
         
         'projected_break_even_price': projected_break_even_price,
         'projected_liquidation_price': projected_liq_price,
         
-        'projected_roi_sl_price': projected_roi_sl_price,
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añaden las nuevas claves separadas al diccionario
+        'projected_roi_sl_manual_price': projected_roi_sl_manual_price,
+        'projected_roi_sl_dynamic_price': projected_roi_sl_dynamic_price,
         'projected_roi_tp_price': projected_roi_tp_price,
+        # --- FIN DE LA MODIFICACIÓN ---
         
         'liquidation_distance_pct': liquidation_distance_pct,
         'total_capital_at_risk': sum(p.capital_asignado for p in all_positions),
