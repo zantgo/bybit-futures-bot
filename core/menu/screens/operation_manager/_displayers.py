@@ -484,19 +484,20 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
                 minutes, seconds = divmod(remainder, 60)
                 data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
     
-    # --- INICIO DE LA SECCIÓN CORREGIDA ---
+    ### INICIO DE LA CORRECCIÓN DEL BUG ###
     
-    # Lógica de visualización del tiempo de la sesión activa
+    # Lógica de visualización del "Tiempo Sesión Activa" (el cronómetro que cuenta hacia arriba)
     tiempo_sesion_activa_str = ""
     if operacion.estado == 'ACTIVA':
         start_time = getattr(operacion, 'tiempo_inicio_sesion_activa', None)
         if start_time:
+            # Si está activa y tiene un timestamp, calculamos el tiempo transcurrido.
             total_seconds_active = (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds()
             hours, remainder = divmod(int(total_seconds_active), 3600)
             minutes, seconds = divmod(remainder, 60)
             tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
         else:
-            # Caso raro: estado ACTIVA pero sin timestamp de inicio.
+            # Medida de seguridad por si el estado es ACTIVA pero falta el timestamp. No debería ocurrir.
             tiempo_sesion_activa_str = "Calculando..." 
     else:
         # Para cualquier otro estado (PAUSADA, DETENIDA, etc.), mostramos "Pausado".
@@ -504,7 +505,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
 
     data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
     
-    # --- FIN DE LA SECCIÓN CORREGIDA ---
+    ### FIN DE LA CORRECCIÓN DEL BUG ###
 
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
     for key, value in data.items():
