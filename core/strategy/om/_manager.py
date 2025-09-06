@@ -82,108 +82,7 @@ class OperationManager:
             original_op = self._get_operation_by_side_internal(side)
             if not original_op: return None
             return copy.deepcopy(original_op)
-    
-    def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
-        with self._lock:
-            target_op = self._get_operation_by_side_internal(side)
-            if not target_op: return False, f"Lado de operación inválido '{side}'."
-    
-            estado_original = target_op.estado
-            changed_keys = set()
-            nuevas_posiciones = params.get('posiciones')
-            nuevo_capital_operativo = 0.0
             
-            if nuevas_posiciones is not None:
-                if isinstance(nuevas_posiciones, list) and all(isinstance(p, LogicalPosition) for p in nuevas_posiciones):
-                    nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
-                else:
-                    nuevas_posiciones = None 
-            
-            capital_operativo_anterior = target_op.capital_operativo_logico_actual
-            diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
-    
-            if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and nuevas_posiciones is not None and abs(diferencia_capital) > 1e-9:
-                current_price = sm_api.get_session_summary().get('current_market_price', 0.0) if sm_api else 0.0
-                live_performance = target_op.get_live_performance(current_price, self._utils)
-                equity_before_flow = live_performance.get("equity_actual_vivo", target_op.equity_total_usdt)
-                equity_inicial_periodo = target_op.capital_inicial_usdt
-                if target_op.capital_flows:
-                    last_flow = target_op.capital_flows[-1]
-                    equity_inicial_periodo = last_flow.equity_before_flow + last_flow.flow_amount
-                pnl_periodo = (target_op.equity_total_usdt + live_performance.get("pnl_no_realizado", 0.0)) - equity_inicial_periodo
-                retorno_periodo = self._utils.safe_division(pnl_periodo, equity_inicial_periodo)
-                target_op.sub_period_returns.append(1 + retorno_periodo)
-                flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
-                target_op.capital_flows.append(flow_event)
-                changed_keys.add('capital_flows')
-    
-            for key, value in params.items():
-                if key not in ['posiciones'] and hasattr(target_op, key) and not callable(getattr(target_op, key)):
-                    old_value = getattr(target_op, key)
-                    if old_value != value:
-                        setattr(target_op, key, value)
-                        changed_keys.add(key)
-            
-            if nuevas_posiciones is not None:
-                pos_map_actual = {p.id: p for p in target_op.posiciones}
-                ids_nuevas_posiciones = {p.id for p in nuevas_posiciones}
-    
-                target_op.posiciones = [p for p in target_op.posiciones if p.id in ids_nuevas_posiciones]
-    
-                for pos_actualizada in nuevas_posiciones:
-                    if pos_actualizada.id in pos_map_actual:
-                        pos_existente = pos_map_actual[pos_actualizada.id]
-                        for key, value in pos_actualizada.__dict__.items():
-                            if hasattr(pos_existente, key):
-                                setattr(pos_existente, key, value)
-                    else:
-                        target_op.posiciones.append(copy.deepcopy(pos_actualizada))
-                
-                changed_keys.add('posiciones')
-    
-            if changed_keys:
-                if estado_original == 'DETENIDA':
-                    target_op.pnl_realizado_usdt = 0.0
-                    target_op.comisiones_totales_usdt = 0.0
-                    target_op.reinvestable_profit_balance = 0.0
-                    target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
-                    target_op.tiempo_acumulado_activo_seg = 0.0
-                    target_op.tiempo_ultimo_inicio_activo = None
-                
-                if estado_original == 'DETENIENDO':
-                    return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
-    
-                estado_nuevo = target_op.estado
-                
-                is_market_entry = all(v is None for v in [
-                    target_op.cond_entrada_above,
-                    target_op.cond_entrada_below,
-                    target_op.tiempo_espera_minutos
-                ])
-                
-                if is_market_entry and estado_original != 'PAUSADA':
-                    if estado_original != 'ACTIVA':
-                        estado_nuevo = 'ACTIVA'
-                        target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
-                        now = datetime.datetime.now(datetime.timezone.utc)
-                        target_op.tiempo_ultimo_inicio_activo = now
-                        if not target_op.tiempo_inicio_ejecucion:
-                            target_op.tiempo_inicio_ejecucion = now
-                elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
-                    estado_nuevo = 'EN_ESPERA'
-                    target_op.estado_razon = "Operación en espera de nueva condición de entrada."
-                    if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
-                        target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
-    
-                if estado_nuevo != estado_original:
-                    self._memory_logger.log(
-                        f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> '{estado_nuevo}'. Razón: {target_op.estado_razon}",
-                        "WARN"
-                    )
-                    target_op.estado = estado_nuevo
-    
-        return True, f"Operación {side.upper()} actualizada con éxito."
-        
     def pausar_operacion(self, side: str, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
         with self._lock:
             target_op = self._get_operation_by_side_internal(side)
@@ -505,3 +404,111 @@ class OperationManager:
                 target_op.estado_razon = reason
             
             self.revisar_y_transicionar_a_detenida(side)
+
+    def create_or_update_operation(self, side: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+        with self._lock:
+            target_op = self._get_operation_by_side_internal(side)
+            if not target_op: return False, f"Lado de operación inválido '{side}'."
+
+            estado_original = target_op.estado
+            changed_keys = set()
+            nuevas_posiciones = params.get('posiciones')
+            nuevo_capital_operativo = 0.0
+            
+            if nuevas_posiciones is not None:
+                if isinstance(nuevas_posiciones, list) and all(isinstance(p, LogicalPosition) for p in nuevas_posiciones):
+                    nuevo_capital_operativo = sum(p.capital_asignado for p in nuevas_posiciones)
+                else:
+                    nuevas_posiciones = None 
+            
+            capital_operativo_anterior = target_op.capital_operativo_logico_actual
+            diferencia_capital = nuevo_capital_operativo - capital_operativo_anterior
+
+            if estado_original in ['ACTIVA', 'EN_ESPERA', 'PAUSADA'] and nuevas_posiciones is not None and abs(diferencia_capital) > 1e-9:
+                current_price = sm_api.get_session_summary().get('current_market_price', 0.0) if sm_api else 0.0
+                live_performance = target_op.get_live_performance(current_price, self._utils)
+                equity_before_flow = live_performance.get("equity_actual_vivo", target_op.equity_total_usdt)
+                equity_inicial_periodo = target_op.capital_inicial_usdt
+                if target_op.capital_flows:
+                    last_flow = target_op.capital_flows[-1]
+                    equity_inicial_periodo = last_flow.equity_before_flow + last_flow.flow_amount
+                pnl_periodo = (target_op.equity_total_usdt + live_performance.get("pnl_no_realizado", 0.0)) - equity_inicial_periodo
+                retorno_periodo = self._utils.safe_division(pnl_periodo, equity_inicial_periodo)
+                target_op.sub_period_returns.append(1 + retorno_periodo)
+                flow_event = CapitalFlow(timestamp=datetime.datetime.now(datetime.timezone.utc), equity_before_flow=equity_before_flow, flow_amount=diferencia_capital)
+                target_op.capital_flows.append(flow_event)
+                changed_keys.add('capital_flows')
+
+            for key, value in params.items():
+                if key not in ['posiciones'] and hasattr(target_op, key) and not callable(getattr(target_op, key)):
+                    old_value = getattr(target_op, key)
+                    if old_value != value:
+                        setattr(target_op, key, value)
+                        changed_keys.add(key)
+            
+            if nuevas_posiciones is not None:
+                pos_map_actual = {p.id: p for p in target_op.posiciones}
+                ids_nuevas_posiciones = {p.id for p in nuevas_posiciones}
+
+                target_op.posiciones = [p for p in target_op.posiciones if p.id in ids_nuevas_posiciones]
+
+                for pos_actualizada in nuevas_posiciones:
+                    if pos_actualizada.id in pos_map_actual:
+                        pos_existente = pos_map_actual[pos_actualizada.id]
+                        for key, value in pos_actualizada.__dict__.items():
+                            if hasattr(pos_existente, key):
+                                setattr(pos_existente, key, value)
+                    else:
+                        target_op.posiciones.append(copy.deepcopy(pos_actualizada))
+                
+                changed_keys.add('posiciones')
+
+            if changed_keys:
+                if estado_original == 'DETENIDA':
+                    target_op.pnl_realizado_usdt = 0.0
+                    target_op.comisiones_totales_usdt = 0.0
+                    target_op.reinvestable_profit_balance = 0.0
+                    target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
+                    target_op.tiempo_acumulado_activo_seg = 0.0
+                    target_op.tiempo_ultimo_inicio_activo = None
+                
+                if estado_original == 'DETENIENDO':
+                    return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
+
+                estado_nuevo = target_op.estado
+                
+                is_market_entry = all(v is None for v in [
+                    target_op.cond_entrada_above,
+                    target_op.cond_entrada_below,
+                    target_op.tiempo_espera_minutos
+                ])
+                
+                if is_market_entry and estado_original != 'PAUSADA':
+                    if estado_original != 'ACTIVA':
+                        estado_nuevo = 'ACTIVA'
+                        target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
+                        now = datetime.datetime.now(datetime.timezone.utc)
+                        target_op.tiempo_ultimo_inicio_activo = now
+                        if not target_op.tiempo_inicio_ejecucion:
+                            target_op.tiempo_inicio_ejecucion = now
+                        
+                        # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
+                        # Inicia el contador de la SESIÓN ACTIVA (el que se reinicia)
+                        target_op.tiempo_inicio_sesion_activa = now
+                        target_op.trades_en_sesion_activa = 0
+                        # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
+
+                elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
+                    estado_nuevo = 'EN_ESPERA'
+                    target_op.estado_razon = "Operación en espera de nueva condición de entrada."
+                    if target_op.tiempo_espera_minutos is not None and target_op.tiempo_inicio_espera is None:
+                        target_op.tiempo_inicio_espera = datetime.datetime.now(datetime.timezone.utc)
+
+                if estado_nuevo != estado_original:
+                    self._memory_logger.log(
+                        f"CAMBIO DE ESTADO ({side.upper()}): '{estado_original}' -> '{estado_nuevo}'. Razón: {target_op.estado_razon}",
+                        "WARN"
+                    )
+                    target_op.estado = estado_nuevo
+
+        return True, f"Operación {side.upper()} actualizada con éxito."
