@@ -293,7 +293,7 @@ def _display_operation_conditions(operacion: Operacion):
         
         # Helper para formatear el precio o mostrar N/A
         def format_price(price):
-            return f"@ ${price:.4f}" if price is not None else "(Calculando...)"
+            return f"@ ${price:.4f}" if price is not None else ""
 
         # SL/TP por ROI y Dinámico
         roi_sl_tp_price = operacion.get_roi_sl_tp_price()
