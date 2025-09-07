@@ -469,8 +469,11 @@ class OperationManager:
                     target_op.comisiones_totales_usdt = 0.0
                     target_op.reinvestable_profit_balance = 0.0
                     target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
+                    
+                    # --- INICIO DE LA CORRECCIÓN ---
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
+                    # --- FIN DE LA CORRECCIÓN ---
                 
                 if estado_original == 'DETENIENDO':
                     return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
@@ -488,15 +491,13 @@ class OperationManager:
                         estado_nuevo = 'ACTIVA'
                         target_op.estado_razon = "Operación iniciada/actualizada a condición de mercado."
                         now = datetime.datetime.now(datetime.timezone.utc)
+                        
                         target_op.tiempo_ultimo_inicio_activo = now
                         if not target_op.tiempo_inicio_ejecucion:
                             target_op.tiempo_inicio_ejecucion = now
-                        
-                        # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
-                        # Inicia el contador de la SESIÓN ACTIVA (el que se reinicia)
+
                         target_op.tiempo_inicio_sesion_activa = now
                         target_op.trades_en_sesion_activa = 0
-                        # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
 
                 elif any(key in changed_keys for key in ['cond_entrada_above', 'cond_entrada_below', 'tiempo_espera_minutos']) and estado_original in ['DETENIDA', 'PAUSADA']:
                     estado_nuevo = 'EN_ESPERA'
