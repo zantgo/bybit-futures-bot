@@ -470,10 +470,10 @@ class OperationManager:
                     target_op.reinvestable_profit_balance = 0.0
                     target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
                     
-                    # --- INICIO DE LA CORRECCIÓN ---
+                    # Reseteo de contadores globales de la operación
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
-                    # --- FIN DE LA CORRECCIÓN ---
+                    target_op.comercios_cerrados_contador = 0 # <-- CORRECCIÓN AÑADIDA
                 
                 if estado_original == 'DETENIENDO':
                     return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
