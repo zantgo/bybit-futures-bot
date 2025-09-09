@@ -203,18 +203,27 @@ def get_order_status( symbol: str, order_id: Optional[str] = None, order_link_id
         memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
 
+# En: core/api/_account.py
+
 def get_active_position_details_api(symbol: str, account_name: Optional[str] = None) -> Optional[List[dict]]:
     """Obtiene detalles de la(s) posición(es) activas para un símbolo (v5 API)."""
-    # --- INICIO DE LA MODIFICACIÓN ---
+    # --- INICIO DEL CÓDIGO IDÉNTICO ---
     connection_manager = get_connection_manager_instance()
     if not connection_manager or not config or not utils:
-    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Position]: Dependencias no disponibles.", level="ERROR")
         return None
+    # --- FIN DEL CÓDIGO IDÉNTICO ---
         
+    # --- INICIO DE LA CORRECCIÓN CLAVE ---
+    # Se elimina el 'purpose' conflictivo. Al pasar 'specific_account', el
+    # ConnectionManager seleccionará la sesión correcta para esa cuenta.
     session, account_used = connection_manager.get_session_for_operation(
-        purpose='general', specific_account=account_name
+        purpose='trading', # Usar un propósito que no esté fijado a 'main'
+        specific_account=account_name
     )
+    # --- FIN DE LA CORRECCIÓN CLAVE ---
+
+    # --- INICIO DEL CÓDIGO IDÉNTICO ---
     if not session:
         memory_logger.log(f"ERROR [Get Position]: No se pudo obtener una sesión API válida (solicitada: {account_name}).", level="ERROR")
         return None
@@ -251,7 +260,8 @@ def get_active_position_details_api(symbol: str, account_name: Optional[str] = N
         memory_logger.log(f"ERROR Inesperado [Get Position]: {e}", level="ERROR")
         memory_logger.log(traceback.format_exc(), level="ERROR")
         return None
-
+    # --- FIN DEL CÓDIGO IDÉNTICO ---
+    
 def get_order_execution_history(category: str, symbol: str, order_id: str, limit: int = 50) -> Optional[List[Dict[str, Any]]]:
     """
     Obtiene el historial de ejecuciones (trades) para una orden específica (v5 API).
