@@ -46,6 +46,12 @@ class _LifecycleManager:
         # --- INICIO DE LA SOLUCIÓN: Añadir la bandera de estado ---
         self._manual_close_in_progress: bool = False
         # --- FIN DE LA SOLUCIÓN ---
+        
+        # --- INICIO DE LA CORRECCIÓN: Añadir contadores de fallos de sincronización ---
+        self._sync_failure_counters: Dict[str, int] = {'long': 0, 'short': 0}
+        self._MAX_SYNC_FAILURES: int = 3 # Umbral de fallos consecutivos antes de tomar acción
+        # --- FIN DE LA CORRECCIÓN ---
+
 
     # Reemplaza la función _reset_all_states completa en _lifecycle.py
     def _reset_all_states(self):
@@ -58,6 +64,10 @@ class _LifecycleManager:
         # --- INICIO DE LA SOLUCIÓN: Resetear la bandera en cada nueva sesión ---
         self._manual_close_in_progress = False
         # --- FIN DE LA SOLUCIÓN ---
+        
+        # --- INICIO DE LA CORRECCIÓN: Resetear contadores de fallos ---
+        self._sync_failure_counters = {'long': 0, 'short': 0}
+        # --- FIN DE LA CORRECCIÓN ---
         
     def set_executor(self, executor: Any):
         """Inyecta el executor después de la inicialización para romper la dependencia circular."""

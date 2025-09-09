@@ -32,9 +32,10 @@ class _Workflow:
 
     def sync_physical_positions(self, side: str):
         """
-        Contiene la LÓGICA del Heartbeat de seguridad. Comprueba la existencia real
-        de una posición en el exchange y sincroniza el estado interno del bot si
-        hay una discrepancia grave (ej. liquidación, cierre manual).
+        Contiene la LÓGICA del Heartbeat de seguridad con reintentos.
+        Comprueba la existencia real de una posición en el exchange y sincroniza
+        el estado interno del bot. Solo asume una liquidación si la API falla
+        múltiples veces consecutivas.
         """
         if self._manual_close_in_progress:
             self._memory_logger.log(f"Heartbeat omitido para {side.upper()}: Cierre manual en progreso.", "DEBUG")
@@ -46,6 +47,11 @@ class _Workflow:
         operacion = self._om_api.get_operation_by_side(side)
         
         if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Si no se esperan posiciones abiertas, es un buen momento para resetear
+            # el contador de fallos de este lado, asegurando que no se acumulen errores de ticks pasados.
+            self._sync_failure_counters[side] = 0
+            # --- FIN DE LA CORRECCIÓN ---
             return
 
         try:
@@ -57,19 +63,46 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
+            # --- INICIO DE LA LÓGICA DE REINTENTOS CORREGIDA ---
+
+            # Escenario 1: La llamada a la API falla (devuelve None).
             if physical_positions is None:
-                self._memory_logger.log(f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones del exchange (error de API). Se reintentará en el siguiente tick.", "WARN")
+                self._sync_failure_counters[side] += 1
+                self._memory_logger.log(
+                    f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones. "
+                    f"Fallo consecutivo {self._sync_failure_counters[side]}/{self._MAX_SYNC_FAILURES}.", "WARN"
+                )
+                
+                # Solo si se supera el umbral de fallos, se asume el peor caso.
+                if self._sync_failure_counters[side] >= self._MAX_SYNC_FAILURES:
+                    reason = (
+                        f"PÉRDIDA DE SINCRONIZACIÓN: La API de posiciones para {side.upper()} "
+                        f"ha fallado {self._MAX_SYNC_FAILURES} veces consecutivas. Asumiendo el peor caso (liquidación)."
+                    )
+                    self._memory_logger.log(reason, "ERROR")
+                    self._om_api.handle_liquidation_event(side, reason)
+                
+                return # Salimos de la función sin resetear el contador para permitir el reintento.
+
+            # Escenario 2: La llamada a la API tiene éxito, pero no devuelve posiciones (liquidación real).
+            if not physical_positions:
+                reason = f"LIQUIDACIÓN DETECTADA: {operacion.posiciones_abiertas_count} pos. {side.upper()} no encontradas en el exchange."
+                self._memory_logger.log(reason, "WARN")
+                self._om_api.handle_liquidation_event(side, reason)
+                
+                # Si la llamada fue exitosa y el estado es conocido (cero posiciones), reseteamos el contador.
+                self._sync_failure_counters[side] = 0
                 return
 
-            if not physical_positions:
-                reason = f"LIQUIDACIÓN DETECTADA: {operacion.posiciones_abiertas_count} pos. {side.upper()} no encontradas ."
+            # Escenario 3: La llamada a la API tiene éxito y devuelve posiciones.
+            # Todo está en orden, reseteamos el contador de fallos.
+            self._sync_failure_counters[side] = 0
 
-                self._memory_logger.log(reason, "WARN")
-                
-                self._om_api.handle_liquidation_event(side, reason)
+            # --- FIN DE LA LÓGICA DE REINTENTOS CORREGIDA ---
+
         except Exception as e:
             self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
-
+            
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
