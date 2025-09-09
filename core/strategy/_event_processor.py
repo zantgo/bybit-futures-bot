@@ -183,7 +183,7 @@ class EventProcessor:
                     )
                     if estimated_liq_price is not None:
                         if (side == 'long' and current_price <= estimated_liq_price) or \
-                           (side == 'short' and current_price >= estimated_liq_price):
+                        (side == 'short' and current_price >= estimated_liq_price):
                             reason = f"LIQUIDACIÓN DETECTADA: Precio ({current_price:.4f}) cruzó umbral ({estimated_liq_price:.4f})"
                             self._memory_logger.log(reason, "WARN")
                             self._om_api.handle_liquidation_event(side, reason)
@@ -194,7 +194,27 @@ class EventProcessor:
                     
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
-                    # 1.2. Prioridad 2: Comprobación de todos los Stop Loss
+                    # --- INICIO DE LA SECCIÓN MODIFICADA (REORDENADA) ---
+
+                    # 1.2. Prioridad 2: Trailing Stop Loss por ROI (si está activo, tiene la máxima prioridad después de la liquidación)
+                    if not risk_condition_met and operacion.roi_tsl:
+                        tsl_config = operacion.roi_tsl
+                        if not operacion.tsl_roi_activo and roi >= tsl_config['activacion']:
+                            self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
+                            operacion = self._om_api.get_operation_by_side(side)
+                        
+                        if operacion.tsl_roi_activo:
+                            if roi > operacion.tsl_roi_peak_pct:
+                                self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
+                                operacion = self._om_api.get_operation_by_side(side)
+                            
+                            umbral_disparo = operacion.tsl_roi_peak_pct - tsl_config['distancia']
+                            if roi <= umbral_disparo:
+                                risk_condition_met = True
+                                risk_reason = f"TSL-ROI: ROI ({roi:.2f}%) <= Stop ({umbral_disparo:.2f}%)"
+                                risk_action = tsl_config['accion']
+                    
+                    # 1.3. Prioridad 3: Comprobación del resto de Stop Loss
                     if not risk_condition_met and operacion.be_sl:
                         break_even_price = operacion.get_live_break_even_price()
                         if break_even_price:
@@ -220,24 +240,7 @@ class EventProcessor:
                             risk_reason = f"Dynamic ROI-SL: ROI ({roi:.2f}%) <= Límite ({sl_roi_target:.2f}%)"
                             risk_action = operacion.dynamic_roi_sl['accion']
                     
-                    # 1.3. Prioridad 3: Comprobación de Take Profits y Trailings
-                    if not risk_condition_met and operacion.roi_tsl:
-                        tsl_config = operacion.roi_tsl
-                        if not operacion.tsl_roi_activo and roi >= tsl_config['activacion']:
-                            self._om_api.create_or_update_operation(side, {'tsl_roi_activo': True, 'tsl_roi_peak_pct': roi})
-                            operacion = self._om_api.get_operation_by_side(side)
-                        
-                        if operacion.tsl_roi_activo:
-                            if roi > operacion.tsl_roi_peak_pct:
-                                self._om_api.create_or_update_operation(side, {'tsl_roi_peak_pct': roi})
-                                operacion = self._om_api.get_operation_by_side(side)
-                            
-                            umbral_disparo = operacion.tsl_roi_peak_pct - tsl_config['distancia']
-                            if roi <= umbral_disparo:
-                                risk_condition_met = True
-                                risk_reason = f"TSL-ROI: ROI ({roi:.2f}%) <= Stop ({umbral_disparo:.2f}%)"
-                                risk_action = tsl_config['accion']
-                    
+                    # 1.4. Prioridad 4: Comprobación de Take Profits
                     if not risk_condition_met and operacion.be_tp:
                         break_even_price = operacion.get_live_break_even_price()
                         if break_even_price:
@@ -255,7 +258,9 @@ class EventProcessor:
                             risk_reason = f"ROI-TP: ROI ({roi:.2f}%) >= Límite ({tp_roi_pct}%)"
                             risk_action = operacion.roi_tp['accion']
 
-                    # 1.4. Ejecución de la Acción de Riesgo
+                    # --- FIN DE LA SECCIÓN MODIFICADA (REORDENADA) ---
+
+                    # 1.5. Ejecución de la Acción de Riesgo
                     if risk_condition_met:
                         log_msg = f"CONDICIÓN DE RIESGO CUMPLIDA ({side.upper()}): {risk_reason}. Acción: {risk_action.upper()}."
                         self._memory_logger.log(log_msg, "WARN")
@@ -316,9 +321,6 @@ class EventProcessor:
                             exit_triggered = True
                             exit_reason = f"Límite de Salida por precio < {valor_limite:.4f} alcanzado"
                             accion_final = cond.get('accion', 'PAUSAR')
-
-                    # --- INICIO DE LA CORRECCIÓN CLAVE ---
-                    # Esta sección ahora usa los contadores de sesión activa.
                     
                     # 3.2 LÍMITES OPERATIVOS (POR SESIÓN ACTIVA)
                     if not exit_triggered and operacion.max_comercios is not None:
@@ -336,8 +338,6 @@ class EventProcessor:
                                 exit_triggered = True
                                 exit_reason = f"Límite de tiempo de sesión activa ({operacion.tiempo_maximo_min} min) alcanzado"
                                 accion_final = operacion.accion_por_limite_tiempo
-                    
-                    # --- FIN DE LA CORRECCIÓN CLAVE ---
                     
                     # 3.3 EJECUCIÓN DE ACCIÓN DE SALIDA
                     if exit_triggered:
