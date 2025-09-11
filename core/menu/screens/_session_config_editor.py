@@ -109,56 +109,6 @@ def _apply_changes_to_real_config(temp_cfg: Dict, real_cfg: Dict, logger: Any):
                 real_cfg[category] = new_value
 
 
-def _display_config_box(temp_cfg: Dict, box_width: int):
-    """Muestra la caja de configuración con formato y alineación adaptativos."""
-    print("\nValores Actuales:")
-    print("┌" + "─" * (box_width - 2) + "┐")
-
-    sections = {
-        "Ticker": {
-            "Ticker Intervalo (s)": temp_cfg['TICKER_INTERVAL_SECONDS'],
-        },
-        "Análisis Técnico": {
-            "Período EMA": temp_cfg['TA']['EMA_WINDOW'],
-            "Período W.Inc": temp_cfg['TA']['WEIGHTED_INC_WINDOW'],
-            "Período W.Dec": temp_cfg['TA']['WEIGHTED_DEC_WINDOW'],
-        },
-        "Generación de Señal": {
-            "Margen Compra (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'],
-            "Margen Venta (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'],
-            "Umbral Decremento": temp_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'],
-            "Umbral Incremento": temp_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'],
-        },
-        "Gestión de Profit": {
-            "Tarifa Comisión (%)": f"{temp_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
-            "Porcentaje Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
-            "Monto Mín. Transferencia": f"${temp_cfg['PROFIT']['MIN_TRANSFER_AMOUNT_USDT']:.4f}",
-            "Slippage Estimado (%)": f"{temp_cfg['PROFIT'].get('SLIPPAGE_PCT', 0.0) * 100:.2f}",
-        },
-        "Gestión de Riesgo": {
-            "Tasa Margen Mantenimiento (%)": f"{temp_cfg.get('RISK', {}).get('MAINTENANCE_MARGIN_RATE', 0.0) * 100:.3f}",
-        }
-    }
-    
-    all_labels = []
-    for section_params in sections.values():
-        all_labels.extend(section_params.keys())
-    max_key_len = max(len(label) for label in all_labels) if all_labels else 0
-
-    first_section = True
-    for title, params in sections.items():
-        if not first_section:
-            print("├" + "─" * (box_width - 2) + "┤")
-        
-        print(_create_config_box_line(title, box_width, is_header=True))
-        
-        for label, value in params.items():
-            content = f"{label:<{max_key_len}} : {value}"
-            print(_create_config_box_line(content, box_width))
-        
-        first_section = False
-
-    print("└" + "─" * (box_width - 2) + "┘")
 
 
 # Reemplaza la función _show_main_config_menu completa en core/menu/screens/_session_config_editor.py
@@ -270,37 +220,6 @@ def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict):
         else:
             break
 
-def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict):
-    while True:
-        menu_items = [
-            f"[1] Margen Compra (%) ({signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']})",
-            f"[2] Margen Venta (%) ({signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']})",
-            f"[3] Umbral Decremento ({signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']})",
-            f"[4] Umbral Incremento ({signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']})",
-            None,
-            "[b] Volver"
-        ]
-        submenu_options = MENU_STYLE.copy()
-        submenu_options['clear_screen'] = False
-        submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Señal:", **submenu_options).show()
-        if submenu == 0:
-            original = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']
-            new_val = get_input("Nuevo Margen Compra (%)", float, original)
-            if new_val != original: changed_keys['PRICE_CHANGE_BUY_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE'] = new_val
-        elif submenu == 1:
-            original = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']
-            new_val = get_input("Nuevo Margen Venta (%)", float, original)
-            if new_val != original: changed_keys['PRICE_CHANGE_SELL_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE'] = new_val
-        elif submenu == 2:
-            original = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']
-            new_val = get_input("Nuevo Umbral Decremento (0-1)", float, original)
-            if new_val != original: changed_keys['WEIGHTED_DECREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD'] = new_val
-        elif submenu == 3:
-            original = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']
-            new_val = get_input("Nuevo Umbral Incremento (0-1)", float, original)
-            if new_val != original: changed_keys['WEIGHTED_INCREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD'] = new_val
-        else:
-            break
 
 def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
     while True:
@@ -355,5 +274,100 @@ def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
             
             if new_val_decimal != risk_cfg.get('MAINTENANCE_MARGIN_RATE'):
                 changed_keys['MAINTENANCE_MARGIN_RATE'] = risk_cfg['MAINTENANCE_MARGIN_RATE'] = new_val_decimal
+        else:
+            break
+
+
+# En: core/menu/screens/_session_config_editor.py
+
+def _display_config_box(temp_cfg: Dict, box_width: int):
+    """Muestra la caja de configuración con formato y alineación adaptativos."""
+    print("\nValores Actuales:")
+    print("┌" + "─" * (box_width - 2) + "┐")
+
+    sections = {
+        "Ticker": {
+            "Ticker Intervalo (s)": temp_cfg['TICKER_INTERVAL_SECONDS'],
+        },
+        "Análisis Técnico": {
+            "Período EMA": temp_cfg['TA']['EMA_WINDOW'],
+            "Período W.Inc": temp_cfg['TA']['WEIGHTED_INC_WINDOW'],
+            "Período W.Dec": temp_cfg['TA']['WEIGHTED_DEC_WINDOW'],
+        },
+        "Generación de Señal": {
+            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
+            "Umbral Caída para Comprar (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'],
+            "Umbral Subida para Vender (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'],
+            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
+            "Umbral Decremento": temp_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'],
+            "Umbral Incremento": temp_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'],
+        },
+        "Gestión de Profit": {
+            "Tarifa Comisión (%)": f"{temp_cfg['PROFIT']['COMMISSION_RATE'] * 100:.3f}",
+            "Porcentaje Reinversión Ganancias": temp_cfg['PROFIT']['REINVEST_PROFIT_PCT'],
+            "Monto Mín. Transferencia": f"${temp_cfg['PROFIT']['MIN_TRANSFER_AMOUNT_USDT']:.4f}",
+            "Slippage Estimado (%)": f"{temp_cfg['PROFIT'].get('SLIPPAGE_PCT', 0.0) * 100:.2f}",
+        },
+        "Gestión de Riesgo": {
+            "Tasa Margen Mantenimiento (%)": f"{temp_cfg.get('RISK', {}).get('MAINTENANCE_MARGIN_RATE', 0.0) * 100:.3f}",
+        }
+    }
+    
+    all_labels = []
+    for section_params in sections.values():
+        all_labels.extend(section_params.keys())
+    max_key_len = max(len(label) for label in all_labels) if all_labels else 0
+
+    first_section = True
+    for title, params in sections.items():
+        if not first_section:
+            print("├" + "─" * (box_width - 2) + "┤")
+        
+        print(_create_config_box_line(title, box_width, is_header=True))
+        
+        for label, value in params.items():
+            content = f"{label:<{max_key_len}} : {value}"
+            print(_create_config_box_line(content, box_width))
+        
+        first_section = False
+
+    print("└" + "─" * (box_width - 2) + "┘")
+
+
+def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict):
+    while True:
+        # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
+        menu_items = [
+            f"[1] Umbral Caída para Comprar (%) ({signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']})",
+            f"[2] Umbral Subida para Vender (%) ({signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']})",
+            f"[3] Umbral Decremento ({signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']})",
+            f"[4] Umbral Incremento ({signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']})",
+            None,
+            "[b] Volver"
+        ]
+        # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
+        submenu_options = MENU_STYLE.copy()
+        submenu_options['clear_screen'] = False
+        submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Señal:", **submenu_options).show()
+        if submenu == 0:
+            original = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']
+            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
+            new_val = get_input("Nuevo Umbral Caída para Comprar (%)", float, original)
+            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
+            if new_val != original: changed_keys['PRICE_CHANGE_BUY_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE'] = new_val
+        elif submenu == 1:
+            original = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']
+            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
+            new_val = get_input("Nuevo Umbral Subida para Vender (%)", float, original)
+            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
+            if new_val != original: changed_keys['PRICE_CHANGE_SELL_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE'] = new_val
+        elif submenu == 2:
+            original = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']
+            new_val = get_input("Nuevo Umbral Decremento (0-1)", float, original)
+            if new_val != original: changed_keys['WEIGHTED_DECREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD'] = new_val
+        elif submenu == 3:
+            original = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']
+            new_val = get_input("Nuevo Umbral Incremento (0-1)", float, original)
+            if new_val != original: changed_keys['WEIGHTED_INCREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD'] = new_val
         else:
             break

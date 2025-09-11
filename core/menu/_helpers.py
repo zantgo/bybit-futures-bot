@@ -270,22 +270,49 @@ HELP_TEXTS = {
           símbolo se valida en tiempo real para asegurar que existe.
     """),
     
+# --- INICIO DEL NUEVO TEXTO DE AYUDA ---
     "session_config_editor": textwrap.dedent("""
         AYUDA: EDITOR DE CONFIGURACIÓN DE SESIÓN
 
         Este editor te permite ajustar los parámetros que definen el
         comportamiento de tu ESTRATEGIA de trading en tiempo real.
+        Los cambios se aplican inmediatamente pero NO se guardan en tu archivo 'config.py'.
 
-        Los cambios realizados aquí afectan a la sesión actual inmediatamente
-        pero NO se guardan permanentemente en tu archivo 'config.py'.
+        Parámetros Detallados:
+        
+        --- Ticker ---
+        - Intervalo (s): Segundos entre cada consulta de precio al exchange.
+          Un valor más bajo ofrece mayor resolución pero más uso de API.
 
-        Parámetros Clave:
-        - Ticker: Intervalo de actualización de precios.
-        - Análisis Técnico (TA): Períodos para indicadores como la EMA.
-        - Señal: Umbrales que determinan cuándo se genera una señal de compra/venta.
-        - Profit y Riesgo: Configuración de comisiones, reinversión y tasas
-          de margen de mantenimiento.
-    """)
+        --- Análisis Técnico (TA) ---
+        - Período EMA: Número de ticks para calcular la Media Móvil Exponencial (EMA).
+          Usada como un filtro de tendencia principal.
+        - Período W.Inc/W.Dec: Ventana de ticks para medir la fuerza de las
+          subidas (Increment) y bajadas (Decrement) del precio.
+
+        --- Generación de Señal ---
+        - Umbral Caída Compra (%): Porcentaje que el precio debe CAER (ej. -0.15)
+          dentro de la ventana de TA para que una señal de COMPRA sea considerada.
+        - Umbral Subida Venta (%): Porcentaje que el precio debe SUBIR (ej. 0.15)
+          dentro de la ventana de TA para que una señal de VENTA sea considerada.
+        - Umbral Decremento/Incremento: Un filtro de "momentum" (0 a 1). Un valor más
+          alto requiere que la caída/subida haya sido más consistente para validar la señal.
+
+        --- Gestión de Profit ---
+        - Tarifa Comisión (%): La comisión estimada que cobra el exchange por cada
+          transacción (apertura y cierre).
+        - Porcentaje Reinversión: El porcentaje de las ganancias netas de un trade
+          que se redistribuirá al capital de las posiciones pendientes.
+        - Monto Mín. Transferencia: El beneficio mínimo para transferir fondos a
+          la cuenta de ganancias.
+        - Slippage Estimado (%): Un colchón para simular el deslizamiento del precio
+          en órdenes a mercado, haciendo el cálculo de PNL más realista.
+        
+        --- Gestión de Riesgo ---
+        - Tasa Margen Mantenimiento (%): Tasa usada para estimar el precio de
+          liquidación. Debe coincidir con la del exchange (ej. 0.5% para BTC en Bybit).
+    """),
+    # --- FIN DEL NUEVO TEXTO DE AYUDA ---
 }
 
 def show_help_popup(help_key: str):
