@@ -20,7 +20,6 @@ except ImportError:
 class _LifecycleManager:
     """Clase base que gestiona el ciclo de vida del PositionManager."""
 
-    # Reemplaza la función __init__ completa en _lifecycle.py
     def __init__(self,
                 position_state: Any,
                 exchange_adapter: AbstractExchange,
@@ -49,11 +48,10 @@ class _LifecycleManager:
         
         # --- INICIO DE LA CORRECCIÓN: Añadir contadores de fallos de sincronización ---
         self._sync_failure_counters: Dict[str, int] = {'long': 0, 'short': 0}
-        self._MAX_SYNC_FAILURES: int = 3 # Umbral de fallos consecutivos antes de tomar acción
+        self._MAX_SYNC_FAILURES: int = 15 # Umbral de fallos consecutivos antes de tomar acción
         # --- FIN DE LA CORRECCIÓN ---
 
 
-    # Reemplaza la función _reset_all_states completa en _lifecycle.py
     def _reset_all_states(self):
         """Resetea todos los atributos de estado del manager a sus valores iniciales."""
         self._initialized = False

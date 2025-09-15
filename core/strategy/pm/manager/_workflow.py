@@ -46,6 +46,9 @@ class _Workflow:
 
         operacion = self._om_api.get_operation_by_side(side)
         
+        # --- (INICIO DE LA SECCIÓN MODIFICADA: Reseteo del contador) ---
+        # if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
+        #     return
         if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
             # --- INICIO DE LA CORRECCIÓN ---
             # Si no se esperan posiciones abiertas, es un buen momento para resetear
@@ -53,6 +56,7 @@ class _Workflow:
             self._sync_failure_counters[side] = 0
             # --- FIN DE LA CORRECCIÓN ---
             return
+        # --- (FIN DE LA SECCIÓN MODIFICADA) ---
 
         try:
             account_purpose = 'longs' if side == 'long' else 'shorts'
@@ -63,9 +67,7 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            # --- INICIO DE LA LÓGICA DE REINTENTOS CORREGIDA ---
-
-            # Escenario 1: La llamada a la API falla (devuelve None).
+            # Escenario 1: La llamada a la API falla (devuelve None). Este es el estado de INCERTIDUMBRE.
             if physical_positions is None:
                 self._sync_failure_counters[side] += 1
                 self._memory_logger.log(
@@ -84,8 +86,8 @@ class _Workflow:
                 
                 return # Salimos de la función sin resetear el contador para permitir el reintento.
 
-            # Escenario 2: La llamada a la API tiene éxito, pero no devuelve posiciones (liquidación real).
-            if not physical_positions:
+            # Escenario 2: La llamada a la API tiene éxito, pero no devuelve posiciones (devuelve []). Esta es una liquidación CONFIRMADA.
+            if not physical_positions: # Esta condición ahora solo se cumple para una lista vacía [], ya que el caso 'None' fue capturado antes.
                 reason = f"LIQUIDACIÓN DETECTADA: {operacion.posiciones_abiertas_count} pos. {side.upper()} no encontradas en el exchange."
                 self._memory_logger.log(reason, "WARN")
                 self._om_api.handle_liquidation_event(side, reason)
@@ -94,15 +96,12 @@ class _Workflow:
                 self._sync_failure_counters[side] = 0
                 return
 
-            # Escenario 3: La llamada a la API tiene éxito y devuelve posiciones.
+            # Escenario 3: La llamada a la API tiene éxito y devuelve posiciones. Todo está en orden.
             # Todo está en orden, reseteamos el contador de fallos.
             self._sync_failure_counters[side] = 0
 
-            # --- FIN DE LA LÓGICA DE REINTENTOS CORREGIDA ---
-
         except Exception as e:
-            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
-            
+            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")      
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
