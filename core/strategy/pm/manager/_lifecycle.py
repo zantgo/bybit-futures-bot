@@ -48,7 +48,7 @@ class _LifecycleManager:
         
         # --- INICIO DE LA CORRECCIÓN: Añadir contadores de fallos de sincronización ---
         self._sync_failure_counters: Dict[str, int] = {'long': 0, 'short': 0}
-        self._MAX_SYNC_FAILURES: int = 15 # Umbral de fallos consecutivos antes de tomar acción
+        self._MAX_SYNC_FAILURES: int = 100 # Umbral de fallos consecutivos antes de tomar acción
         # --- FIN DE LA CORRECCIÓN ---
 
 
