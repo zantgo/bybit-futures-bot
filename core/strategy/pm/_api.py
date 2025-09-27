@@ -85,3 +85,10 @@ def manual_open_next_pending_position(side: str) -> Tuple[bool, str]:
     if not _pm_instance:
         return False, "PM no instanciado"
     return _pm_instance.manual_open_next_pending_position(side)
+
+
+# --- AÑADE ESTA FUNCIÓN en core/strategy/pm/_api.py ---
+def update_max_sync_failures(new_value: int):
+    """Delega la actualización del umbral de reintentos de sincronización."""
+    if _pm_instance:
+        _pm_instance.update_max_sync_failures(new_value)

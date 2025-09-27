@@ -153,17 +153,21 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                 if new_val != original: changed_keys['TICKER_INTERVAL_SECONDS'] = temp_cfg['TICKER_INTERVAL_SECONDS'] = new_val
             
             elif choice == 1:
-                _edit_ta_submenu(temp_cfg['TA'], changed_keys)
+                if _edit_ta_submenu(temp_cfg['TA'], changed_keys):
+                    changed_keys['TA'] = True # Marcar que la categoría cambió
             
             elif choice == 2:
-                _edit_signal_submenu(temp_cfg['SIGNAL'], changed_keys)
+                if _edit_signal_submenu(temp_cfg['SIGNAL'], changed_keys):
+                    changed_keys['SIGNAL'] = True
 
             elif choice == 3: 
-                _edit_profit_submenu(temp_cfg['PROFIT'], changed_keys)
+                if _edit_profit_submenu(temp_cfg['PROFIT'], changed_keys):
+                    changed_keys['PROFIT'] = True
             
             elif choice == 4:
                 if 'RISK' not in temp_cfg: temp_cfg['RISK'] = {}
-                _edit_risk_submenu(temp_cfg['RISK'], changed_keys)
+                if _edit_risk_submenu(temp_cfg['RISK'], changed_keys):
+                    changed_keys['RISK'] = True
             
             # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 6: # Índice de Ayuda
@@ -192,7 +196,8 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
         except UserInputCancelled:
             print("\n\nEdición cancelada."); time.sleep(1)
 # --- Submenús de edición ---
-def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict):
+def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict) -> bool:
+    changes_in_submenu = False
     while True:
         menu_items = [
             f"[1] Período EMA ({ta_cfg['EMA_WINDOW']})",
@@ -208,20 +213,28 @@ def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict):
         if submenu == 0:
             original = ta_cfg['EMA_WINDOW']
             new_val = get_input("Nuevo Período EMA", int, original, min_val=1)
-            if new_val != original: changed_keys['EMA_WINDOW'] = ta_cfg['EMA_WINDOW'] = new_val
+            if new_val != original: 
+                changed_keys['EMA_WINDOW'] = ta_cfg['EMA_WINDOW'] = new_val
+                changes_in_submenu = True
         elif submenu == 1:
             original = ta_cfg['WEIGHTED_INC_WINDOW']
             new_val = get_input("Nuevo Período W.Inc", int, original, min_val=1)
-            if new_val != original: changed_keys['WEIGHTED_INC_WINDOW'] = ta_cfg['WEIGHTED_INC_WINDOW'] = new_val
+            if new_val != original: 
+                changed_keys['WEIGHTED_INC_WINDOW'] = ta_cfg['WEIGHTED_INC_WINDOW'] = new_val
+                changes_in_submenu = True
         elif submenu == 2:
             original = ta_cfg['WEIGHTED_DEC_WINDOW']
             new_val = get_input("Nuevo Período W.Dec", int, original, min_val=1)
-            if new_val != original: changed_keys['WEIGHTED_DEC_WINDOW'] = ta_cfg['WEIGHTED_DEC_WINDOW'] = new_val
+            if new_val != original: 
+                changed_keys['WEIGHTED_DEC_WINDOW'] = ta_cfg['WEIGHTED_DEC_WINDOW'] = new_val
+                changes_in_submenu = True
         else:
             break
+    return changes_in_submenu
 
 
-def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
+def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict) -> bool:
+    changes_in_submenu = False
     while True:
         menu_items = [
             f"[1] Tarifa Comisión (%) ({profit_cfg['COMMISSION_RATE'] * 100:.3f})",
@@ -237,31 +250,47 @@ def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict):
         if submenu == 0:
             original = profit_cfg['COMMISSION_RATE']
             new_val = get_input("Nueva Tarifa Comisión (%)", float, original * 100, min_val=0.0)
-            if new_val / 100 != original: changed_keys['COMMISSION_RATE'] = profit_cfg['COMMISSION_RATE'] = new_val / 100
+            if new_val / 100 != original: 
+                changed_keys['COMMISSION_RATE'] = profit_cfg['COMMISSION_RATE'] = new_val / 100
+                changes_in_submenu = True
         elif submenu == 1:
             original = profit_cfg['REINVEST_PROFIT_PCT']
             new_val = get_input("Porcentaje Reinversión de Ganancias", float, original, min_val=0.0, max_val=100.0)
-            if new_val != original: changed_keys['REINVEST_PROFIT_PCT'] = profit_cfg['REINVEST_PROFIT_PCT'] = new_val
+            if new_val != original: 
+                changed_keys['REINVEST_PROFIT_PCT'] = profit_cfg['REINVEST_PROFIT_PCT'] = new_val
+                changes_in_submenu = True
         elif submenu == 2:
             original = profit_cfg['MIN_TRANSFER_AMOUNT_USDT']
             new_val = get_input("Monto Mín. de Transferencia (USDT)", float, original, min_val=0.0)
-            if new_val != original: changed_keys['MIN_TRANSFER_AMOUNT_USDT'] = profit_cfg['MIN_TRANSFER_AMOUNT_USDT'] = new_val
+            if new_val != original: 
+                changed_keys['MIN_TRANSFER_AMOUNT_USDT'] = profit_cfg['MIN_TRANSFER_AMOUNT_USDT'] = new_val
+                changes_in_submenu = True
         elif submenu == 3:
             original = profit_cfg.get('SLIPPAGE_PCT', 0.0)
             new_val = get_input("Nuevo Slippage Estimado (%)", float, original * 100, min_val=0.0)
-            if new_val / 100 != original: changed_keys['SLIPPAGE_PCT'] = profit_cfg['SLIPPAGE_PCT'] = new_val / 100
+            if new_val / 100 != original: 
+                changed_keys['SLIPPAGE_PCT'] = profit_cfg['SLIPPAGE_PCT'] = new_val / 100
+                changes_in_submenu = True
         else:
             break
+    return changes_in_submenu
 
-def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
+def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict) -> bool:
     """Submenú específico para editar los parámetros de riesgo de la sesión."""
+    changes_in_submenu = False
     while True:
         current_mmr_pct = risk_cfg.get('MAINTENANCE_MARGIN_RATE', 0.0) * 100
+        # --- INICIO DE LA MODIFICACIÓN ---
+        current_max_failures = risk_cfg.get('MAX_SYNC_FAILURES', 100)
+        
         menu_items = [
             f"[1] Tasa Margen Mantenimiento (%) ({current_mmr_pct:.3f})",
+            f"[2] Máx. Reintentos Sincronización ({current_max_failures})",
             None,
             "[b] Volver"
         ]
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         submenu_options = MENU_STYLE.copy()
         submenu_options['clear_screen'] = False
         submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Riesgo:", **submenu_options).show()
@@ -274,8 +303,20 @@ def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict):
             
             if new_val_decimal != risk_cfg.get('MAINTENANCE_MARGIN_RATE'):
                 changed_keys['MAINTENANCE_MARGIN_RATE'] = risk_cfg['MAINTENANCE_MARGIN_RATE'] = new_val_decimal
+                changes_in_submenu = True
+                
+        # --- INICIO DE LA MODIFICACIÓN ---
+        elif submenu == 1:
+            original_val = current_max_failures
+            new_val = get_input("Nuevo número de reintentos de sincronización", int, original_val, min_val=1)
+            if new_val != original_val:
+                changed_keys['MAX_SYNC_FAILURES'] = risk_cfg['MAX_SYNC_FAILURES'] = new_val
+                changes_in_submenu = True
+        # --- FIN DE LA MODIFICACIÓN ---
+
         else:
             break
+    return changes_in_submenu
 
 
 # En: core/menu/screens/_session_config_editor.py
@@ -310,6 +351,9 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
         },
         "Gestión de Riesgo": {
             "Tasa Margen Mantenimiento (%)": f"{temp_cfg.get('RISK', {}).get('MAINTENANCE_MARGIN_RATE', 0.0) * 100:.3f}",
+            # --- INICIO DE LA MODIFICACIÓN ---
+            "Máx. Reintentos Sincronización": temp_cfg.get('RISK', {}).get('MAX_SYNC_FAILURES', 100),
+            # --- FIN DE LA MODIFICACIÓN ---
         }
     }
     
@@ -334,7 +378,8 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
     print("└" + "─" * (box_width - 2) + "┘")
 
 
-def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict):
+def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict) -> bool:
+    changes_in_submenu = False
     while True:
         # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
         menu_items = [
@@ -354,20 +399,29 @@ def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict):
             # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
             new_val = get_input("Nuevo Umbral Caída para Comprar (%)", float, original)
             # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
-            if new_val != original: changed_keys['PRICE_CHANGE_BUY_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE'] = new_val
+            if new_val != original: 
+                changed_keys['PRICE_CHANGE_BUY_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE'] = new_val
+                changes_in_submenu = True
         elif submenu == 1:
             original = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']
             # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
             new_val = get_input("Nuevo Umbral Subida para Vender (%)", float, original)
             # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
-            if new_val != original: changed_keys['PRICE_CHANGE_SELL_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE'] = new_val
+            if new_val != original: 
+                changed_keys['PRICE_CHANGE_SELL_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE'] = new_val
+                changes_in_submenu = True
         elif submenu == 2:
             original = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD']
             new_val = get_input("Nuevo Umbral Decremento (0-1)", float, original)
-            if new_val != original: changed_keys['WEIGHTED_DECREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD'] = new_val
+            if new_val != original: 
+                changed_keys['WEIGHTED_DECREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_DECREMENT_THRESHOLD'] = new_val
+                changes_in_submenu = True
         elif submenu == 3:
             original = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']
             new_val = get_input("Nuevo Umbral Incremento (0-1)", float, original)
-            if new_val != original: changed_keys['WEIGHTED_INCREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD'] = new_val
+            if new_val != original: 
+                changed_keys['WEIGHTED_INCREMENT_THRESHOLD'] = signal_cfg['WEIGHTED_INCREMENT_THRESHOLD'] = new_val
+                changes_in_submenu = True
         else:
             break
+    return changes_in_submenu

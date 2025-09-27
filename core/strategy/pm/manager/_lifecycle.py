@@ -48,7 +48,12 @@ class _LifecycleManager:
         
         # --- INICIO DE LA CORRECCIÓN: Añadir contadores de fallos de sincronización ---
         self._sync_failure_counters: Dict[str, int] = {'long': 0, 'short': 0}
-        self._MAX_SYNC_FAILURES: int = 100 # Umbral de fallos consecutivos antes de tomar acción
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Lee el umbral desde la configuración de la sesión en lugar de un valor fijo.
+        self._MAX_SYNC_FAILURES: int = config.SESSION_CONFIG["RISK"]["MAX_SYNC_FAILURES"] # Umbral de fallos consecutivos antes de tomar acción
+        # --- FIN DE LA MODIFICACIÓN ---
+        
         # --- FIN DE LA CORRECCIÓN ---
 
 

@@ -83,6 +83,14 @@ SESSION_CONFIG = {
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
         "SLIPPAGE_PCT": 0.0005, 
     },
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Parámetros de Riesgo de la Sesión
+    "RISK": {
+        "MAINTENANCE_MARGIN_RATE": 0.005,
+        "MAX_SYNC_FAILURES": 100,
+    },
+    # --- FIN DE LA MODIFICACIÓN ---
 }
 
 # --- 3. CONFIGURACIÓN POR DEFECTO PARA NUEVAS OPERACIONES ---

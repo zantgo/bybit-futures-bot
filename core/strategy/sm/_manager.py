@@ -283,6 +283,8 @@ class SessionManager:
             memory_logger.log(traceback.format_exc(), "ERROR")
             return {"error": error_msg}
 
+# --- REEMPLAZA ESTA FUNCIÓN COMPLETA en core/strategy/sm/_manager.py ---
+
     def update_session_parameters(self, params: Dict[str, Any]):
         """
         Actualiza los parámetros, valida cambios críticos como el símbolo del ticker,
@@ -296,6 +298,13 @@ class SessionManager:
             memory_logger.log("SessionManager: No se detectaron cambios en la configuración.", "INFO")
             return
             
+        # --- INICIO DEL NUEVO BLOQUE LÓGICO ---
+        if 'MAX_SYNC_FAILURES' in changed_keys:
+            new_value = self._config.SESSION_CONFIG["RISK"]["MAX_SYNC_FAILURES"]
+            # Llama a la nueva función de la API del Position Manager
+            self._pm_api.update_max_sync_failures(new_value)
+        # --- FIN DEL NUEVO BLOQUE LÓGICO ---
+
         if 'TICKER_SYMBOL' in changed_keys:
             new_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
             memory_logger.log(f"SessionManager: Se detectó cambio de símbolo a '{new_symbol}'. Validando...", "WARN")
@@ -321,6 +330,7 @@ class SessionManager:
             memory_logger.log("SM: Parámetros actualizados. Reiniciando Ticker para aplicar cambios.", "WARN")
             self.stop()
             self.start()
+
         
     def is_running(self) -> bool:
         """Indica si la sesión está actualmente en ejecución (ticker activo)."""

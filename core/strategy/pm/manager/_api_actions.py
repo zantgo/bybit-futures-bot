@@ -144,3 +144,9 @@ class _ApiActions:
              message = result.get('error', message)
 
         return success, message
+# --- AÑADE ESTA FUNCIÓN en core/strategy/pm/manager/_api_actions.py ---
+    def update_max_sync_failures(self, new_value: int):
+        """Actualiza el umbral de fallos de sincronización en tiempo real."""
+        if isinstance(new_value, int) and new_value > 0:
+            self._MAX_SYNC_FAILURES = new_value
+            self._memory_logger.log(f"PM: Umbral MAX_SYNC_FAILURES actualizado a {new_value}", "WARN")
