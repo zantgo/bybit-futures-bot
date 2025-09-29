@@ -99,6 +99,49 @@ def _close_last_open(side: str):
         press_enter_to_continue()
 
 
+# --- INICIO DE LA MODIFICACIÓN: Nueva función añadida ---
+def _close_first_open(side: str):
+    """
+    Ejecuta la lógica para cerrar manualmente la primera posición abierta.
+    """
+    clear_screen()
+    print_tui_header(f"Cierre Manual Individual - {side.upper()}")
+
+    operacion = om_api.get_operation_by_side(side)
+    open_positions = operacion.posiciones_abiertas
+
+    if not open_positions:
+        print("\nNo hay posiciones abiertas para cerrar.")
+        time.sleep(2)
+        return
+    
+    # El índice a cerrar es siempre el primero de la lista (índice 0)
+    index_to_close_in_list = 0
+    pos_to_close = open_positions[index_to_close_in_list]
+
+    confirm_title = (
+        f"Confirmas cerrar la PRIMERA posición abierta?\n\n"
+        f"  - ID:          ...{str(pos_to_close.id)[-6:]}\n"
+        f"  - P. Entrada:  {pos_to_close.entry_price:.4f}\n"
+        f"  - Capital:     {pos_to_close.capital_asignado:.2f} USDT\n\n"
+        f"Esta acción cerrará la posición a precio de mercado."
+    )
+    confirm_menu = TerminalMenu(["[s] Sí, cerrar posición", "[n] No, cancelar"], title=confirm_title)
+    if confirm_menu.show() == 0:
+        print("\n\033[93mEnviando orden de cierre, por favor espere...\033[0m")
+        # Pasamos el índice RELATIVO a la lista de posiciones abiertas (en este caso, 0)
+        success, msg = pm_api.manual_close_logical_position_by_index(side, index_to_close_in_list)
+        
+        clear_screen()
+        print_tui_header(f"Cierre Manual Individual - Resultado")
+        if success:
+            print(f"\n\033[92mÉXITO:\033[0m {msg}")
+        else:
+            print(f"\n\033[91mFALLO:\033[0m {msg}")
+        press_enter_to_continue()
+# --- FIN DE LA MODIFICACIÓN ---
+
+
 def _panic_close_all(side: str):
     """
     Ejecuta la lógica para el cierre de pánico de todas las posiciones.

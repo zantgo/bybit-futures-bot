@@ -62,16 +62,20 @@ def show_manual_position_manager_screen(side: str):
             actions.append('open_next')
         
         if has_open:
-            menu_items.append("[2] Cerrar Última Posición Abierta")
+            menu_items.append("[2] Cerrar ÚLTIMA Posición Abierta")
             actions.append('close_last')
             
+            # --- INICIO DE LA MODIFICACIÓN ---
+            # Se añade la nueva opción de menú y su acción correspondiente.
+            menu_items.append("[3] Cerrar PRIMERA Posición Abierta")
+            actions.append('close_first')
+            # --- FIN DE LA MODIFICACIÓN ---
+
         if has_open:
             menu_items.append(f"[*] CIERRE DE PÁNICO (Cerrar TODAS las {operacion.posiciones_abiertas_count} posiciones)")
             actions.append('panic_close')
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se añade un separador 'None' a ambas listas para mantener la alineación
-        # y generar el espacio en el menú.
+        # Se mantiene la estructura existente para los botones de ayuda y refresco.
         menu_items.extend([
             None, # Separador visual añadido
             "[r] Refrescar",
@@ -84,7 +88,6 @@ def show_manual_position_manager_screen(side: str):
             'help', 
             'back'
         ])
-        # --- FIN DE LA MODIFICACIÓN ---
 
         # Esta parte del código ya maneja correctamente la lista con 'None'
         final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
@@ -108,6 +111,12 @@ def show_manual_position_manager_screen(side: str):
         elif action == 'close_last':
             _actions._close_last_open(side)
         
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Se añade el bloque elif para manejar la nueva acción.
+        elif action == 'close_first':
+            _actions._close_first_open(side)
+        # --- FIN DE LA MODIFICACIÓN ---
+
         elif action == 'panic_close':
             _actions._panic_close_all(side)
         
@@ -118,4 +127,4 @@ def show_manual_position_manager_screen(side: str):
             show_help_popup('position_viewer')
             
         elif action == 'back' or action is None:
-            break
+            break```
