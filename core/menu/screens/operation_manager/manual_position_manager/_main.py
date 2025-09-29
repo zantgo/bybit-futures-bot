@@ -23,8 +23,6 @@ except ImportError:
     om_api = None
     pm_api = None
 
-# Reemplaza la función show_manual_position_manager_screen completa en core/menu/screens/operation_manager/manual_position_manager/_main.py
-
 def show_manual_position_manager_screen(side: str):
     """
     Muestra la pantalla para la gestión manual de apertura y cierre de posiciones.
@@ -75,7 +73,6 @@ def show_manual_position_manager_screen(side: str):
             menu_items.append(f"[*] CIERRE DE PÁNICO (Cerrar TODAS las {operacion.posiciones_abiertas_count} posiciones)")
             actions.append('panic_close')
         
-        # Se mantiene la estructura existente para los botones de ayuda y refresco.
         menu_items.extend([
             None, # Separador visual añadido
             "[r] Refrescar",
@@ -111,11 +108,8 @@ def show_manual_position_manager_screen(side: str):
         elif action == 'close_last':
             _actions._close_last_open(side)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se añade el bloque elif para manejar la nueva acción.
         elif action == 'close_first':
             _actions._close_first_open(side)
-        # --- FIN DE LA MODIFICACIÓN ---
 
         elif action == 'panic_close':
             _actions._panic_close_all(side)
@@ -127,4 +121,4 @@ def show_manual_position_manager_screen(side: str):
             show_help_popup('position_viewer')
             
         elif action == 'back' or action is None:
-            break```
+            break
