@@ -35,7 +35,7 @@ class _Workflow:
         Contiene la LÓGICA del Heartbeat de seguridad con reintentos.
         Comprueba la existencia real de una posición en el exchange y sincroniza
         el estado interno del bot. Solo asume una liquidación si la API falla
-        múltiples veces consecutivas.
+        o devuelve un estado anómalo (sin posiciones) de forma persistente.
         """
         if self._manual_close_in_progress:
             self._memory_logger.log(f"Heartbeat omitido para {side.upper()}: Cierre manual en progreso.", "DEBUG")
@@ -46,17 +46,9 @@ class _Workflow:
 
         operacion = self._om_api.get_operation_by_side(side)
         
-        # --- (INICIO DE LA SECCIÓN MODIFICADA: Reseteo del contador) ---
-        # if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
-        #     return
         if not (operacion and operacion.posiciones_abiertas_count > 0 and operacion.estado in ['ACTIVA', 'PAUSADA', 'DETENIENDO']):
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Si no se esperan posiciones abiertas, es un buen momento para resetear
-            # el contador de fallos de este lado, asegurando que no se acumulen errores de ticks pasados.
             self._sync_failure_counters[side] = 0
-            # --- FIN DE LA CORRECCIÓN ---
             return
-        # --- (FIN DE LA SECCIÓN MODIFICADA) ---
 
         try:
             account_purpose = 'longs' if side == 'long' else 'shorts'
@@ -67,41 +59,38 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            # Escenario 1: La llamada a la API falla (devuelve None). Este es el estado de INCERTIDUMBRE.
-            if physical_positions is None:
+            # --- INICIO DE LA MODIFICACIÓN CRÍTICA (LÓGICA UNIFICADA) ---
+            
+            # Una "anomalía" ocurre si la API falla (None) O si devuelve una lista vacía cuando esperamos posiciones.
+            is_anomaly = physical_positions is None or not physical_positions
+
+            if is_anomaly:
                 self._sync_failure_counters[side] += 1
+                
+                anomaly_type = "fallo de API" if physical_positions is None else "posiciones no encontradas"
                 self._memory_logger.log(
-                    f"HEARTBEAT WARN ({side.upper()}): No se pudo obtener el estado de las posiciones. "
-                    f"Fallo consecutivo {self._sync_failure_counters[side]}/{self._MAX_SYNC_FAILURES}.", "WARN"
+                    f"HEARTBEAT WARN ({side.upper()}): Anomaly detected ({anomaly_type}). "
+                    f"Failure count {self._sync_failure_counters[side]}/{self._MAX_SYNC_FAILURES}.", "WARN"
                 )
                 
-                # Solo si se supera el umbral de fallos, se asume el peor caso.
                 if self._sync_failure_counters[side] >= self._MAX_SYNC_FAILURES:
                     reason = (
-                        f"PÉRDIDA DE SINCRONIZACIÓN: La API de posiciones para {side.upper()} "
-                        f"ha fallado {self._MAX_SYNC_FAILURES} veces consecutivas. Asumiendo el peor caso (liquidación)."
+                        f"ESTADO ANÓMALO PERSISTENTE: Se han detectado {self._MAX_SYNC_FAILURES} anomalías consecutivas "
+                        f"para {side.upper()} ({anomaly_type}). Asumiendo el peor caso (liquidación)."
                     )
                     self._memory_logger.log(reason, "ERROR")
                     self._om_api.handle_liquidation_event(side, reason)
                 
-                return # Salimos de la función sin resetear el contador para permitir el reintento.
+                return # Salimos para permitir el reintento.
 
-            # Escenario 2: La llamada a la API tiene éxito, pero no devuelve posiciones (devuelve []). Esta es una liquidación CONFIRMADA.
-            if not physical_positions: # Esta condición ahora solo se cumple para una lista vacía [], ya que el caso 'None' fue capturado antes.
-                reason = f"LIQUIDACIÓN DETECTADA: {operacion.posiciones_abiertas_count} pos. {side.upper()} no encontradas en el exchange."
-                self._memory_logger.log(reason, "WARN")
-                self._om_api.handle_liquidation_event(side, reason)
-                
-                # Si la llamada fue exitosa y el estado es conocido (cero posiciones), reseteamos el contador.
-                self._sync_failure_counters[side] = 0
-                return
-
-            # Escenario 3: La llamada a la API tiene éxito y devuelve posiciones. Todo está en orden.
-            # Todo está en orden, reseteamos el contador de fallos.
+            # Si llegamos aquí, la API respondió con posiciones, por lo que no hay anomalía.
             self._sync_failure_counters[side] = 0
+            
+            # --- FIN DE LA MODIFICACIÓN CRÍTICA ---
 
         except Exception as e:
-            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")      
+            self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
+
     def check_and_close_positions(self, current_price: float, timestamp: datetime.datetime):
         """
         Revisa todas las posiciones abiertas para posible cierre por SL, TSL o detención forzosa.
@@ -137,14 +126,8 @@ class _Workflow:
                         else:
                             self._memory_logger.log(f"PM Workflow: Cierre total para {side.upper()} completado (o no se encontraron posiciones).", "INFO")
 
-                        # --- INICIO DE LA CORRECCIÓN: Pasar el precio de cierre ---
-                        #
-                        # Se pasa el `current_price` a la función de finalización
-                        # para que pueda calcular el PNL real y preciso del cierre.
-                        #
                         reason = operacion.estado_razon
                         self._om_api.finalize_forced_closure(side, reason, current_price)
-                        # --- FIN DE LA CORRECCIÓN ---
 
                     else:
                         self._memory_logger.log(f"PM Workflow ERROR: No se encontró el nombre de la cuenta para el lado {side.upper()} (Clave buscada: '{account_key}')", "ERROR")
@@ -191,13 +174,9 @@ class _Workflow:
 
             # Ejecutar cierres por SL/TSL
             if positions_to_close:
-                
-                # --- INICIO DE LA SOLUCIÓN: Añadir el bloque try...finally ---
                 self._manual_close_in_progress = True
                 self._memory_logger.log(f"Bandera de protección de cierre (WORKFLOW) ACTIVADA para {side.upper()}.", "DEBUG")
                 try:
-                # --- FIN DE LA SOLUCIÓN ---
-
                     for close_info in sorted(positions_to_close, key=lambda x: x['index'], reverse=True):
                         self._close_logical_position(
                             side, 
@@ -206,12 +185,7 @@ class _Workflow:
                             timestamp, 
                             reason=close_info.get('reason', "UNKNOWN")
                         )
-
-                # --- INICIO DE LA SOLUCIÓN: Añadir el bloque try...finally ---
                 finally:
-                    # Esta pausa es importante para dar tiempo a que las actualizaciones de estado se propaguen
-                    # antes de que la bandera se desactive y el siguiente heartbeat pueda ejecutarse.
                     time.sleep(0.1) 
                     self._manual_close_in_progress = False
                     self._memory_logger.log(f"Bandera de protección de cierre (WORKFLOW) DESACTIVADA para {side.upper()}.", "DEBUG")
-                # --- FIN DE LA SOLUCIÓN ---
