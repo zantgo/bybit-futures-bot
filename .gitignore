@@ -1,15 +1,65 @@
-# --- Secrets ---
-# ¡NUNCA subas tus claves API o secretos a GitHub!
+# ==============================================================================
+# Archivos y Directorios Críticos de Seguridad
+# ¡NUNCA deben subirse a un repositorio público!
+# ==============================================================================
+
+# Archivo de entorno con claves API, secretos y UIDs.
+# ¡EL MÁS IMPORTANTE!
 .env
 *.env
 
-# --- Python ---
-# Byte-compiled / optimized / DLL files
+# Directorios con datos generados por el bot que revelan tu actividad y estrategia.
+/logs/
+/results/
+
+
+# ==============================================================================
+# Archivos y Directorios de Python
+# ==============================================================================
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+.env/
+
+# Archivos de caché de Python y bytecode
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.so
 
-# Entorno virtual
-venv/
+# Archivos de distribución y empaquetado
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Archivos de caché de herramientas de testing
+.pytest_cache/
+.tox/
+htmlcov/
+
+# Puntos de control de Jupyter Notebook
+.ipynb_checkpoints
+
+
+# ==============================================================================
+# Archivos de Configuración de IDEs y Editores
+# Evitan conflictos y mantienen el repo limpio de configuraciones personales.
+# ==============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+
+
+# ==============================================================================
+# Archivos del Sistema Operativo
+# ==============================================================================
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
