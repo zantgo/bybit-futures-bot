@@ -33,9 +33,45 @@ Un bot de trading algorítmico para Bybit construido en Python, enfocado en una 
 
 ## 📐 Diagrama de Arquitectura (Simplificado)
 
-![Diagrama de Arquitectura] <!-- ¡MUY RECOMENDADO! Crea una imagen simple (con draw.io o similar) que muestre las capas: TUI -> BotController -> SessionManager -> (OM/PM) -> Adapter -> API -->
+```mermaid
+graph TD
+    subgraph "Capa de Presentación"
+        TUI["💻 Interfaz de Usuario en Terminal (TUI)"]
+    end
 
----
+    subgraph "Capa de Control de Aplicación"
+        BotController["🤖 BotController (Gestor Principal)"]
+        SessionManager["📈 SessionManager (Gestor de Sesión)"]
+    end
+
+    subgraph "Capa de Lógica de Negocio (Estrategia)"
+        OM["🧠 OperationManager (OM)"]
+        PM["📊 PositionManager (PM)"]
+        TA_Signal["🔬 TA Manager & Signal Generator"]
+    end
+
+    subgraph "Capa de Abstracción del Exchange"
+        style Adapter fill:#f9f,stroke:#333,stroke-width:2px
+        Adapter["🔌 BybitAdapter (Traductor)"]
+    end
+
+    subgraph "Capa de Infraestructura"
+        API["📡 core/api & ConnectionManager"]
+        Bybit["🏦 Exchange (Bybit API)"]
+    end
+
+    %% --- Conexiones entre capas ---
+    TUI -- "Acciones del Usuario" --> BotController
+    BotController -- "Crea/Inicia Sesión" --> SessionManager
+    SessionManager -- "Orquesta Eventos de Precio" --> TA_Signal
+    SessionManager -- "Pasa Señales y Ticks" --> PM
+    OM -- "Define Estrategia" --> PM
+    TA_Signal -- "Genera Señal (BUY/SELL)" --> PM
+    PM -- "Ejecuta Orden (Abrir/Cerrar)" --> Adapter
+    Adapter -- "Traduce a llamada API" --> API
+    API -- "Comunica con" --> Bybit
+```
+
 
 ## 🚀 Puesta en Marcha
 
@@ -88,6 +124,8 @@ El bot utiliza subcuentas para una gestión de riesgo aislada.
 ### 4. Checklist Final y Ejecución
 
 **¡IMPORTANTE!** Antes de cada ejecución, asegúrate de que tu configuración en Bybit coincide con la del bot.
+
+*   ✅ **Símbolo y Capital:** Confirma que el símbolo es el correcto y que hay suficiente balance en las subcuentas `longs` y `shorts`.
 
 *   ✅ **Modo Hedge:** El bot **requiere** que el Modo Hedge esté activado para el par que vas a operar en la plataforma de Bybit.
 
