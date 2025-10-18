@@ -1,14 +1,15 @@
-# Python Trading Bot - Arquitectura de Software Avanzada
+# Bybit Futures Trading Bot 
 
-![GIF de la TUI en acción] <!-- ¡IMPORTANTE! Graba un GIF de tu bot funcionando y ponlo aquí. Es lo más impactante. -->
+Este es un bot de trading algorítmico para Bybit que ejecuta estrategias complejas de **promediación de costos (DCA) y grid trading**, controlado íntegramente a través de una potente **Interfaz de Usuario en Terminal (TUI)**.
 
-Un bot de trading algorítmico para Bybit construido en Python, enfocado en una **arquitectura modular, escalable y robusta**. Este proyecto es una demostración práctica de principios de diseño de software como la Inyección de Dependencias, el Patrón Adaptador y la Separación de Responsabilidades, todo controlado a través de una completa Interfaz de Usuario en Terminal (TUI).
+El sistema permite configurar, lanzar y monitorear operaciones en tiempo real sin necesidad de reiniciar. La estrategia de trading se basa en una combinación de indicadores técnicos (EMA, momentum ponderado) para identificar puntos de entrada, mientras que la gestión de riesgo y capital se aísla a través de subcuentas dedicadas para operaciones LONG y SHORT.
+
+La arquitectura del bot está diseñada para ser modular y extensible, utilizando una capa de abstracción que lo independiza del exchange y permite la configuración de parámetros "en caliente" durante la ejecución.
 
 > ### **Advertencia de Seguridad y Riesgo**
 > **EL TRADING DE FUTUROS CON APALANCAMIENTO ES EXTREMADAMENTE RIESGOSO Y PUEDE RESULTAR EN LA PÉRDIDA TOTAL DE SU CAPITAL.**
-> Este software se proporciona "tal cual", sin ninguna garantía. El autor no se hace responsable de ninguna pérdida financiera. **Nunca** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET**.
+> Este software se proporciona "tal cual", sin ninguna garantía. El autor no se hace responsable de ninguna pérdida financiera. **Nunca** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET** o modo **Paper Trading**.
 
----
 
 ## ✨ Características Clave
 
@@ -25,52 +26,13 @@ Un bot de trading algorítmico para Bybit construido en Python, enfocado en una 
 *   **Lenguaje:** Python 3.10+
 *   **Librerías Principales:** `pybit`, `pandas`, `numpy`, `simple-term-menu`, `python-dotenv`
 *   **Principios de Diseño Aplicados:**
-    *   **Arquitectura Limpia (Clean Architecture):** Flujo de dependencias claro hacia el núcleo del negocio.
+    *   **Arquitectura Limpia (CA):** Flujo de dependencias claro hacia el núcleo del negocio.
     *   **Inyección de Dependencias (DI):** Las clases reciben sus dependencias en lugar de crearlas, lo que facilita las pruebas y la modularidad.
     *   **Patrón Fachada (Facade):** Módulos `_api.py` que exponen una interfaz simple para subsistemas complejos (PM, OM, SM).
     *   **Patrón Adaptador (Adapter):** La capa `core/exchange` que desacopla el bot de la implementación específica de Bybit.
     *   **Separación de Responsabilidades (SoC):** Cada clase y módulo tiene un propósito bien definido (ej. `PositionExecutor` solo ejecuta, `_calculator` solo calcula).
 
-## 📐 Diagrama de Arquitectura (Simplificado)
 
-```mermaid
-graph TD
-    subgraph "Capa de Presentación"
-        TUI["💻 Interfaz de Usuario en Terminal (TUI)"]
-    end
-
-    subgraph "Capa de Control de Aplicación"
-        BotController["🤖 BotController (Gestor Principal)"]
-        SessionManager["📈 SessionManager (Gestor de Sesión)"]
-    end
-
-    subgraph "Capa de Lógica de Negocio (Estrategia)"
-        OM["🧠 OperationManager (OM)"]
-        PM["📊 PositionManager (PM)"]
-        TA_Signal["🔬 TA Manager & Signal Generator"]
-    end
-
-    subgraph "Capa de Abstracción del Exchange"
-        style Adapter fill:#999,stroke:#333,stroke-width:2px
-        Adapter["🔌 BybitAdapter (Traductor)"]
-    end
-
-    subgraph "Capa de Infraestructura"
-        API["📡 core/api & ConnectionManager"]
-        Bybit["🏦 Exchange (Bybit API)"]
-    end
-
-    %% --- Conexiones entre capas ---
-    TUI -- "Acciones del Usuario" --> BotController
-    BotController -- "Crea/Inicia Sesión" --> SessionManager
-    SessionManager -- "Orquesta Eventos de Precio" --> TA_Signal
-    SessionManager -- "Pasa Señales y Ticks" --> PM
-    OM -- "Define Estrategia" --> PM
-    TA_Signal -- "Genera Señal (BUY/SELL)" --> PM
-    PM -- "Ejecuta Orden (Abrir/Cerrar)" --> Adapter
-    Adapter -- "Traduce a llamada API" --> API
-    API -- "Comunica con" --> Bybit
-```
 ## 🚀 Puesta en Marcha
 
 Sigue estos pasos para configurar y ejecutar el bot en tu máquina local.
@@ -82,8 +44,8 @@ Sigue estos pasos para configurar y ejecutar el bot en tu máquina local.
 ### 2. Instalación
 1.  **Clonar el repositorio:**
     ```bash
-    git clone https://github.com/zantgo/bybit-futures-bot-67.git
-    cd tu-repositorio
+    git clone https://github.com/zantgo/bybit-futures-bot.git
+    cd bybit-futures-bot
     ```
 
 2.  **Crear y activar un entorno virtual:**
