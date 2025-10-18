@@ -1,5 +1,7 @@
 # Bybit Futures Trading Bot 
 
+![Demostración del proyecto](./assets/demo.gif)
+
 Este es un bot de trading algorítmico para Bybit que ejecuta estrategias complejas de **promediación de costos (DCA) y grid trading**, controlado íntegramente a través de una potente **Interfaz de Usuario en Terminal (TUI)**.
 
 El sistema permite configurar, lanzar y monitorear operaciones en tiempo real sin necesidad de reiniciar. La estrategia de trading se basa en una combinación de indicadores técnicos (EMA, momentum ponderado) para identificar puntos de entrada, mientras que la gestión de riesgo y capital se aísla a través de subcuentas dedicadas para operaciones LONG y SHORT.
