@@ -31,7 +31,13 @@ Un bot de trading algorítmico para Bybit construido en Python, enfocado en una 
     *   **Patrón Adaptador (Adapter):** La capa `core/exchange` que desacopla el bot de la implementación específica de Bybit.
     *   **Separación de Responsabilidades (SoC):** Cada clase y módulo tiene un propósito bien definido (ej. `PositionExecutor` solo ejecuta, `_calculator` solo calcula).
 
-## 📐 Diagrama de Arquitectura (Simplificado)
+## 📐 Arquitectura y Modelo de Datos
+
+Este proyecto no es solo un script, sino un sistema de software diseñado con una arquitectura en capas bien definida. Los siguientes diagramas ilustran la estructura, el flujo de datos y las relaciones entre los componentes clave.
+
+### 1. Diagrama de Arquitectura de Capas
+
+Este diagrama muestra la visión de alto nivel del sistema, organizado según los principios de **Arquitectura Limpia (Clean Architecture)**. Cada capa tiene una responsabilidad clara, y las dependencias fluyen hacia el interior (hacia la lógica de negocio), lo que hace que el sistema sea modular, comprobable y fácil de mantener.
 
 ```mermaid
 graph TD
@@ -60,18 +66,153 @@ graph TD
         Bybit["🏦 Exchange (Bybit API)"]
     end
 
-    %% --- Conexiones entre capas ---
+    %% --- Conexiones y Flujo de Control ---
     TUI -- "Acciones del Usuario" --> BotController
     BotController -- "Crea/Inicia Sesión" --> SessionManager
     SessionManager -- "Orquesta Eventos de Precio" --> TA_Signal
     SessionManager -- "Pasa Señales y Ticks" --> PM
-    OM -- "Define Estrategia" --> PM
+    OM -- "Define Estrategia y Estado" --> PM
     TA_Signal -- "Genera Señal (BUY/SELL)" --> PM
     PM -- "Ejecuta Orden (Abrir/Cerrar)" --> Adapter
     Adapter -- "Traduce a llamada API" --> API
     API -- "Comunica con" --> Bybit
 ```
 
+### 2. Diagrama de Flujo de Datos (Ciclo de Vida de un Tick)
+
+Este diagrama de secuencia ilustra la **interacción dinámica** entre los componentes clave cuando se recibe un nuevo tick de precio. Muestra paso a paso cómo la información fluye a través del sistema, desde la obtención del precio hasta la posible ejecución de una orden.
+
+```mermaid
+sequenceDiagram
+    participant Ticker
+    participant SessionManager as SM
+    participant EventProcessor as EP
+    participant TAManager as TA
+    participant SignalGenerator as Signal
+    participant PositionManager as PM
+    participant ExchangeAdapter as Adapter
+
+    loop Cada 'N' segundos
+        Ticker->>SM: 1. Nuevo Precio Obtenido
+        SM->>EP: 2. Procesa Evento de Precio
+        
+        EP->>TA: 3. Añade Tick y Calcula Indicadores
+        TA-->>EP: 4. Devuelve Indicadores (EMA, etc.)
+        
+        EP->>Signal: 5. Evalúa Indicadores con Reglas
+        Signal-->>EP: 6. Devuelve Señal (BUY/SELL/HOLD)
+        
+        EP->>PM: 7. Notifica Señal y Precio Actual
+        
+        alt La señal es BUY/SELL y las condiciones se cumplen
+            PM->>Adapter: 8. Orden de Apertura (StandardOrder)
+            Adapter-->>PM: 9. Respuesta de la API
+        end
+
+        alt Las condiciones de SL/TSL se cumplen
+            PM->>Adapter: 8. Orden de Cierre (StandardOrder)
+            Adapter-->>PM: 9. Respuesta de la API
+        end
+    end
+```
+
+### 3. Modelo de Clases (Diagrama de Clases UML Simplificado)
+
+Este diagrama muestra las **clases más importantes** del sistema y sus relaciones (composición, herencia, asociación). Refleja la estructura orientada a objetos del proyecto y cómo las responsabilidades se encapsulan en diferentes clases.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class BotController {
+        +create_session() SessionManager
+        +run_position_test()
+    }
+
+    class SessionManager {
+        -ticker : Ticker
+        -event_processor : EventProcessor
+        +start()
+        +stop()
+    }
+
+    class OperationManager {
+        -long_operation : Operacion
+        -short_operation : Operacion
+        +create_or_update_operation()
+        +pausar_operacion()
+    }
+
+    class PositionManager {
+        -executor : PositionExecutor
+        +handle_low_level_signal()
+        +check_and_close_positions()
+    }
+    
+    class AbstractExchange {
+        <<Interface>>
+        +place_order()
+        +get_ticker()
+    }
+
+    class BybitAdapter {
+        +place_order(StandardOrder)
+        +get_ticker(symbol)
+    }
+
+    class Ticker {
+        +start(callback)
+    }
+    
+    class EventProcessor {
+      +process_event()
+    }
+
+    %% --- Relaciones Estructurales ---
+    BotController "1" *-- "1" SessionManager : crea
+    SessionManager "1" *-- "1" Ticker : gestiona
+    SessionManager "1" *-- "1" EventProcessor : orquesta
+    SessionManager "1" *-- "1" OperationManager : gestiona
+    SessionManager "1" *-- "1" PositionManager : gestiona
+    
+    EventProcessor ..> PositionManager : notifica
+    EventProcessor ..> OperationManager : verifica
+    
+    PositionManager ..> OperationManager : consulta
+    PositionManager --|> BybitAdapter : usa
+
+    BybitAdapter --|> AbstractExchange : implementa
+```
+
+### 4. Modelo de Entidades de Dominio (Estructuras de Datos)
+
+Estas son las **estructuras de datos centrales** que representan los conceptos de negocio del bot. La lógica de la aplicación opera sobre estas entidades, que se mantienen desacopladas de cualquier detalle de implementación externa.
+
+*   **`Operacion`**: Representa una estrategia completa para un lado del mercado (LONG o SHORT). Contiene toda la configuración de la estrategia y la lista de sus posiciones.
+*   **`LogicalPosition`**: Representa un "lote" de capital individual que puede ser invertido. Es la unidad atómica de trading que el `PositionManager` gestiona.
+
+```mermaid
+classDiagram
+    class Operacion {
+        +id : str
+        +estado : str
+        +apalancamiento : float
+        +averaging_distance_pct : float
+        +roi_sl : dict
+        +posiciones : List<LogicalPosition>
+    }
+
+    class LogicalPosition {
+        +id : str
+        +estado : str ('PENDIENTE', 'ABIERTA')
+        +capital_asignado : float
+        +entry_price : float
+        +size_contracts : float
+        +stop_loss_price : float
+    }
+
+    Operacion "1" *-- "0..*" LogicalPosition : contiene
+```
 
 ## 🚀 Puesta en Marcha
 
