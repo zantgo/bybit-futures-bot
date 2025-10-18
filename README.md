@@ -1,4 +1,4 @@
-# Bybit Futures Trading Bot 
+# Bybit Futures Bot 
 
 ![Demostración del proyecto](./assets/demo.gif)
 
