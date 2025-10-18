@@ -31,228 +31,46 @@ Un bot de trading algorítmico para Bybit construido en Python, enfocado en una 
     *   **Patrón Adaptador (Adapter):** La capa `core/exchange` que desacopla el bot de la implementación específica de Bybit.
     *   **Separación de Responsabilidades (SoC):** Cada clase y módulo tiene un propósito bien definido (ej. `PositionExecutor` solo ejecuta, `_calculator` solo calcula).
 
-
-## 📐 Arquitectura, Flujo y Modelos de Datos
-
-Esta sección ofrece una inmersión profunda en el diseño de software y los modelos de datos que constituyen el núcleo del bot. Los diagramas a continuación no son meras ilustraciones; son una representación precisa de los principios de **Arquitectura Limpia**, **Separación de Responsabilidades (SoC)** y **Diseño Modular** que han guiado la construcción de este sistema. El objetivo es demostrar no solo una aplicación funcional, sino una base de código robusta, mantenible y profesional.
-
-### 1. Arquitectura de Capas de Alto Nivel
-
-Este diagrama ilustra la estructura de capas del bot, un pilar de la Arquitectura Limpia. El flujo de dependencias es estrictamente unidireccional (de arriba hacia abajo), apuntando siempre hacia la lógica de negocio central. Este diseño garantiza que las capas externas (como la Interfaz de Usuario o la comunicación con el exchange) puedan ser modificadas o reemplazadas sin afectar el núcleo de la estrategia.
-
-*   **Capa de Presentación:** La TUI, responsable únicamente de la interacción con el usuario. Delega todas las acciones a la capa de control.
-*   **Capa de Control de Aplicación:** Los "directores de orquesta" (`BotController`, `SessionManager`) que gestionan el ciclo de vida de la aplicación y las sesiones de trading.
-*   **Capa de Lógica de Negocio:** El cerebro del bot, donde residen las reglas de la estrategia, la gestión de operaciones (`OperationManager`) y la ejecución de posiciones (`PositionManager`).
-*   **Capa de Abstracción del Exchange:** El `BybitAdapter`, que actúa como un traductor (Patrón Adaptador), desacoplando la lógica de negocio de los detalles de implementación de la API de Bybit.
-*   **Capa de Infraestructura:** La capa más externa, responsable de la comunicación real con el exchange y la gestión de credenciales.
+## 📐 Diagrama de Arquitectura (Simplificado)
 
 ```mermaid
 graph TD
     subgraph "Capa de Presentación"
-        TUI["💻 Interfaz de Usuario en Terminal (core/menu)"]
+        TUI["💻 Interfaz de Usuario en Terminal (TUI)"]
     end
 
     subgraph "Capa de Control de Aplicación"
-        BotController["🤖 BotController (Gestor de Aplicación)"]
-        SessionManager["📈 SessionManager (Gestor de Sesión de Trading)"]
+        BotController["🤖 BotController (Gestor Principal)"]
+        SessionManager["📈 SessionManager (Gestor de Sesión)"]
     end
 
     subgraph "Capa de Lógica de Negocio (Estrategia)"
-        OM["🧠 OperationManager (Gestiona Estrategias LONG/SHORT)"]
-        PM["📊 PositionManager (Gestiona Posiciones Individuales)"]
-        EventProcessor["🔄 EventProcessor (Orquestador de Ticks)"]
-        TA_Signal["🔬 TAManager & SignalGenerator"]
+        OM["🧠 OperationManager (OM)"]
+        PM["📊 PositionManager (PM)"]
+        TA_Signal["🔬 TA Manager & Signal Generator"]
     end
 
     subgraph "Capa de Abstracción del Exchange"
         style Adapter fill:#f9f,stroke:#333,stroke-width:2px
-        Adapter["🔌 BybitAdapter (Traductor a Lenguaje Genérico)"]
+        Adapter["🔌 BybitAdapter (Traductor)"]
     end
 
     subgraph "Capa de Infraestructura"
         API["📡 core/api & ConnectionManager"]
-        Pybit["🏦 Librería Externa (pybit)"]
+        Bybit["🏦 Exchange (Bybit API)"]
     end
 
-    %% --- Flujo de Control y Dependencias ---
-    TUI -- "1. Acciones del Usuario" --> BotController
-    BotController -- "2. Crea Sesión" --> SessionManager
-    SessionManager -- "3. Inicia Ticker y Orquesta" --> EventProcessor
-    EventProcessor -- "4. Procesa tick, llama a TA/Signal" --> TA_Signal
-    EventProcessor -- "5. Notifica señal y precio" --> PM
-    OM -- "Define el estado de la Estrategia" --> PM
+    %% --- Conexiones entre capas ---
+    TUI -- "Acciones del Usuario" --> BotController
+    BotController -- "Crea/Inicia Sesión" --> SessionManager
+    SessionManager -- "Orquesta Eventos de Precio" --> TA_Signal
+    SessionManager -- "Pasa Señales y Ticks" --> PM
+    OM -- "Define Estrategia" --> PM
     TA_Signal -- "Genera Señal (BUY/SELL)" --> PM
-    PM -- "Decide Abrir/Cerrar y ordena a" --> Adapter
-    Adapter -- "Traduce y utiliza" --> API
-    API -- "Construye y envía petición" --> Pybit
+    PM -- "Ejecuta Orden (Abrir/Cerrar)" --> Adapter
+    Adapter -- "Traduce a llamada API" --> API
+    API -- "Comunica con" --> Bybit
 ```
-
-### 2. Flujo de Datos: El Ciclo de Vida de un Tick de Precio
-
-Este diagrama de secuencia ilustra el comportamiento dinámico del sistema en tiempo real. Muestra, paso a paso, cómo un simple evento de precio fluye a través de las capas para ser analizado y, potencialmente, desencadenar una acción de trading. Este flujo demuestra la orquestación y la colaboración entre los componentes clave.
-
-1.  El `Ticker` obtiene el precio y lo envía al `SessionManager`.
-2.  El `SessionManager` delega el evento al `EventProcessor`, el orquestador central de la lógica de tick.
-3.  El `EventProcessor` realiza el "Heartbeat de Seguridad", pidiendo al `PositionManager` que verifique la existencia de posiciones en el exchange.
-4.  Luego, pasa el precio al `TAManager` para el cálculo de indicadores.
-5.  Los indicadores actualizados son enviados al `SignalGenerator` para evaluar las reglas de la estrategia.
-6.  La señal resultante (`BUY`/`SELL`/`HOLD`) es enviada al `PositionManager` para que evalúe si debe actuar.
-7.  Si se cumplen todas las condiciones (operación activa, distancia de promediación, etc.), el `PositionManager` ordena la ejecución a través del `ExchangeAdapter`.
-
-```mermaid
-sequenceDiagram
-    participant Ticker
-    participant SessionManager as SM
-    participant EventProcessor as EP
-    participant PositionManager as PM
-    participant TAManager as TA
-    participant SignalGenerator as Signal
-    participant ExchangeAdapter as Adapter
-
-    loop Cada 'N' segundos
-        Ticker->>SM: 1. Nuevo Precio Obtenido
-        SM->>EP: 2. Procesa Evento de Precio
-        
-        EP->>PM: 3. Heartbeat: sync_physical_positions()
-        
-        EP->>TA: 4. process_raw_price_event()
-        TA-->>EP: 5. Devuelve Indicadores (EMA, etc.)
-        
-        EP->>Signal: 6. generate_signal()
-        Signal-->>EP: 7. Devuelve Señal (BUY/SELL/HOLD)
-        
-        EP->>PM: 8. handle_low_level_signal()
-        
-        alt Señal es BUY y PM valida condiciones
-            PM->>Adapter: 9. place_order(StandardOrder)
-            Adapter-->>PM: 10. Respuesta de la API
-        end
-    end
-```
-
-### 3. Diagrama de Clases: Relaciones entre Componentes Clave
-
-Este diagrama de clases UML modela las relaciones estructurales entre los principales gestores y componentes del sistema. Ilustra la **Inyección de Dependencias** y la composición que definen la arquitectura.
-
-*   **Composición (`*--`):** Muestra relaciones de propiedad fuerte. Por ejemplo, el `BotController` **crea y posee** una instancia de `SessionManager`. A su vez, el `SessionManager` **posee** al `Ticker` y al `EventProcessor`.
-*   **Agregación (`o--`):** Muestra relaciones de "tiene un". El `SessionManager` **tiene acceso a** `OperationManager` y `PositionManager`, pero no es su propietario exclusivo.
-*   **Dependencia (`..>`):** Muestra relaciones de "utiliza un". El `PositionManager` **utiliza** al `OperationManager` para consultar el estado de la estrategia y al `BybitAdapter` para ejecutar órdenes.
-
-```mermaid
-classDiagram
-    class BotController {
-        <<Manager Principal>>
-        -dependencies: Dict
-        +create_session(): SessionManager
-        +initialize_connections()
-    }
-    class SessionManager {
-        <<Gestor de Sesión>>
-        -ticker: Ticker
-        -eventProcessor: EventProcessor
-        -pm: PositionManager
-        -om: OperationManager
-        +start()
-        +stop()
-        +update_session_parameters()
-    }
-    class OperationManager {
-        <<Gestor de Estrategia>>
-        -long_operation: Operacion
-        -short_operation: Operacion
-        +get_operation_by_side(): Operacion
-        +pausar_operacion()
-        +detener_operacion()
-    }
-    class PositionManager {
-        <<Gestor de Posiciones>>
-        -executor: PositionExecutor
-        -om_api: OperationManagerAPI
-        +handle_low_level_signal()
-        +check_and_close_positions()
-        +manual_open_next_pending_position()
-    }
-    class EventProcessor {
-        <<Orquestador de Ticks>>
-        -taManager: TAManager
-        -signalGenerator: SignalGenerator
-        +process_event()
-    }
-    class Ticker {
-        <<Infraestructura>>
-        -thread: Thread
-        +start()
-    }
-    class BybitAdapter {
-        <<Adaptador>>
-        +place_order(StandardOrder)
-        +get_positions(): List~StandardPosition~
-    }
-    class Operacion {
-        <<Entidad de Dominio>>
-    }
-
-    BotController "1" *-- "1" SessionManager : crea
-    SessionManager "1" *-- "1" Ticker : contiene
-    SessionManager "1" *-- "1" EventProcessor : contiene
-    SessionManager "1" o-- "1" OperationManager : utiliza
-    SessionManager "1" o-- "1" PositionManager : utiliza
-    
-    EventProcessor ..> TAManager : depende de
-    EventProcessor ..> SignalGenerator : depende de
-    
-    PositionManager ..> OperationManager : consulta estado vía API
-    PositionManager ..> BybitAdapter : ejecuta a través de
-
-    OperationManager "1" *-- "2" Operacion : gestiona
-```
-
-### 4. Modelo de Entidades de Dominio (ERD)
-
-Este diagrama se centra exclusivamente en las **estructuras de datos** que definen la lógica de negocio del bot, ubicadas en `core/strategy/entities`. Muestra cómo se modela una estrategia de trading.
-
-*   **`SessionManager`:** Aunque es un gestor de procesos, actúa como el **contenedor de contexto** para las dos operaciones principales de una sesión de trading. No es una entidad de datos persistente, sino el orquestador en tiempo de ejecución.
-*   **`Operacion`:** Es la entidad central que representa una **estrategia completa y configurable** para un lado del mercado (ej. la estrategia de promediación en LONG). Contiene todos los parámetros de alto nivel, los límites de riesgo de la operación y el estado general (`ACTIVA`, `PAUSADA`, etc.).
-*   **`LogicalPosition`:** Representa una **unidad individual de capital y riesgo**. Es el "lote" que se abre y se cierra en el mercado. Tiene su propio estado (`PENDIENTE`, `ABIERTA`), precio de entrada, y parámetros de riesgo individuales como el Stop Loss.
-
-La relación clave es que una `SessionManager` gestiona dos `Operacion`es, y cada `Operacion` a su vez contiene una o más `LogicalPosition`. Esta estructura es la que permite la implementación de estrategias complejas como la promediación de costos.
-
-```mermaid
-classDiagram
-    direction LR
-    
-    class SessionManager {
-        <<Gestor de Sesión>>
-        +session_start_time: datetime
-        +is_running: bool
-    }
-
-    class Operacion {
-        <<Entidad de Estrategia>>
-        +id: str
-        +estado: str {"ACTIVA", "PAUSADA", "DETENIDA"}
-        +tendencia: str {"LONG_ONLY", "SHORT_ONLY"}
-        +apalancamiento: float
-        +pnl_realizado_usdt: float
-        +capital_inicial_usdt: float
-        +roi_sl: Dict
-        +roi_tp: Dict
-        +...
-    }
-    class LogicalPosition {
-        <<Entidad de Posición>>
-        +id: str
-        +estado: str {"PENDIENTE", "ABIERTA"}
-        +capital_asignado: float
-        +entry_price: float
-        +size_contracts: float
-        +stop_loss_price: float
-        +ts_is_active: bool
-        +...
-    }
-    
-    SessionManager "1" *-- "2" Operacion : gestiona
-    Operacion "1" *-- "1..*" LogicalPosition : contiene```
 ## 🚀 Puesta en Marcha
 
 Sigue estos pasos para configurar y ejecutar el bot en tu máquina local.
