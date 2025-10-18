@@ -51,7 +51,7 @@ graph TD
     end
 
     subgraph "Capa de Abstracción del Exchange"
-        style Adapter fill:#f99,stroke:#333,stroke-width:2px
+        style Adapter fill:#999,stroke:#333,stroke-width:2px
         Adapter["🔌 BybitAdapter (Traductor)"]
     end
 
