@@ -1,110 +1,120 @@
-# Bybit Futures Bot - Versión 60+ (Modelo de Hitos y Tendencias)
+# Python Trading Bot - Arquitectura de Software Avanzada
 
-Este es un bot de trading algorítmico avanzado para futuros de Bybit, diseñado con una arquitectura modular y una potente interfaz de usuario en la terminal (TUI) para un control total en tiempo real.
+![GIF de la TUI en acción] <!-- ¡IMPORTANTE! Graba un GIF de tu bot funcionando y ponlo aquí. Es lo más impactante. -->
 
-El bot opera bajo un modelo estratégico jerárquico:
--   **Sesión:** El ciclo de vida completo de una ejecución, con disyuntores de seguridad globales.
--   **Hitos (Milestones):** Reglas condicionales ("SI el precio cruza X...") que activan modos operativos.
--   **Tendencias (Trends):** Modos operativos con reglas específicas de riesgo y finalización que se ejecutan cuando un hito se activa.
+Un bot de trading algorítmico para Bybit construido en Python, enfocado en una **arquitectura modular, escalable y robusta**. Este proyecto es una demostración práctica de principios de diseño de software como la Inyección de Dependencias, el Patrón Adaptador y la Separación de Responsabilidades, todo controlado a través de una completa Interfaz de Usuario en Terminal (TUI).
 
----
-
-## !! Advertencia de Seguridad y Riesgo !!
-
-**EL TRADING DE FUTUROS CON APALANCAMIENTO ES EXTREMADAMENTE RIESGOSO Y PUEDE RESULTAR EN LA PÉRDIDA TOTAL DE SU CAPITAL.**
-
--   Este software se proporciona "tal cual", sin ninguna garantía.
--   El autor no se hace responsable de ninguna pérdida financiera.
--   **NUNCA** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET** (`UNIVERSAL_TESTNET_MODE = True` en `config.py`).
--   Comprenda completamente el código y los riesgos antes de depositar fondos reales.
+> ### **Advertencia de Seguridad y Riesgo**
+> **EL TRADING DE FUTUROS CON APALANCAMIENTO ES EXTREMADAMENTE RIESGOSO Y PUEDE RESULTAR EN LA PÉRDIDA TOTAL DE SU CAPITAL.**
+> Este software se proporciona "tal cual", sin ninguna garantía. El autor no se hace responsable de ninguna pérdida financiera. **Nunca** ejecute este bot en una cuenta real sin haberlo probado extensivamente en **TESTNET**.
 
 ---
 
-## !!! IMPORTANTE: Checklist Antes de Cada Ejecución !!!
+## ✨ Características Clave
 
-**SIEMPRE VERIFICA QUE TU CONFIGURACIÓN LOCAL COINCIDA CON LA DE LA PLATAFORMA DE BYBIT.**
+*   **Interfaz de Usuario en Terminal (TUI):** Menús interactivos construidos con `simple-term-menu` para controlar el bot en tiempo real, configurar estrategias, monitorear el rendimiento y visualizar logs.
+*   **Arquitectura en Capas Limpia:** Clara separación entre la capa de Presentación (TUI), la Lógica de Negocio (Estrategia) y el Acceso a Datos (API), facilitando el mantenimiento y la escalabilidad.
+*   **Gestión de Estrategia Modular:** Permite configurar y ejecutar estrategias complejas (ej. promediación de costos) con múltiples posiciones lógicas, límites de riesgo (SL/TP/TSL) y condiciones de entrada/salida personalizables.
+*   **Abstracción del Exchange (Patrón Adaptador):** Diseñado con una interfaz (`AbstractExchange`) que independiza la lógica del bot del exchange. La implementación actual para Bybit (`BybitAdapter`) podría ser reemplazada o extendida para otros exchanges con un esfuerzo mínimo.
+*   **Manejo de Cuentas Múltiples:** Orquesta operaciones y transferencias entre subcuentas dedicadas (main, longs, shorts, profit) para un aislamiento de riesgo y una gestión de capital superior.
+*   **Configuración en Caliente ("Hot Reload"):** Permite ajustar parámetros críticos de la estrategia (indicadores de TA, configuración de riesgo) durante una sesión de trading activa, sin necesidad de reiniciar el bot.
+*   **Logging Asíncrono y Detallado:** Registra señales, posiciones cerradas e instantáneas de sesión en archivos `.jsonl` para un análisis y auditoría posterior, sin bloquear el hilo principal.
 
--   **HEDGE MODE:** El bot está diseñado para operar exclusivamente en **Modo Hedge**. Asegúrate de que esta opción esté activada en Bybit para el par que vas a operar.
-    -   *Cómo verificar:* En la interfaz de trading de Bybit, busca el icono de configuración (engranaje) y en "Preferencias de Trading" -> "Modo de Posición", selecciona "Modo Hedge".
+## 🛠️ Stack Tecnológico y Principios de Diseño
 
--   **APALANCAMIENTO:** El valor de `POSITION_LEVERAGE` en tu archivo `config.py` debe ser **exactamente el mismo** que tienes configurado en la interfaz de Bybit para los lados Long y Short de ese símbolo.
+*   **Lenguaje:** Python 3.10+
+*   **Librerías Principales:** `pybit`, `pandas`, `numpy`, `simple-term-menu`, `python-dotenv`
+*   **Principios de Diseño Aplicados:**
+    *   **Arquitectura Limpia (Clean Architecture):** Flujo de dependencias claro hacia el núcleo del negocio.
+    *   **Inyección de Dependencias (DI):** Las clases reciben sus dependencias en lugar de crearlas, lo que facilita las pruebas y la modularidad.
+    *   **Patrón Fachada (Facade):** Módulos `_api.py` que exponen una interfaz simple para subsistemas complejos (PM, OM, SM).
+    *   **Patrón Adaptador (Adapter):** La capa `core/exchange` que desacopla el bot de la implementación específica de Bybit.
+    *   **Separación de Responsabilidades (SoC):** Cada clase y módulo tiene un propósito bien definido (ej. `PositionExecutor` solo ejecuta, `_calculator` solo calcula).
 
--   **SÍMBOLO:** Confirma que el `TICKER_SYMBOL` en `config.py` (o el que selecciones en la TUI) es el par correcto que deseas operar.
+## 📐 Diagrama de Arquitectura (Simplificado)
 
--   **CAPITAL:** Asegúrate de que haya suficiente balance (USDT) en las subcuentas de `longs` y `shorts` para cubrir las operaciones que el bot pueda abrir.
+![Diagrama de Arquitectura] <!-- ¡MUY RECOMENDADO! Crea una imagen simple (con draw.io o similar) que muestre las capas: TUI -> BotController -> SessionManager -> (OM/PM) -> Adapter -> API -->
 
 ---
 
-## 1. Configuración Inicial (Solo una vez)
+## 🚀 Puesta en Marcha
 
-### 1.1. Prerrequisitos
+Sigue estos pasos para configurar y ejecutar el bot en tu máquina local.
+
+### 1. Prerrequisitos
 -   Python 3.10 o superior.
 -   Una cuenta en [Bybit](https://www.bybit.com/).
 
-### 1.2. Pasos de Instalación
-1.  **Clona el repositorio:**
+### 2. Instalación
+1.  **Clonar el repositorio:**
     ```bash
-    git clone <URL_DEL_REPOSITORIO>
-    cd <NOMBRE_DEL_DIRECTORIO>
+    git clone https://github.com/zantgo/bybit-futures-bot-67.git
+    cd tu-repositorio
     ```
-2.  **Crea y activa un entorno virtual:**
+
+2.  **Crear y activar un entorno virtual:**
     ```bash
     python -m venv venv
-    source venv/bin/activate  # En macOS/Linux
-    # .\venv\Scripts\Activate.ps1 # En Windows PowerShell
+    # En Windows:
+    .\venv\Scripts\activate
+    # En macOS/Linux:
+    source venv/bin/activate
     ```
-3.  **Instala las dependencias:**
+
+3.  **Instalar las dependencias:**
     ```bash
     pip install -r requirements.txt
     ```
 
-### 1.3. Configuración de Cuentas y API en Bybit
-El bot está diseñado para operar con subcuentas para un aislamiento de riesgo superior.
+### 3. Configuración en Bybit y `.env`
 
-1.  **Crea Subcuentas en Bybit:** En tu panel de Bybit, ve a "Subcuentas" y crea tres subcuentas de tipo "Cuenta de Trading Unificado". Dales nombres descriptivos como:
-    *   `longs`
-    *   `shorts`
-    *   `profit` (para acumular ganancias)
-2.  **Genera Claves API:**
-    *   **Cuenta Principal:** Crea una clave API con permisos de **"Leer/Escribir"** para **Activos -> Transferencia**. Esta clave es **esencial** para mover las ganancias a la subcuenta de `profit`.
-    *   **Subcuentas (`longs`, `shorts`, `profit`):** Para cada una, crea una clave API con permisos de **"Leer/Escribir"** para **Contrato -> Trading Unificado**.
-3.  **Obtén los UIDs:** En la sección de "Gestión de Subcuentas", anota el UID de cada una de tus subcuentas.
+El bot utiliza subcuentas para una gestión de riesgo aislada.
 
-### 1.4. Configuración del Archivo `.env`
-1.  En la raíz del proyecto, crea un archivo llamado `.env`.
-2.  Copia, pega y rellena el siguiente contenido con tus claves y UIDs:
+1.  **Crea Subcuentas en Bybit:**
+    *   En tu panel de Bybit, ve a "Subcuentas" y crea tres subcuentas de tipo **"Cuenta de Trading Unificado"**. Nómbralas `longs`, `shorts`, y `profit`.
+    *   Anota el **UID** de cada una de estas subcuentas.
 
-    ```dotenv
-    # --- UIDs (Encuéntralos en la sección de Subcuentas de Bybit) ---
-    BYBIT_LONGS_UID=1234567
-    BYBIT_SHORTS_UID=2345678
-    BYBIT_PROFIT_UID=3456789
+2.  **Genera las Claves API:**
+    *   **Cuenta Principal:** Crea una clave API con permisos **Leer/Escribir** para **Activos -> Transferencia**.
+    *   **Subcuentas (`longs`, `shorts`, `profit`):** Para cada una, crea una clave API con permisos **Leer/Escribir** para **Contrato -> Trading Unificado**.
 
-    # --- Claves Cuenta Principal (SOLO para transferencias) ---
-    BYBIT_MAIN_API_KEY="YOUR_MAIN_API_KEY"
-    BYBIT_MAIN_API_SECRET="YOUR_MAIN_API_SECRET"
+3.  **Configura el archivo `.env`:**
+    *   Crea una copia del archivo de ejemplo: `cp .env.example .env` (o `copy .env.example .env` en Windows).
+    *   Abre el archivo `.env` y rellena **todas** las variables con tus claves API y UIDs.
 
-    # --- Claves Subcuenta Futuros Long ---
-    BYBIT_LONGS_API_KEY="YOUR_LONGS_API_KEY"
-    BYBIT_LONGS_API_SECRET="YOUR_LONGS_API_SECRET"
+4.  **Deposita Fondos:**
+    *   Transfiere fondos (USDT) desde tu cuenta principal a las subcuentas `longs` y `shorts` para que el bot pueda operar.
 
-    # --- Claves Subcuenta Futuros Short ---
-    BYBIT_SHORTS_API_KEY="YOUR_SHORTS_API_KEY"
-    BYBIT_SHORTS_API_SECRET="YOUR_SHORTS_API_SECRET"
+### 4. Checklist Final y Ejecución
 
-    # --- Claves Subcuenta Ganancias (para obtener el ticker) ---
-    BYBIT_PROFIT_API_KEY="YOUR_PROFIT_API_KEY"
-    BYBIT_PROFIT_API_SECRET="YOUR_PROFIT_API_SECRET"
-    ```
+**¡IMPORTANTE!** Antes de cada ejecución, asegúrate de que tu configuración en Bybit coincide con la del bot.
 
-### 1.5. Deposita Fondos
-Desde tu Cuenta Principal en Bybit, transfiere los fondos (USDT) que deseas operar a tus subcuentas `longs` y `shorts`.
+*   ✅ **Modo Hedge:** El bot **requiere** que el Modo Hedge esté activado para el par que vas a operar en la plataforma de Bybit.
 
-## 1.6. Archivos de Log
+**Para ejecutar el bot:**
+```bash
+python main.py
+```
 
-El bot genera varios archivos en la carpeta `logs/` para auditoría y análisis:
--   `signals_log.jsonl`: Un registro de cada señal de trading generada.
--   `closed_positions.jsonl`: Un registro detallado de cada posición que se ha cerrado, incluyendo PNL.
--   `open_positions_snapshot.jsonl`: Una instantánea de las posiciones que quedaron abiertas al cerrar el bot.
+## 📂 Estructura del Proyecto
 
-Estos archivos están limitados a las últimas 1000 entradas para evitar consumir espacio en disco excesivo.
+```
+/
+├── core/                # Lógica central del bot
+│   ├── api/             # Comunicación de bajo nivel con el exchange
+│   ├── bot_controller/  # Orquestador principal de la aplicación
+│   ├── exchange/        # Capa de abstracción del exchange (Adapter)
+│   ├── logging/         # Módulos de logging
+│   ├── menu/            # Toda la lógica de la Interfaz de Usuario (TUI)
+│   └── strategy/        # El corazón de la lógica de trading (SM, OM, PM, TA, Signal)
+├── connection/          # Gestión de conexiones y el Ticker de precios
+├── runner/              # Ensamblador de dependencias y lógica de apagado
+├── config.py            # Archivo principal de configuración de la estrategia
+├── main.py              # Punto de entrada de la aplicación
+├── requirements.txt     # Dependencias del proyecto
+└── .env.example         # Plantilla para las variables de entorno
+```
+
+## 📄 Licencia
+
+Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para más detalles.
