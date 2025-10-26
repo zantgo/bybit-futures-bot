@@ -70,16 +70,16 @@ SESSION_CONFIG = {
     # Parámetros de Generación de Señales
     "SIGNAL": {
         "ENABLED": True, 
-        "PRICE_CHANGE_BUY_PERCENTAGE": -0.2,
-        "PRICE_CHANGE_SELL_PERCENTAGE": 0.2,
-        "WEIGHTED_DECREMENT_THRESHOLD": 0.4,
-        "WEIGHTED_INCREMENT_THRESHOLD": 0.4,
+        "PRICE_CHANGE_BUY_PERCENTAGE": -0.05,
+        "PRICE_CHANGE_SELL_PERCENTAGE": 0.05,
+        "WEIGHTED_DECREMENT_THRESHOLD": 0.25,
+        "WEIGHTED_INCREMENT_THRESHOLD": 0.25,
     },
 
     # Parámetros de Ganancias
     "PROFIT": {
         "COMMISSION_RATE": 0.001,
-        "REINVEST_PROFIT_PCT": 10.0,
+        "REINVEST_PROFIT_PCT": 1.0,
         "MIN_TRANSFER_AMOUNT_USDT": 0.001, 
         "SLIPPAGE_PCT": 0.0005, 
     },
@@ -88,7 +88,7 @@ SESSION_CONFIG = {
     # Parámetros de Riesgo de la Sesión
     "RISK": {
         "MAINTENANCE_MARGIN_RATE": 0.005,
-        "MAX_SYNC_FAILURES": 100,
+        "MAX_SYNC_FAILURES": 10000,
     },
     # --- FIN DE LA MODIFICACIÓN ---
 }
@@ -99,9 +99,9 @@ SESSION_CONFIG = {
 
 OPERATION_DEFAULTS = {
     "CAPITAL": {
-        "BASE_SIZE_USDT": 1.0,
-        "MAX_POSITIONS": 10,
-        "LEVERAGE": 10.0,
+        "BASE_SIZE_USDT": 100.0,
+        "MAX_POSITIONS": 100,
+        "LEVERAGE": 4.0,
     },
     "RISK": {
         "INDIVIDUAL_SL": {
