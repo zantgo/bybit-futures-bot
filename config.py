@@ -105,7 +105,7 @@ OPERATION_DEFAULTS = {
     },
     "RISK": {
         "INDIVIDUAL_SL": {
-            "ENABLED": True, 
+            "ENABLED": False, 
             "PERCENTAGE": 50.0, 
         },
         "INDIVIDUAL_TSL": {
