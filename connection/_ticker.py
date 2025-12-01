@@ -1,5 +1,4 @@
-# Reemplaza el archivo completo: connection/_ticker.py
-# O simplemente añade la nueva función y modifica la existente.
+#connection/_ticker.py
 
 import threading
 import time
@@ -78,16 +77,6 @@ class Ticker:
         self._thread.name = "PriceTickerThread"
         self._thread.start()
         self._memory_logger.log("Ticker: Hilo iniciado.", level="INFO")
-
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # def stop(self):
-    #     if self._thread and self._thread.is_alive():
-    #         self._memory_logger.log("Ticker: Solicitando parada...", level="INFO")
-    #         self._stop_event.set()
-    #         self._thread.join(timeout=5)
-    #         if self._thread.is_alive():
-    #             self._memory_logger.log("WARN [Ticker]: El hilo no terminó de forma limpia.", level="WARN")
-    #     self._thread = None
     
     def signal_stop(self):
         """Solamente establece el evento de parada para que el hilo termine su bucle."""
@@ -103,7 +92,6 @@ class Ticker:
                 self._memory_logger.log("WARN [Ticker]: El hilo no terminó de forma limpia.", level="WARN")
         
         self._thread = None
-    # --- FIN DE LA MODIFICACIÓN ---
 
     def run_simulation_tick(self, new_price: float):
         if not callable(self._raw_event_callback):
