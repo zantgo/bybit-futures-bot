@@ -66,9 +66,7 @@ def calculate_all_indicators(raw_df: pd.DataFrame) -> Dict[str, any]:
     if raw_df.empty or len(raw_df) < 2:
         return latest_indicators
 
-    # --- INICIO DE LA CORRECCIÓN ---
     ta_config = config.SESSION_CONFIG["TA"]
-    # --- FIN DE LA CORRECCIÓN ---
 
     # --- 1. Cálculo de la EMA (Exponential Moving Average) ---
     ema_window = ta_config["EMA_WINDOW"]
