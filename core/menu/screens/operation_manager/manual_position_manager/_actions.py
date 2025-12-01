@@ -98,8 +98,6 @@ def _close_last_open(side: str):
             print(f"\n\033[91mFALLO:\033[0m {msg}")
         press_enter_to_continue()
 
-
-# --- INICIO DE LA MODIFICACIÓN: Nueva función añadida ---
 def _close_first_open(side: str):
     """
     Ejecuta la lógica para cerrar manualmente la primera posición abierta.
@@ -139,8 +137,6 @@ def _close_first_open(side: str):
         else:
             print(f"\n\033[91mFALLO:\033[0m {msg}")
         press_enter_to_continue()
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 def _panic_close_all(side: str):
     """
