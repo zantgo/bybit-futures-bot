@@ -11,10 +11,8 @@ from typing import Optional, Union
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 
 # --- Dependencias del Proyecto ---
-# Estas importaciones acceden a módulos que ya están en el sys.path
 import config
 from core.logging import memory_logger
-# Importamos los módulos "primos" en lugar de la fachada `api` completa
 from .._market_data import get_instrument_info
 from .._helpers import _get_qty_precision_from_step
 
