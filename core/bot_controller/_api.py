@@ -14,14 +14,11 @@ se mantenga estable.
 from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
 
 # --- Dependencias de Tipado ---
-# Usamos TYPE_CHECKING para evitar importaciones circulares en tiempo de ejecución,
-# pero permitiendo que los analizadores de código estático entiendan los tipos.
 if TYPE_CHECKING:
     from ._manager import BotController
     from core.strategy.sm._manager import SessionManager
 
 # --- Instancia Global del Módulo (Privada) ---
-# Esta variable contendrá la única instancia del BotController para toda la sesión.
 _bc_instance: Optional['BotController'] = None
 
 
@@ -33,13 +30,6 @@ def init_bc_api(instance: 'BotController'):
     """
     global _bc_instance
     _bc_instance = instance
-
-
-# ==============================================================================
-# --- FUNCIONES PROXY (DELEGADAS) ---
-# Cada función pública aquí simplemente comprueba que la instancia del
-# BotController exista y luego delega la llamada al método correspondiente.
-# ==============================================================================
 
 def initialize_connections() -> Tuple[bool, str]:
     """
@@ -74,7 +64,6 @@ def get_general_config() -> Dict[str, Any]:
         return {"Error": "BotController no instanciado."}
     return _bc_instance.get_general_config()
 
-
 def update_general_config(params: Dict[str, Any]) -> bool:
     """
 
@@ -84,7 +73,6 @@ def update_general_config(params: Dict[str, Any]) -> bool:
         return False
     return _bc_instance.update_general_config(params)
 
-
 def shutdown_bot():
     """
     Delega la llamada para ejecutar la secuencia de apagado de la aplicación.
@@ -92,9 +80,6 @@ def shutdown_bot():
     if _bc_instance:
         _bc_instance.shutdown_bot()
 
-        # ... (código existente) ...
-
-# AÑADIR ESTA NUEVA FUNCIÓN AL FINAL DEL ARCHIVO
 def validate_and_update_ticker_symbol(new_symbol: str) -> Tuple[bool, str]:
     """
     Delega la llamada para validar y actualizar el símbolo del ticker global.
