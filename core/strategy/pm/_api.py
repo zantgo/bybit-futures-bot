@@ -15,12 +15,9 @@ if TYPE_CHECKING:
     from .manager import PositionManager
     from core.strategy.entities import Operacion, LogicalPosition
 
-# --- Módulos API de Dependencia ---
-# El PM API ahora necesita conocer al SM API para obtener el precio
 from core.strategy.sm import api as sm_api
 
 _pm_instance: Optional['PositionManager'] = None
-
 
 def init_pm_api(instance: 'PositionManager'):
     """Inicializa esta fachada API inyectando la instancia principal del PositionManager."""
@@ -66,7 +63,6 @@ def get_current_market_price() -> Optional[float]:
     Obtiene el precio de mercado más reciente conocido por la sesión.
     Delega la llamada a la API del SessionManager, que es el propietario del Ticker.
     """
-    # La llamada ya no va al _pm_instance
     return sm_api.get_session_summary().get('current_market_price')
 
 def sync_physical_positions(side: str):
@@ -77,7 +73,6 @@ def sync_physical_positions(side: str):
     if _pm_instance:
         _pm_instance.sync_physical_positions(side)
         
-
 def manual_open_next_pending_position(side: str) -> Tuple[bool, str]:
     """
     Delega la llamada para abrir manualmente la siguiente posición pendiente.
@@ -86,8 +81,6 @@ def manual_open_next_pending_position(side: str) -> Tuple[bool, str]:
         return False, "PM no instanciado"
     return _pm_instance.manual_open_next_pending_position(side)
 
-
-# --- AÑADE ESTA FUNCIÓN en core/strategy/pm/_api.py ---
 def update_max_sync_failures(new_value: int):
     """Delega la actualización del umbral de reintentos de sincronización."""
     if _pm_instance:
