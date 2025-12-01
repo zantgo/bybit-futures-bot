@@ -20,20 +20,16 @@ import shutil
 import re
 import time
 
-# --- Estilo Visual Consistente para simple-term-menu ---
+# --- Estilo Visual ---
 MENU_STYLE = {
     "menu_cursor": "> ",
     "menu_cursor_style": ("fg_yellow", "bold"),
     "menu_highlight_style": ("bg_cyan", "fg_black"),
     "cycle_cursor": True,
-    "clear_screen": False, # Se gestionará manualmente para evitar errores
+    "clear_screen": False,
 }
 
 RESET_COLOR = "\033[0m"
-
-# ==============================================================================
-# --- DICCIONARIO DE AYUDA COMPLETAMENTE ACTUALIZADO ---
-# ==============================================================================
 
 HELP_TEXTS = {
     # --- Pantallas Principales ---
@@ -270,7 +266,6 @@ HELP_TEXTS = {
           símbolo se valida en tiempo real para asegurar que existe.
     """),
     
-# --- INICIO DEL NUEVO TEXTO DE AYUDA ---
     "session_config_editor": textwrap.dedent("""
         AYUDA: EDITOR DE CONFIGURACIÓN DE SESIÓN
 
@@ -312,13 +307,10 @@ HELP_TEXTS = {
         - Tasa Margen Mantenimiento (%): Tasa usada para estimar el precio de
           liquidación. Debe coincidir con la del exchange (ej. 0.5% para BTC en Bybit).
     """),
-    # --- FIN DEL NUEVO TEXTO DE AYUDA ---
 }
 
 def show_help_popup(help_key: str):
     text = HELP_TEXTS.get(help_key, "No hay ayuda disponible para esta sección.")
-    # --- SOLUCIÓN AL ERROR AssertionError ---
-    # La pantalla de ayuda debe limpiar la pantalla para mostrarse correctamente.
     clear_screen()
     print_tui_header(f"Ayuda: {help_key.replace('_', ' ').title()}")
     print(textwrap.dedent(text))
