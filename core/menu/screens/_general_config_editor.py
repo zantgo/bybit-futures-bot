@@ -40,7 +40,6 @@ from .._helpers import (
     UserInputCancelled
 )
 
-# Importamos la API del BotController para poder llamarla
 from core.bot_controller import api as bc_api
 
 # --- Inyección de Dependencias ---
@@ -76,8 +75,8 @@ def _create_config_box_line(content: str, width: int) -> str:
     clean_content = _clean_ansi_codes(content)
     content_len = len(clean_content)
     
-    if content_len > width - 2:  # -2 para los bordes │ │
-        content = _truncate_text(clean_content, width - 5) # -5 para bordes y ...
+    if content_len > width - 2:
+        content = _truncate_text(clean_content, width - 5)
         content_len = len(content)
     
     padding = width - content_len - 2
@@ -94,14 +93,11 @@ def show_general_config_editor_screen(config_module: Any) -> bool:
     
     _show_general_config_menu(config_module)
 
-    # Devolvemos False porque no hay un "guardado" final, los cambios ya están aplicados.
     return False
-
-# Reemplaza la función _show_general_config_menu completa en core/menu/screens/_general_config_editor.py
 
 def _show_general_config_menu(config_module: Any):
     """Muestra el menú interactivo para editar la configuración general."""
-    from .._helpers import show_help_popup # <-- Importación añadida
+    from .._helpers import show_help_popup
 
     while True:
         clear_screen()
@@ -134,18 +130,16 @@ def _show_general_config_menu(config_module: Any):
         
         print("└" + "─" * (box_width - 2) + "┘")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Exchange", 
             "[2] Modo", 
             "[3] Testnet",
             "[4] Símbolo del Ticker",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver al Menú Principal"
         ]
         action_map = {0: 'exchange', 1: 'mode', 2: 'testnet', 3: 'ticker', 5: 'help', 6: 'back'}
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -188,10 +182,8 @@ def _show_general_config_menu(config_module: Any):
                 print(f"\nResultado: {message}")
                 time.sleep(2.5)
             
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif action == 'help':
                 show_help_popup('general_config_editor')
-            # --- FIN DE LA MODIFICACIÓN ---
                 
             elif action == 'back' or action is None:
                 return
