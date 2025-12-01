@@ -1,5 +1,5 @@
 """
-Módulo Generador de Señales (Versión de Clase).
+Módulo Generador de Señales
 
 v3.0 (Recarga en Caliente):
 - Se añade el método `initialize()` y un estado interno `_strategy_is_ready` para
