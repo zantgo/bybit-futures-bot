@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 import threading
 
-# --- Dependencias del Proyecto (inyectadas a través de __init__) ---
+# --- Dependencias del Proyecto ---
 try:
     from core.logging import memory_logger
     from core.strategy._event_processor import EventProcessor
@@ -35,7 +35,6 @@ STRATEGY_AFFECTING_KEYS = {
     'WEIGHTED_INCREMENT_THRESHOLD',
     'ENABLED' 
 }
-
 
 class SessionManager:
     """
@@ -149,9 +148,6 @@ class SessionManager:
             short_op = self._om_api.get_operation_by_side('short')
 
             if long_op and short_op and long_op.estado == 'DETENIDA' and short_op.estado == 'DETENIDA':
-                # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
-                # memory_logger.log("SessionManager: Ambas operaciones están DETENIDAS. Pausando el Ticker automáticamente.", "WARN")
-                # --- FIN DE LA MODIFICACIÓN ---
                 self.stop()
         except Exception as e:
             memory_logger.log(f"SM: Error en _check_and_manage_ticker_state: {e}", "ERROR")
@@ -198,19 +194,12 @@ class SessionManager:
         if not self._is_running:
             return
 
-        # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
-        # memory_logger.log("SessionManager: Deteniendo Ticker de precios...", "INFO")
-        # --- FIN DE LA MODIFICACIÓN ---
-        
         if self._ticker._thread and threading.current_thread() is self._ticker._thread:
             self._ticker.signal_stop()
         else:
             self._ticker.stop()
 
         self._is_running = False
-        # --- INICIO DE LA MODIFICACIÓN: Comentar el log ---
-        # memory_logger.log("SessionManager: Sesión detenida.", "INFO")
-        # --- FIN DE LA MODIFICACIÓN ---
 
     def get_session_summary(self) -> Dict[str, Any]:
         """
@@ -283,8 +272,6 @@ class SessionManager:
             memory_logger.log(traceback.format_exc(), "ERROR")
             return {"error": error_msg}
 
-# --- REEMPLAZA ESTA FUNCIÓN COMPLETA en core/strategy/sm/_manager.py ---
-
     def update_session_parameters(self, params: Dict[str, Any]):
         """
         Actualiza los parámetros, valida cambios críticos como el símbolo del ticker,
@@ -298,12 +285,9 @@ class SessionManager:
             memory_logger.log("SessionManager: No se detectaron cambios en la configuración.", "INFO")
             return
             
-        # --- INICIO DEL NUEVO BLOQUE LÓGICO ---
         if 'MAX_SYNC_FAILURES' in changed_keys:
             new_value = self._config.SESSION_CONFIG["RISK"]["MAX_SYNC_FAILURES"]
-            # Llama a la nueva función de la API del Position Manager
             self._pm_api.update_max_sync_failures(new_value)
-        # --- FIN DEL NUEVO BLOQUE LÓGICO ---
 
         if 'TICKER_SYMBOL' in changed_keys:
             new_symbol = self._config.BOT_CONFIG["TICKER"]["SYMBOL"]
