@@ -24,8 +24,6 @@ class StandardBalance:
     """Balance normalizado de una cuenta."""
     total_equity_usd: float
     available_balance_usd: float
-    # Puedes añadir balances por moneda si es necesario
-    # balances: Dict[str, float] 
 
 @dataclass
 class StandardPosition:
