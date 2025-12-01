@@ -24,14 +24,11 @@ from core.logging import memory_logger
 from . import _credentials
 from . import _client_factory
 
-# --- INICIO DE LA MODIFICACIÓN: Patrón de Instancia Única ---
 _connection_manager_instance: Optional['ConnectionManager'] = None
 
 def get_connection_manager_instance() -> Optional['ConnectionManager']:
     """Devuelve la instancia global única del ConnectionManager."""
     return _connection_manager_instance
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 class ConnectionManager:
     """
@@ -43,13 +40,11 @@ class ConnectionManager:
         """
         Inicializa el ConnectionManager, inyectando sus dependencias.
         """
-        # --- INICIO DE LA MODIFICACIÓN: Registrar la instancia global ---
         global _connection_manager_instance
         if _connection_manager_instance is not None:
             # Esto previene que se creen múltiples instancias, reforzando el patrón
             memory_logger.log("WARN: Se intentó crear una segunda instancia de ConnectionManager.", "WARN")
         _connection_manager_instance = self
-        # --- FIN DE LA MODIFICACIÓN ---
 
         self._config = dependencies.get('config_module', config)
         self._memory_logger = dependencies.get('memory_logger_module', memory_logger)
@@ -76,8 +71,6 @@ class ConnectionManager:
         print("INICIANDO GESTOR DE CONEXIONES Y VALIDANDO CUENTAS API...")
         print("="*80)
         
-        # La función de carga de UIDs ahora se llama desde config.py al importar
-        # self._credentials.load_and_validate_uids() 
         api_credentials = self._credentials.load_api_credentials()
         
         required_accounts = set(self._config.BOT_CONFIG["ACCOUNTS"].values())
