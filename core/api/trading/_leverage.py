@@ -26,11 +26,7 @@ except ImportError:
 # Importar helper de la capa superior de la API
 from .._helpers import _handle_api_error_generic
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Solo importar la función, no ejecutarla.
 from connection._manager import get_connection_manager_instance
-# connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
-# --- FIN DE LA MODIFICACIÓN ---
 
 def set_leverage(
     symbol: str,
@@ -53,11 +49,9 @@ def set_leverage(
     Returns:
         bool: True si la operación fue exitosa para todas las cuentas objetivo, False si alguna falló.
     """
-    # --- INICIO DE LA MODIFICACIÓN ---
     # Obtenemos la instancia JUSTO cuando se necesita.
     connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
-    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Set Leverage]: Dependencias no disponibles.", level="ERROR")
         return False
         
