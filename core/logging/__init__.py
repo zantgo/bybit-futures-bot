@@ -149,7 +149,6 @@ def initialize_loggers():
     global _signal_manager, _closed_pos_manager, _open_pos_manager
     import config # Importación local para asegurar que config esté cargado
 
-    # --- INICIO DE LA CORRECCIÓN (Adaptación a Nueva Estructura) ---
     logging_config = config.BOT_CONFIG["LOGGING"]
     log_files = config.LOG_FILES
     
@@ -182,7 +181,6 @@ def initialize_loggers():
         )
         open_position_logger.setup(_open_pos_manager)
         _open_pos_manager.start()
-    # --- FIN DE LA CORRECCIÓN ---
     
     memory_logger.log("Sistema de logging asíncrono inicializado.", "INFO")
 
@@ -193,14 +191,11 @@ def shutdown_loggers():
     if _open_pos_manager: _open_pos_manager.stop()
     memory_logger.log("Sistema de logging asíncrono detenido.", "INFO")
 
-
-# --- Control de lo que se exporta con 'from core.logging import *' ---
-# Es una buena práctica definir __all__ para una API pública limpia.
 __all__ = [
     'memory_logger',
     'signal_logger',
     'closed_position_logger',
     'open_position_logger',
-    'initialize_loggers', # Exponer la nueva función de inicialización
-    'shutdown_loggers',   # Exponer la nueva función de apagado
+    'initialize_loggers',
+    'shutdown_loggers',
 ]
