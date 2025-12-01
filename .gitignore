@@ -1,10 +1,8 @@
 # ==============================================================================
 # Archivos y Directorios Críticos de Seguridad
-# ¡NUNCA deben subirse a un repositorio público!
 # ==============================================================================
 
 # Archivo de entorno con claves API, secretos y UIDs.
-# ¡EL MÁS IMPORTANTE!
 .env
 *.env
 
