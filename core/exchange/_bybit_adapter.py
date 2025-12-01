@@ -49,7 +49,6 @@ class BybitAdapter(AbstractExchange):
         self._connection_manager = connection_manager
         self._symbol: Optional[str] = None
         self._latest_price: Optional[float] = None
-        # --- INICIO DE LA CORRECCIÓN (Adaptación a Nueva Estructura) ---
         self._purpose_to_account_name_map = {
             'main': config.BOT_CONFIG["ACCOUNTS"]["MAIN"],
             'longs': config.BOT_CONFIG["ACCOUNTS"]["LONGS"],
@@ -57,8 +56,6 @@ class BybitAdapter(AbstractExchange):
             'profit': config.BOT_CONFIG["ACCOUNTS"]["PROFIT"],
             'ticker': config.BOT_CONFIG["TICKER"]["SOURCE_ACCOUNT"]
         }
-        # --- FIN DE LA CORRECCIÓN ---
-
 
     def initialize(self, symbol: str) -> bool:
         """
@@ -145,9 +142,7 @@ class BybitAdapter(AbstractExchange):
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=account_name)
         if not session: return None
         
-        # --- INICIO DE LA CORRECCIÓN ---
         category = config.EXCHANGE_CONSTANTS["BYBIT"]["CATEGORY_LINEAR"]
-        # --- FIN DE LA CORRECCIÓN ---
         
         try:
             response = session.get_tickers(category=category, symbol=symbol)
@@ -186,8 +181,6 @@ class BybitAdapter(AbstractExchange):
         is_hedge_mode = config.EXCHANGE_CONSTANTS["BYBIT"]["HEDGE_MODE_ENABLED"]
         pos_idx = 0 # Valor por defecto para modo One-Way
 
-        # --- INICIO DE LA CORRECCIÓN CRÍTICA ---
-        # La lógica para determinar el positionIdx ahora reside aquí y considera si la orden es de cierre.
         if is_hedge_mode:
             if not order.reduce_only:
                 # Lógica para órdenes de APERTURA
@@ -199,7 +192,6 @@ class BybitAdapter(AbstractExchange):
                 # Una orden de compra ('buy') cierra una posición SHORT (idx 2)
                 # Una orden de venta ('sell') cierra una posición LONG (idx 1)
                 pos_idx = 2 if order.side.lower() == 'buy' else 1
-        # --- FIN DE LA CORRECCIÓN CRÍTICA ---
 
         response = bybit_api.place_market_order(
             symbol=order.symbol, 
@@ -236,18 +228,14 @@ class BybitAdapter(AbstractExchange):
             memory_logger.log(f"Error de transferencia: propósito desconocido '{from_purpose}' o '{to_purpose}'", "ERROR")
             return False
 
-        # --- INICIO DE LA CORRECCIÓN ---
         loaded_uids = config.LOADED_UIDS
-        # --- FIN DE LA CORRECCIÓN ---
         from_uid = loaded_uids.get(from_acc_name)
         to_uid = loaded_uids.get(to_acc_name)
         if not from_uid or not to_uid: 
             memory_logger.log(f"Error de transferencia: UID no encontrado para '{from_acc_name}' o '{to_acc_name}'", "ERROR")
             return False
 
-        # --- INICIO DE LA CORRECCIÓN ---
         session, _ = self._connection_manager.get_session_for_operation('general', specific_account=config.BOT_CONFIG["ACCOUNTS"]["MAIN"])
-        # --- FIN DE LA CORRECCIÓN ---
         if not session: 
             memory_logger.log("Error de transferencia: No se pudo obtener sesión para la cuenta principal.", "ERROR")
             return False
@@ -256,14 +244,12 @@ class BybitAdapter(AbstractExchange):
         
         try:
             transfer_id = str(uuid.uuid4())
-            # --- INICIO DE LA CORRECCIÓN ---
             response = session.create_universal_transfer(
                 transferId=transfer_id, coin=coin.upper(), amount=amount_str,
                 fromMemberId=int(from_uid), toMemberId=int(to_uid),
                 fromAccountType=config.EXCHANGE_CONSTANTS["BYBIT"]["UNIVERSAL_TRANSFER_FROM_TYPE"],
                 toAccountType=config.EXCHANGE_CONSTANTS["BYBIT"]["UNIVERSAL_TRANSFER_TO_TYPE"]
             )
-            # --- FIN DE LA CORRECCIÓN ---
             
             if response and response.get('retCode') == 0:
                 return True
