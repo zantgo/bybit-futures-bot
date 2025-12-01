@@ -56,38 +56,23 @@ def create_or_update_operation(side: str, params: Dict[str, Any]) -> Tuple[bool,
         return False, "OM no instanciado"
     return _om_instance.create_or_update_operation(side, params)
 
-# --- INICIO DE LA MODIFICACIÓN ---
 def pausar_operacion(side: str, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
-# --- (LÍNEA ORIGINAL COMENTADA) ---
-# def pausar_operacion(side: str, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para pausar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
     return _om_instance.pausar_operacion(side, reason, price)
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # return _om_instance.pausar_operacion(side, reason)
 
 def reanudar_operacion(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-# --- (LÍNEA ORIGINAL COMENTADA) ---
-# def reanudar_operacion(side: str) -> Tuple[bool, str]:
     """Delega la llamada para reanudar la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
     return _om_instance.reanudar_operacion(side, price)
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # return _om_instance.reanudar_operacion(side)
 
 def forzar_activacion_manual(side: str, price: Optional[float] = None) -> Tuple[bool, str]:
-# --- (LÍNEA ORIGINAL COMENTADA) ---
-# def forzar_activacion_manual(side: str) -> Tuple[bool, str]:
     """Delega la llamada para forzar la activación manual de la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
     return _om_instance.forzar_activacion_manual(side, price)
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # return _om_instance.forzar_activacion_manual(side)
-
-# Reemplaza esta línea en core/strategy/om/_api.py
 
 def activar_por_condicion(side: str, price: Optional[float] = None, razon_activacion: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para activar la operación cuando se cumple una condición."""
@@ -96,16 +81,10 @@ def activar_por_condicion(side: str, price: Optional[float] = None, razon_activa
     return _om_instance.activar_por_condicion(side, price, razon_activacion)
 
 def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None, price: Optional[float] = None) -> Tuple[bool, str]:
-# --- (LÍNEA ORIGINAL COMENTADA) ---
-# def detener_operacion(side: str, forzar_cierre_posiciones: bool, reason: Optional[str] = None) -> Tuple[bool, str]:
     """Delega la llamada para detener completamente la operación."""
     if not _om_instance:
         return False, "OM no instanciado"
     return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason, price)
-    # --- (LÍNEA ORIGINAL COMENTADA) ---
-    # return _om_instance.detener_operacion(side, forzar_cierre_posiciones, reason)
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 # --- Funciones de Actualización de Estado ---
 
