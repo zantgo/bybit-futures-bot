@@ -23,11 +23,9 @@ class _ApiActions:
 
     def manual_close_logical_position_by_index(self, side: str, index: int) -> Tuple[bool, str]:
         """Cierra una posición lógica específica por su índice relativo a las posiciones abiertas."""
-        # --- INICIO DE LA SOLUCIÓN ADICIONAL: Aplicar la misma protección aquí ---
         self._manual_close_in_progress = True
         self._memory_logger.log(f"Bandera de cierre manual (SINGLE) ACTIVADA para {side.upper()}.", "DEBUG")
         try:
-        # --- FIN DE LA SOLUCIÓN ADICIONAL ---
             price = self.get_current_market_price()
             if not price:
                 return False, "No se pudo obtener el precio de mercado actual para el cierre."
@@ -54,22 +52,18 @@ class _ApiActions:
             message = result.get('message', 'Fallo al enviar la orden de cierre.')
             
             return success, message
-        # --- INICIO DE LA SOLUCIÓN ADICIONAL: Bloque finally ---
         finally:
             self._manual_close_in_progress = False
             self._memory_logger.log(f"Bandera de cierre manual (SINGLE) DESACTIVADA para {side.upper()}.", "DEBUG")
-        # --- FIN DE LA SOLUCIÓN ADICIONAL ---
 
     def close_all_logical_positions(self, side: str, reason: str = "MANUAL_ALL") -> Tuple[bool, str]:
         """
         Cierra TODAS las posiciones lógicas de un lado.
         Ahora devuelve una tupla (bool, str) con el resultado.
         """
-        # --- INICIO DE LA SOLUCIÓN: Activar la bandera y usar try...finally ---
         self._manual_close_in_progress = True
         self._memory_logger.log(f"Bandera de cierre manual (ALL) ACTIVADA para {side.upper()}.", "DEBUG")
         try:
-        # --- FIN DE LA SOLUCIÓN ---
             price = self.get_current_market_price()
             if not price: 
                 msg = f"CIERRE TOTAL FALLIDO: Sin precio para {side.upper()}."
@@ -105,11 +99,9 @@ class _ApiActions:
                 msg = f"Advertencia: Solo se pudieron cerrar {success_count} de {count} posiciones {side.upper()}."
                 self._memory_logger.log(msg, level="WARN")
                 return False, msg
-        # --- INICIO DE LA SOLUCIÓN: Bloque finally para desactivar la bandera ---
         finally:
             self._manual_close_in_progress = False
             self._memory_logger.log(f"Bandera de cierre manual (ALL) DESACTIVADA para {side.upper()}.", "DEBUG")
-        # --- FIN DE LA SOLUCIÓN ---
         
     def manual_open_next_pending_position(self, side: str) -> Tuple[bool, str]:
         """
@@ -127,7 +119,6 @@ class _ApiActions:
         if operacion.estado not in ['ACTIVA', 'PAUSADA']:
             return False, f"La apertura manual solo es posible si la operación está ACTIVA o PAUSADA. Estado actual: {operacion.estado}"
 
-        # Llamar a la nueva función de lógica privada (que crearemos en el siguiente paso)
         # El método _manual_open_position se encargará de toda la lógica y ejecución.
         result = self._manual_open_position(
             side=side,
@@ -144,7 +135,7 @@ class _ApiActions:
              message = result.get('error', message)
 
         return success, message
-# --- AÑADE ESTA FUNCIÓN en core/strategy/pm/manager/_api_actions.py ---
+        
     def update_max_sync_failures(self, new_value: int):
         """Actualiza el umbral de fallos de sincronización en tiempo real."""
         if isinstance(new_value, int) and new_value > 0:
