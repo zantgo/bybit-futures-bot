@@ -15,10 +15,7 @@ except ImportError:
 
 from . import _displayers
 from . import _wizards
-# --- INICIO DE LA MODIFICACIÓN (Paso 4 del Plan) ---
-# Importar el nuevo módulo del gestor manual
 from . import manual_position_manager
-# --- FIN DE LA MODIFICACIÓN ---
 
 from ..._helpers import (
     clear_screen,
@@ -58,7 +55,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
         return
 
     while True:
-        # Añadir clear_screen para una transición limpia desde el dashboard
         clear_screen()
         print_tui_header("Panel de Control de Operaciones")
 
@@ -83,7 +79,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
                 "[b] Volver al Dashboard"
             ]
             
-            # El menú principal sí debe limpiar la pantalla
             menu_options = MENU_STYLE.copy()
             menu_options['clear_screen'] = True
             
@@ -101,8 +96,6 @@ def show_operation_manager_screen(side_filter: Optional[str] = None):
             print(f"\n\033[91mERROR CRÍTICO en el selector de operaciones: {e}\033[0m")
             press_enter_to_continue()
             break
-
-# Reemplaza esta función completa en core/menu/screens/operation_manager/_main.py
 
 def _show_single_operation_view(side: str):
     """
@@ -209,18 +202,13 @@ def _show_single_operation_view(side: str):
             elif action == "force_start":
                 if TerminalMenu(["[1] Sí, forzar inicio", "[2] No, cancelar"], title="¿Activar la operación ignorando la condición de entrada?").show() == 0:
                     om_api.forzar_activacion_manual(side, price=current_price); time.sleep(0.2)
-                    # --- (LÍNEA ORIGINAL COMENTADA) ---
-                    # om_api.forzar_activacion_manual(side); time.sleep(0.2)
             
             elif action == "stop":
                 title = "¿Seguro? Se cerrarán todas las posiciones y se reseteará la operación."
                 if TerminalMenu(["[1] Sí, detener todo", "[2] No, cancelar"], title=title).show() == 0:
                     print("\n\033[93mProcesando solicitud de detención, por favor espere...\033[0m")
                     success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True, price=current_price)
-                    # --- (LÍNEA ORIGINAL COMENTADA) ---
-                    # success, message = om_api.detener_operacion(side, forzar_cierre_posiciones=True)
                     print(f"\nResultado: {'ÉXITO' if success else 'FALLO'} - {message}"); time.sleep(2.5)
-            # --- FIN DE LA MODIFICACIÓN ---
 
             elif action == "refresh": continue
             elif action == "help": show_help_popup("auto_mode")
