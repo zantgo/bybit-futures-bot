@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/menu/screens/_position_viewer.py
+# core/menu/screens/_position_viewer.py
 
 import time
 from typing import Any
@@ -83,7 +83,6 @@ def _manage_side_positions(side: str, pm_api: Any):
             print(f"Precio de Mercado Actual: {current_price:.4f} USDT\n")
             for i, pos in enumerate(open_positions):
                 pnl = 0.0
-                # --- INICIO DE LA CORRECCIÓN ---
                 entry_price = pos.entry_price or 0.0
                 size_contracts = pos.size_contracts or 0.0
                 sl_price = pos.stop_loss_price
@@ -91,7 +90,6 @@ def _manage_side_positions(side: str, pm_api: Any):
                 if pos.ts_is_active:
                     ts_stop = pos.ts_stop_price
                     ts_info = f"TS Activo @ {ts_stop:.4f}" if ts_stop else "TS Activo (Calculando...)"
-                # --- FIN DE LA CORRECCIÓN ---
 
                 if current_price > 0 and entry_price > 0 and size_contracts > 0:
                     pnl = (current_price - entry_price) * size_contracts if side == 'long' else (entry_price - current_price) * size_contracts
