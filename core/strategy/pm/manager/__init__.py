@@ -13,21 +13,12 @@ la funcionalidad del PositionManager original.
 """
 from typing import Any
 
-# 1. Importar todas las clases base de los módulos privados
 from ._lifecycle import _LifecycleManager
 from ._api_getters import _ApiGetters
 from ._api_actions import _ApiActions
 from ._workflow import _Workflow
 from ._private_logic import _PrivateLogic
 
-# --- INICIO DE LA CORRECCIÓN ---
-# Se elimina la importación incorrecta del módulo _triggers
-# from ._triggers import check_conditional_triggers 
-# --- FIN DE LA CORRECCIÓN ---
-
-# 2. Definir la clase final `PositionManager` que hereda de todas las clases base.
-# El orden de la herencia es importante para la Resolución de Métodos (MRO).
-# _LifecycleManager debe ir primero porque contiene el constructor `__init__`.
 class PositionManager(
     _LifecycleManager,
     _ApiGetters,
@@ -48,7 +39,6 @@ class PositionManager(
         """
         super().__init__(*args, **kwargs)
 
-# 3. Definir __all__ para que `from . import PositionManager` funcione correctamente.
 __all__ = [
     'PositionManager',
 ]
