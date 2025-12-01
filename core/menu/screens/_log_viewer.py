@@ -13,9 +13,6 @@ import sys
 import os
 from typing import Dict, Any, Optional
 
-# --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
-
-# Ajustar sys.path para importaciones absolutas
 if __name__ != "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))))
@@ -44,9 +41,6 @@ except ImportError as e:
     def clear_screen(): pass
     def print_tui_header(title): print(f"--- {title} ---")
 
-# --- FIN DE CAMBIOS: Importaciones Adaptadas ---
-
-
 # --- Pantalla del Visor de Logs ---
 
 def show_log_viewer():
@@ -72,11 +66,6 @@ def show_log_viewer():
         if not all_logs:
             print("\n  (No hay logs para mostrar)")
         else:
-            # --- INICIO DE LA MODIFICACIÓN (Adaptación a Nueva Estructura) ---
-            # Leer el límite desde el archivo de configuración centralizado.
-            # --- (COMENTADO) ---
-            # max_lines_to_show = getattr(config, 'TUI_LOG_VIEWER_MAX_LINES', 100)
-            # --- (CORREGIDO) ---
             max_lines_to_show = config.BOT_CONFIG["LOGGING"]["TUI_LOG_VIEWER_MAX_LINES"]
             
             # Aplicar el slicing para obtener solo las últimas N líneas.
@@ -84,7 +73,6 @@ def show_log_viewer():
             
             # Mensaje actualizado para reflejar el número total de logs y los que se muestran.
             print(f"\n  --- Mostrando las últimas {len(logs_to_show)} de {len(all_logs)} entradas ---")
-            # --- FIN DE LA MODIFICACIÓN ---
             
             for timestamp, level, message in logs_to_show:
                 color_code = ""
