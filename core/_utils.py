@@ -33,7 +33,7 @@ def format_datetime(dt_object: Union[datetime.datetime, pd.Timestamp, None], fmt
             # Otro error de formateo
             return "Formatting Error"
     elif dt_object is None:
-        return "N/A" # O devuelve un string vacío '', o None según prefieras
+        return "N/A"
     else:
         # Si no es un tipo esperado, intentar convertir a string como fallback
         return str(dt_object)
