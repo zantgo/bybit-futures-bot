@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any
 
-# Importación segura de utils, aunque la serialización ahora es local.
 try:
     from core import utils
 except ImportError:
@@ -41,7 +40,6 @@ def log_open_positions_snapshot(snapshot_data: Dict):
             elif isinstance(obj, list):
                 return [make_serializable(elem) for elem in obj]
             elif isinstance(obj, (datetime.datetime, pd.Timestamp)):
-                # Se recomienda usar isoformat() para un estándar consistente
                 return obj.isoformat()
             elif isinstance(obj, (np.float64, np.float32, np.int64, np.int32)):
                 return obj.item()
