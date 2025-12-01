@@ -11,7 +11,6 @@ import traceback
 from typing import Optional, Dict, Any
 import time
 
-# --- INICIO DE CAMBIOS: Importaciones Adaptadas ---
 if __name__ != "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
@@ -20,20 +19,14 @@ if __name__ != "__main__":
 
 try:
     import config
-    # --- MODIFICADO: Solo importar la función, no ejecutarla ---
     from connection._manager import get_connection_manager_instance
-    # connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
-    # --- FIN DE LA MODIFICACIÓN ---
     from core.logging import memory_logger
     from ._helpers import _handle_api_error_generic
     from pybit.exceptions import InvalidRequestError, FailedRequestError
 except ImportError as e:
-    # Este print se mantiene ya que el logger podría no estar disponible
     print(f"ERROR [Market Data API Import]: No se pudo importar módulo necesario: {e}")
     config = type('obj', (object,), {})()
-    # --- INICIO DE LA MODIFICACIÓN (Fallback) ---
     def get_connection_manager_instance(): return None
-    # --- FIN DE LA MODIFICACIÓN (Fallback) ---
     memory_logger = type('obj', (object,), {'log': print})()
     def _handle_api_error_generic(response: Optional[Dict], operation_tag: str) -> bool: return True
     class InvalidRequestError(Exception): pass
@@ -50,11 +43,9 @@ def get_instrument_info(symbol: str, category: str = 'linear', force_refresh: bo
     """Obtiene información del instrumento (precisión, mínimos) desde la API o caché."""
     global _instrument_info_cache
     
-    # --- INICIO DE LA MODIFICACIÓN ---
     # Obtenemos la instancia JUSTO cuando se necesita.
     connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
-    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Get Instrument Info]: Dependencias no disponibles.", level="ERROR")
         return None
         
