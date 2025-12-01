@@ -15,21 +15,17 @@ from ..._helpers import (
     MENU_STYLE
 )
 
-# Importar el nuevo asistente unificado desde su propio paquete
 from . import wizard_setup 
 
 _deps: Dict[str, Any] = {}
 
-# --- INICIO DE LA MODIFICACIÓN ---
 def init(dependencies: Dict[str, Any]):
     """Recibe las dependencias e inicializa los submódulos de asistentes."""
     global _deps
     _deps = dependencies
     
-    # Se asegura de que las dependencias se pasen al nuevo paquete refactorizado.
     if hasattr(wizard_setup, 'init'):
         wizard_setup.init(dependencies)
-# --- FIN DE LA MODIFICACIÓN ---
 
 def operation_setup_wizard(om_api: Any, side: str, is_modification: bool = False):
     """
