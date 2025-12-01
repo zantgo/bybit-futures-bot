@@ -32,11 +32,9 @@ def execute_transfer(
         memory_logger.log("  -> Omitida: Monto inválido o cero.", level="DEBUG")
         return 0.0
 
-    # --- INICIO DE LA MODIFICACIÓN: Lógica de Paper Trading ---
     if config.BOT_CONFIG["PAPER_TRADING_MODE"]:
         memory_logger.log(f"  -> MODO PAPEL: Simulación de transferencia de {amount:.4f} USDT exitosa.", "WARN")
         return amount
-    # --- FIN DE LA MODIFICACIÓN ---
 
     try:
         from_purpose = 'longs' if from_account_side == 'long' else 'shorts'
