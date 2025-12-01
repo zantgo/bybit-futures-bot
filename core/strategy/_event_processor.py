@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/strategy/_event_processor.py
+# core/strategy/_event_processor.py
 
 import sys
 import os
@@ -194,8 +194,6 @@ class EventProcessor:
                     
                     risk_condition_met, risk_reason, risk_action = False, "", ""
 
-                    # --- INICIO DE LA SECCIÓN MODIFICADA (REORDENADA) ---
-
                     # 1.2. Prioridad 2: Trailing Stop Loss por ROI (si está activo, tiene la máxima prioridad después de la liquidación)
                     if not risk_condition_met and operacion.roi_tsl:
                         tsl_config = operacion.roi_tsl
@@ -257,8 +255,6 @@ class EventProcessor:
                             risk_condition_met = True
                             risk_reason = f"ROI-TP: ROI ({roi:.2f}%) >= Límite ({tp_roi_pct}%)"
                             risk_action = operacion.roi_tp['accion']
-
-                    # --- FIN DE LA SECCIÓN MODIFICADA (REORDENADA) ---
 
                     # 1.5. Ejecución de la Acción de Riesgo
                     if risk_condition_met:
