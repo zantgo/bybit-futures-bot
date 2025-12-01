@@ -64,7 +64,6 @@ except ImportError:
         @property
         def avg_entry_price(self): return None
 
-
 # --- Inyección de Dependencias ---
 _deps: Dict[str, Any] = {}
 
@@ -84,9 +83,6 @@ def _get_terminal_width():
 def _get_unified_box_width() -> int:
     """
     Calcula un ancho de caja unificado y dinámico.
-    
-    CORRECCIÓN: Se ajusta la lógica para permitir que la caja se expanda con el
-    ancho del terminal, sin quedar limitada por un ancho de contenido fijo.
     """
     terminal_width = _get_terminal_width()
     
@@ -393,7 +389,6 @@ def _display_operation_conditions(operacion: Operacion):
                 tp_price = be_price * (1 + tp_dist / 100) if operacion.tendencia == 'LONG_ONLY' else be_price * (1 - tp_dist / 100)
             riesgos_activos.append(f"TP por Break-Even: Dist: {operacion.be_tp['distancia']}% (Acción: {operacion.be_tp['accion']}) {format_price(tp_price)}")
 
-        # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
         if not riesgos_activos:
             print(_create_box_line("  - Ningún límite de riesgo de operación configurado.", box_width))
         else:
@@ -406,7 +401,6 @@ def _display_operation_conditions(operacion: Operacion):
             
             for riesgo in riesgos_activos:
                 print(_create_box_line(f"  - {riesgo}", box_width))
-        # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
 
         # --- Límites de Salida de Operación ---
         print("├" + "─" * (box_width - 2) + "┤")
@@ -450,6 +444,7 @@ def _display_operation_conditions(operacion: Operacion):
                 print(_create_box_line(f"  - {limit}", box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
+    
 def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, side: str):
     box_width = _get_unified_box_width()
     print("┌" + "─" * (box_width - 2) + "┐")
@@ -484,9 +479,7 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
                 minutes, seconds = divmod(remainder, 60)
                 data["Activación en (Temporizador)"] = f"{hours:02}:{minutes:02}:{seconds:02}"
     
-    ### INICIO DE LA CORRECCIÓN DEL BUG ###
-    
-    # Lógica de visualización del "Tiempo Sesión Activa" (el cronómetro que cuenta hacia arriba)
+    # Lógica de visualización del "Tiempo Sesión Activa"
     tiempo_sesion_activa_str = ""
     if operacion.estado == 'ACTIVA':
         start_time = getattr(operacion, 'tiempo_inicio_sesion_activa', None)
@@ -497,16 +490,12 @@ def _display_operation_details(summary: Dict[str, Any], operacion: Operacion, si
             minutes, seconds = divmod(remainder, 60)
             tiempo_sesion_activa_str = f"{hours:02}:{minutes:02}:{seconds:02}"
         else:
-            # Medida de seguridad por si el estado es ACTIVA pero falta el timestamp. No debería ocurrir.
             tiempo_sesion_activa_str = "Calculando..." 
     else:
-        # Para cualquier otro estado (PAUSADA, DETENIDA, etc.), mostramos "Pausado".
         tiempo_sesion_activa_str = "00:00:00 (Pausado)"
 
     data["Tiempo Sesión Activa"] = tiempo_sesion_activa_str
     
-    ### FIN DE LA CORRECCIÓN DEL BUG ###
-
     max_key_len = max(len(_clean_ansi_codes(k)) for k in data.keys()) if data else 0
     for key, value in data.items():
         content = f"{key:<{max_key_len}} : {value}"
