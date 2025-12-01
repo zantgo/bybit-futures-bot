@@ -1,5 +1,3 @@
-# core/menu/screens/operation_manager/position_editor/__init__.py
-
 import time
 import uuid
 import copy
@@ -16,44 +14,7 @@ from ...._helpers import (
     get_input,
     MENU_STYLE,
     UserInputCancelled,
-)
-
-try:
-    from core.strategy.entities import Operacion, LogicalPosition
-    from core.strategy.pm import api as pm_api
-    from core.strategy.om import api as om_api
-    from . import _calculations as calc
-    from . import _displayers as disp
-except ImportError:
-    # Fallbacks para análisis estático y resiliencia
-    pm_api = None
-    om_api = None
-    calc = None
-    disp = None
-    class Operacion: pass
-    class LogicalPosition: pass
-
-
-# --- INICIO DE LA MODIFICACIÓN (Paso 3 del Plan - Simplificación del Editor) ---
-# Reemplaza la función show_position_editor_screen completa en core/menu/screens/operation_manager/position_editor/__init__.py
-
-import time
-import uuid
-import copy
-from typing import Any, Dict
-
-try:
-    from simple_term_menu import TerminalMenu
-except ImportError:
-    TerminalMenu = None
-
-from ...._helpers import (
-    clear_screen,
-    print_tui_header,
-    get_input,
-    MENU_STYLE,
-    UserInputCancelled,
-    show_help_popup # <-- Importación añadida
+    show_help_popup
 )
 
 try:
@@ -71,10 +32,6 @@ except ImportError:
     class LogicalPosition: pass
 
 def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
-    """
-    Muestra la pantalla interactiva para configurar la lista de posiciones PENDIENTES
-    y visualizar el impacto en el riesgo en tiempo real.
-    """
     if not all([TerminalMenu, pm_api, om_api, calc, disp]):
         print("Error: Dependencias críticas para el editor de posiciones no están disponibles.")
         time.sleep(3)
@@ -101,20 +58,18 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
         
         has_pending = any(p.estado == 'PENDIENTE' for p in operacion.posiciones)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Añadir nueva posición PENDIENTE",
             "[2] Modificar capital de TODAS las PENDIENTES",
             "[3] Eliminar la última PENDIENTE",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver"
         ]
 
         if not has_pending:
             menu_items[1] = "[2] Modificar capital... (No hay posiciones PENDIENTES)"
             menu_items[2] = "[3] Eliminar última... (No hay posiciones PENDIENTES)"
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -153,12 +108,10 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
                     print("\nÚltima posición PENDIENTE eliminada."); time.sleep(1.5)
                     params_changed = True
 
-            # --- INICIO DE LA MODIFICACIÓN ---
-            elif choice == 4: # Índice de Ayuda
+            elif choice == 4:
                 show_help_popup('wizard_position_editor')
-            # --- FIN DE LA MODIFICACIÓN ---
             
-            elif choice == 5 or choice is None: # Índice de Volver
+            elif choice == 5 or choice is None:
                 if params_changed:
                     cancel_menu = TerminalMenu(["[1] Guardar y Volver", "[2] Descartar Cambios y Volver"], title="\nHay cambios sin guardar. ¿Qué deseas hacer?").show()
                     if cancel_menu == 1:
@@ -168,4 +121,3 @@ def show_position_editor_screen(operacion: Operacion, side: str) -> bool:
 
         except UserInputCancelled:
             print("\nAcción cancelada."); time.sleep(1)
-# --- FIN DE LA MODIFICACIÓN ---
