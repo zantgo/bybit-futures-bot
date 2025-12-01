@@ -23,14 +23,12 @@ def check_buy_condition(
     """
     Evalúa si se cumplen todas las condiciones para una señal de COMPRA.
     """
-    # --- INICIO DE LA CORRECCIÓN ---
     signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     return (
         pd.notna(dec_pct) and np.isfinite(dec_pct) and dec_pct <= signal_cfg["PRICE_CHANGE_BUY_PERCENTAGE"] and
         pd.notna(w_dec) and w_dec >= signal_cfg["WEIGHTED_DECREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price < ema
     )
-    # --- FIN DE LA CORRECCIÓN ---
 
 def check_sell_condition(
     price: float,
@@ -41,14 +39,12 @@ def check_sell_condition(
     """
     Evalúa si se cumplen todas las condiciones para una señal de VENTA.
     """
-    # --- INICIO DE LA CORRECCIÓN ---
     signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     return (
         pd.notna(inc_pct) and np.isfinite(inc_pct) and inc_pct >= signal_cfg["PRICE_CHANGE_SELL_PERCENTAGE"] and
         pd.notna(w_inc) and w_inc >= signal_cfg["WEIGHTED_INCREMENT_THRESHOLD"] and
         pd.notna(ema) and np.isfinite(ema) and price > ema
     )
-    # --- FIN DE LA CORRECCIÓN ---
 
 def evaluate_strategy(
     price: float,
@@ -61,7 +57,6 @@ def evaluate_strategy(
     """
     Evalúa todas las reglas de la estrategia y devuelve la señal y la razón.
     """
-    # --- INICIO DE LA CORRECCIÓN ---
     signal_cfg = config.SESSION_CONFIG["SIGNAL"]
     if check_buy_condition(price, ema, dec_pct, w_dec):
         signal = "BUY"
@@ -74,6 +69,5 @@ def evaluate_strategy(
         reason = (f"inc_pct({inc_pct:.2f}%) >= {signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']}%, "
                   f"w_inc({w_inc:.2f}) >= {signal_cfg['WEIGHTED_INCREMENT_THRESHOLD']}, price > EMA")
         return signal, reason
-    # --- FIN DE LA CORRECCIÓN ---
 
     return "HOLD", "Condiciones BUY/SELL no cumplidas"
