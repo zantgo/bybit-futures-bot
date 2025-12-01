@@ -30,12 +30,10 @@ from ._account import (
     get_position_info_api,
 )
 
-# Se actualiza la importación para apuntar al nuevo sub-paquete 'trading'.
-# La palabra clave 'trading' ahora representa la fachada 'core/api/trading/__init__.py'
 from . import trading
 
 # --- Control de lo que se exporta con 'from core.api import *' ---
-# Es una buena práctica definir __all__ para una API pública limpia.
+
 __all__ = [
     # Funciones de datos de mercado
     'get_instrument_info',
