@@ -13,11 +13,7 @@ from typing import Optional, Dict
 import config
 from core.logging import memory_logger
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Solo importar la función, no ejecutarla.
 from connection._manager import get_connection_manager_instance
-# connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
-# --- FIN DE LA MODIFICACIÓN ---
 
 # Importar excepciones específicas con fallbacks
 try:
@@ -53,11 +49,9 @@ def cancel_order(
         Optional[dict]: La respuesta de la API, ya sea de éxito o de error.
                          Devuelve None si ocurre un error antes de la llamada a la API.
     """
-    # --- INICIO DE LA MODIFICACIÓN ---
     # Obtenemos la instancia JUSTO cuando se necesita.
     connection_manager = get_connection_manager_instance()
     if not connection_manager or not config:
-    # --- FIN DE LA MODIFICACIÓN ---
         memory_logger.log("ERROR [Cancel Order]: Dependencias no disponibles.", level="ERROR")
         return None
     if not order_id and not order_link_id:
