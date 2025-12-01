@@ -5,16 +5,10 @@ import datetime
 from typing import Any, Dict
 import os
 
-# --- INICIO DE LA MODIFICACIÓN: La importación se mueve a un nivel local si es necesaria ---
-# (Se elimina 'from core.logging import memory_logger' de aquí para evitar dependencias globales)
-# --- FIN DE LA MODIFICACIÓN ---
-
 def _write_session_summary_to_file(
     final_summary: Dict[str, Any],
     config_module: Any,
-    # --- INICIO DE LA MODIFICACIÓN: Se añade el parámetro del logger ---
     memory_logger_module: Any
-    # --- FIN DE LA MODIFICACIÓN ---
 ):
     """
     Formatea el resumen final de la sesión y lo guarda en un archivo de texto.
@@ -22,11 +16,8 @@ def _write_session_summary_to_file(
     from core.strategy.pm import api as pm_api
 
     if not final_summary or final_summary.get('error'):
-        # --- INICIO DE LA MODIFICACIÓN: Reemplazar print con logger ---
-        # print("No se generará archivo de resumen debido a un error en los datos.")
         if memory_logger_module:
             memory_logger_module.log("No se generará archivo de resumen debido a un error en los datos.", "WARN")
-        # --- FIN DE LA MODIFICACIÓN ---
         return
 
     try:
@@ -119,34 +110,26 @@ def shutdown_session_backend(
     final_summary: Dict[str, Any],
     config_module: Any,
     open_snapshot_logger_module: Any,
-    # --- INICIO DE LA MODIFICACIÓN: Se añade el parámetro del logger ---
     memory_logger_module: Any
-    # --- FIN DE LA MODIFICACIÓN ---
 ):
     """
     Ejecuta la secuencia de limpieza y apagado para una sesión de trading.
     """
-    # --- INICIO DE LA MODIFICACIÓN: Reemplazar print con logger ---
-    # print("\n--- Limpieza Final de la Sesión de Trading (Backend) ---")
     if memory_logger_module:
         memory_logger_module.log("--- Limpieza Final de la Sesión de Trading (Backend) ---", "INFO")
     
     if not session_manager:
-        # print("Advertencia: No se proporcionó un SessionManager para el apagado.")
         if memory_logger_module:
             memory_logger_module.log("Advertencia: No se proporcionó un SessionManager para el apagado.", "WARN")
         return
 
     if session_manager.is_running():
-        # print("Deteniendo el Ticker de precios de la sesión...")
         if memory_logger_module:
             memory_logger_module.log("Deteniendo el Ticker de precios de la sesión...", "INFO")
         session_manager.stop()
-        # print("Ticker detenido.")
         if memory_logger_module:
             memory_logger_module.log("Ticker detenido.", "INFO")
 
-    # print("Obteniendo resumen final para logging...")
     if memory_logger_module:
         memory_logger_module.log("Obteniendo resumen final para logging...", "INFO")
     summary = session_manager.get_session_summary()
@@ -158,7 +141,6 @@ def shutdown_session_backend(
         if open_snapshot_logger_module and config_module.BOT_CONFIG["LOGGING"]["LOG_OPEN_SNAPSHOT"]:
             open_snapshot_logger_module.log_open_positions_snapshot(summary)
         
-        # print("Resumen final de la sesión obtenido y logueado.")
         if memory_logger_module:
             memory_logger_module.log("Resumen final de la sesión obtenido y logueado.", "INFO")
         
@@ -167,11 +149,8 @@ def shutdown_session_backend(
     else:
         final_summary['error'] = 'No se pudo obtener el resumen final de la sesión.'
         error_msg = summary.get('error', 'Error desconocido') if summary else 'N/A'
-        # print(f"No se pudo obtener el resumen final: {error_msg}")
         if memory_logger_module:
             memory_logger_module.log(f"No se pudo obtener el resumen final: {error_msg}", "ERROR")
     
-    # print("Secuencia de apagado de la sesión (Backend) completada.")
     if memory_logger_module:
         memory_logger_module.log("Secuencia de apagado de la sesión (Backend) completada.", "INFO")
-    # --- FIN DE LA MODIFICACIÓN ---
