@@ -84,18 +84,15 @@ SESSION_CONFIG = {
         "SLIPPAGE_PCT": 0.0005, 
     },
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     # Parámetros de Riesgo de la Sesión
     "RISK": {
         "MAINTENANCE_MARGIN_RATE": 0.005,
         "MAX_SYNC_FAILURES": 10000,
     },
-    # --- FIN DE LA MODIFICACIÓN ---
 }
 
 # --- 3. CONFIGURACIÓN POR DEFECTO PARA NUEVAS OPERACIONES ---
-# Estos son los valores que la TUI usará como predeterminados al crear una
-# nueva operación estratégica.
+# Estos son los valores que la TUI usará como predeterminados al crear una nueva operación estratégica.
 
 OPERATION_DEFAULTS = {
     "CAPITAL": {
@@ -119,12 +116,11 @@ OPERATION_DEFAULTS = {
             "DISTANCE_PCT_SHORT": 0.5,
         },
     },
+  
     # Parámetros de RIESGO a nivel de OPERACIÓN COMPLETA.
     # La acción al cumplirse (PAUSAR o DETENER) se configura en el config.py
     "OPERATION_RISK": {
         "AFTER_STATE": 'DETENER', # PAUSAR O DETENER DEFAULT PARA TODOS LOS RIESGOS SE PUEDE EDITAR EN LA TUI
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Se separan SL y TP en diccionarios independientes
         "ROI_SL": {
             "ENABLED": False,
             "PERCENTAGE": -25.0 # Valor negativo para Stop Loss
@@ -133,7 +129,6 @@ OPERATION_DEFAULTS = {
             "ENABLED": False,
             "PERCENTAGE": 50.0 # Valor positivo para Take Profit
         },
-        # --- FIN DE LA MODIFICACIÓN ---
         "ROI_TSL": {
             "ENABLED": False,
             "ACTIVATION_PCT": 25.0,
@@ -143,13 +138,11 @@ OPERATION_DEFAULTS = {
             "ENABLED": False, # Por defecto, está desactivado.
             "TRAIL_PCT": 50.0 # El valor a restar del ROI realizado. (ej. ROI 20% - 10% = SL/TP en +10%)
         },
-                # --- INICIO DE LA MODIFICACIÓN ---
-        "BE_SL_TP": { # <-- NUEVO DICCIONARIO
+        "BE_SL_TP": { 
             "ENABLED": False,
             "SL_DISTANCE_PCT": 10.0,
             "TP_DISTANCE_PCT": 20.0,
         },
-        # --- FIN DE LA MODIFICACIÓN ---
     },
     # Parámetros de LÍMITES OPERATIVOS.
     # La acción al cumplirse (PAUSAR o DETENER) es configurable en la TUI.
