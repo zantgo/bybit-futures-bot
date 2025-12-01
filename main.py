@@ -44,7 +44,6 @@ if __name__ == "__main__":
     logging_package.initialize_loggers()
 
     # 2. Ensamblar el diccionario de dependencias (clases y módulos).
-    # Esta función ahora solo recoge las "recetas", no cocina nada.
     dependencies = assemble_dependencies()
     
     if not dependencies:
