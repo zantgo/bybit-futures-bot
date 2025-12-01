@@ -29,15 +29,12 @@ class DataStore:
         'decrement': 'int8'
     }
 
-    # --- INICIO DE LA CORRECCIÓN: Inyectar config en el constructor ---
     def __init__(self, config_module: Any = config):
-    # --- FIN DE LA CORRECCIÓN ---
         """
         Inicializa el DataStore.
         Lee el tamaño de la ventana de la configuración y crea un DataFrame
         vacío con los tipos de datos correctos.
         """
-        # --- INICIO DE LA CORRECCIÓN ---
         self._config = config_module
         ta_config = self._config.SESSION_CONFIG["TA"]
         self._window_size = max(
@@ -45,7 +42,6 @@ class DataStore:
             ta_config["WEIGHTED_INC_WINDOW"],
             ta_config["WEIGHTED_DEC_WINDOW"]
         ) * 2
-        # --- FIN DE LA CORRECCIÓN ---
         self._raw_data_df = pd.DataFrame(columns=list(self._RAW_TABLE_DTYPES.keys())).astype(self._RAW_TABLE_DTYPES)
 
     def initialize(self):
