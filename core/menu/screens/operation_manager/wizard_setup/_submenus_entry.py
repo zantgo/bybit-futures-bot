@@ -21,7 +21,7 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
     """
     Submenú para gestionar las condiciones de entrada de la operación con una UI simplificada.
     """
-    from ...._helpers import show_help_popup # <-- Importación añadida
+    from ...._helpers import show_help_popup
     params_changed_in_submenu = False
     
     while True:
