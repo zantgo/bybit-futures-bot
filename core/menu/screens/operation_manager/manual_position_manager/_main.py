@@ -27,7 +27,7 @@ def show_manual_position_manager_screen(side: str):
     """
     Muestra la pantalla para la gestión manual de apertura y cierre de posiciones.
     """
-    from ...._helpers import show_help_popup # Importar la función de ayuda
+    from ...._helpers import show_help_popup 
 
     if not all([TerminalMenu, om_api, pm_api]):
         print("Error: Dependencias críticas para el gestor manual no disponibles.")
@@ -63,43 +63,38 @@ def show_manual_position_manager_screen(side: str):
             menu_items.append("[2] Cerrar ÚLTIMA Posición Abierta")
             actions.append('close_last')
             
-            # --- INICIO DE LA MODIFICACIÓN ---
-            # Se añade la nueva opción de menú y su acción correspondiente.
             menu_items.append("[3] Cerrar PRIMERA Posición Abierta")
             actions.append('close_first')
-            # --- FIN DE LA MODIFICACIÓN ---
 
         if has_open:
             menu_items.append(f"[*] CIERRE DE PÁNICO (Cerrar TODAS las {operacion.posiciones_abiertas_count} posiciones)")
             actions.append('panic_close')
         
         menu_items.extend([
-            None, # Separador visual añadido
+            None,
             "[r] Refrescar",
             "[h] Ayuda",
             "[b] Volver al Panel de Operación"
         ])
         actions.extend([
-            None, # Acción correspondiente al separador
+            None,
             'refresh', 
             'help', 
             'back'
         ])
 
-        # Esta parte del código ya maneja correctamente la lista con 'None'
         final_menu_items = [item for item in menu_items if item is not None and not item.startswith("[ ]")]
         final_actions = [action for action in actions if action is not None]
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
         menu = TerminalMenu(
-            menu_items, # Usamos la lista original que contiene el None
+            menu_items,
             title="\nAcciones de Gestión Manual:",
             **menu_options
         )
         choice_index = menu.show()
         
-        # Mapeo directo usando el índice sobre la lista original de acciones
         action = actions[choice_index] if choice_index is not None else None
         
         if action == 'open_next':
