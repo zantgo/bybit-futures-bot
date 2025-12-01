@@ -56,10 +56,6 @@ class LogicalPositionTable:
         with self._lock:
             self._positions = copy.deepcopy(new_positions)
             
-        # --- SOLUCIÓN APLICADA AQUÍ ---
-        # La siguiente línea que genera el mensaje no deseado ha sido completamente comentada.
-        # memory_logger.log(f"[LPT Sync {self.side.upper()}]: Tabla sincronizada con {len(new_positions)} posiciones.", level="DEBUG")
-
     def add_position(self, position_data: LogicalPosition) -> bool:
         if not isinstance(position_data, LogicalPosition): 
             memory_logger.log(f"ERROR [LPT {self.side.upper()} Add]: El dato no es un objeto LogicalPosition válido.", level="ERROR"); return False
@@ -142,14 +138,12 @@ class LogicalPositionTable:
         if not self._utils: return 0.0
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
-        # --- CORRECCIÓN: Asegurar que size_contracts no sea None ---
         return sum(pos.size_contracts for pos in positions_copy if pos.size_contracts is not None)
 
     def get_total_used_margin(self) -> float:
         if not self._utils: return 0.0
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
-        # --- CORRECCIÓN: Asegurar que margin_usdt no sea None ---
         return sum(pos.margin_usdt for pos in positions_copy if pos.margin_usdt is not None)
 
     def get_average_entry_price(self) -> float:
@@ -157,7 +151,6 @@ class LogicalPositionTable:
         with self._lock:
             positions_copy = copy.deepcopy(self._positions)
         if not positions_copy: return 0.0
-        # --- CORRECCIÓN: Filtrar posiciones sin datos válidos ---
         valid_positions = [p for p in positions_copy if p.size_contracts is not None and p.entry_price is not None]
         if not valid_positions: return 0.0
         
@@ -184,7 +177,6 @@ class LogicalPositionTable:
         ]
         
         for pos in positions_copy:
-            # --- CORRECCIONES PARA ROBUSTEZ ---
             entry_ts_str = self._utils.format_datetime(pos.entry_timestamp, '%H:%M:%S') if self._utils and pos.entry_timestamp else "N/A"
             tp_activation_price = 'N/A'
             if hasattr(pos, 'tsl_activation_pct_at_open') and pos.tsl_activation_pct_at_open > 0 and pos.entry_price:
