@@ -23,7 +23,6 @@ from . import ta
 from . import signal
 from . import pm
 
-# --- Control de lo que se exporta con 'from core.strategy import *' ---
 __all__ = [
     'event_processor',
     'ta',
