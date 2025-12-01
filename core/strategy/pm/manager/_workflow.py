@@ -1,8 +1,7 @@
-# Contenido completo y corregido para: core/strategy/pm/manager/_workflow.py
+# core/strategy/pm/manager/_workflow.py
 import datetime
 import time
 from typing import Any, List, Dict
-# ¡Importante! Añadir esta importación para acceder a la función de cierre total.
 from core import api as core_api 
 
 class _Workflow:
@@ -59,8 +58,6 @@ class _Workflow:
                 account_purpose=account_purpose
             )
 
-            # --- INICIO DE LA MODIFICACIÓN CRÍTICA (LÓGICA UNIFICADA) ---
-            
             # Una "anomalía" ocurre si la API falla (None) O si devuelve una lista vacía cuando esperamos posiciones.
             is_anomaly = physical_positions is None or not physical_positions
 
@@ -86,8 +83,6 @@ class _Workflow:
             # Si llegamos aquí, la API respondió con posiciones, por lo que no hay anomalía.
             self._sync_failure_counters[side] = 0
             
-            # --- FIN DE LA MODIFICACIÓN CRÍTICA ---
-
         except Exception as e:
             self._memory_logger.log(f"PM ERROR: Excepción durante el heartbeat de sincronización de posiciones ({side}): {e}", "ERROR")
 
