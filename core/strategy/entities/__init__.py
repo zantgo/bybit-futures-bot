@@ -277,9 +277,6 @@ class Operacion:
             return None
         return break_even_price if break_even_price > 0 else None
 
-    # --- INICIO DE LA MODIFICACIÓN ---
-    # Se elimina la función get_roi_sl_tp_price y se reemplaza por las dos siguientes
-    
     def get_active_sl_tp_price(self) -> Optional[float]:
         """
         Calcula el precio de mercado al que se alcanzaría el SL/TP de la operación,
@@ -323,7 +320,7 @@ class Operacion:
         if target_roi_pct is None:
             return None
 
-        # --- Lógica de Simulación (movida desde _calculations.py) ---
+        # --- Lógica de Simulación ---
         sim_total_value = 0.0
         sim_total_size = 0.0
         
@@ -364,4 +361,3 @@ class Operacion:
             return None
             
         return target_price if target_price > 0 else None
-    # --- FIN DE LA MODIFICACIÓN ---
