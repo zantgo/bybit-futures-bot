@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/menu/screens/_dashboard.py
+# core/menu/screens/_dashboard.py
 
 import time
 import datetime
@@ -33,7 +33,6 @@ except ImportError:
         def get_live_performance(self, current_price: float, utils_module: Any) -> Dict[str, float]:
             return {"pnl_no_realizado": 0.0, "pnl_total": 0.0, "equity_actual_vivo": 0.0, "roi_twrr_vivo": 0.0}
     class LogicalPosition: pass
-
 
 _deps: Dict[str, Any] = {}
 
@@ -145,7 +144,6 @@ def _display_final_summary(summary: Dict[str, Any], config_module: Any):
 
     press_enter_to_continue()
 
-
 def _render_session_status_block(summary: Dict[str, Any], box_width: int):
     session_start_time = pm_api.get_session_start_time()
     start_time_str = "N/A"
@@ -187,7 +185,6 @@ def _render_session_status_block(summary: Dict[str, Any], box_width: int):
         print(_create_box_line(content, box_width))
 
     print("└" + "─" * (box_width - 2) + "┘")
-
 
 def _render_signal_status_block(summary: Dict[str, Any], config_module: Any, box_width: int):
     ticker_symbol = config_module.BOT_CONFIG["TICKER"]["SYMBOL"]
@@ -302,9 +299,6 @@ def _render_operations_status_block(summary: Dict[str, Any], box_width: int):
 
     print("└" + "─" * width_col + "┴" + "─" * width_col + "┘")
 
-
-# Reemplaza esta función completa en core/menu/screens/_dashboard.py
-
 def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     terminal_width = _get_terminal_width()
     box_width = min(terminal_width - 2, 90)
@@ -318,7 +312,6 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     now_str = datetime.datetime.now(timezone.utc).strftime('%H:%M:%S %d-%m-%Y (UTC)')
     title = "Dashboard de la Sesión"
 
-    # --- INICIO DE LA MODIFICACIÓN ---
     # Determinar el modo de trading actual desde la configuración
     modo_trading_str = "Paper Trading" if config_module.BOT_CONFIG["PAPER_TRADING_MODE"] else "Live Trading"
     
@@ -326,8 +319,7 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     subtitle_line = f"{now_str} | {modo_trading_str}"
     
     print(f"{title:^{box_width}}")
-    print(f"{subtitle_line:^{box_width}}") # Imprimir la nueva línea combinada
-    # --- FIN DE LA MODIFICACIÓN ---
+    print(f"{subtitle_line:^{box_width}}")
 
     print(header_line)
 
@@ -337,7 +329,6 @@ def _render_dashboard_view(summary: Dict[str, Any], config_module: Any):
     
 def show_dashboard_screen(session_manager: Any):
     from ._session_config_editor import show_session_config_editor_screen
-    # Aseguramos que todas las dependencias necesarias, incluida la de ayuda, estén importadas
     from .. import _helpers as helpers_module
 
     config_module = _deps.get("config_module")
