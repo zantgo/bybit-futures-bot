@@ -38,7 +38,7 @@ def init(dependencies: Dict[str, Any]):
     _deps = dependencies
 
 def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
-    from ...._helpers import show_help_popup # <-- Importación añadida
+    from ...._helpers import show_help_popup
     params_changed_in_submenu = False
     
     while True:
@@ -49,12 +49,12 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
             f"[2] Distancia de Promediación ({temp_op.averaging_distance_pct:.2f}%)",
             f"[3] Reinversión Automática ({'Activada' if temp_op.auto_reinvest_enabled else 'Desactivada'})",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver"
         ]
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
         
-        if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
+        if choice is None or choice == 5: break
         
         try:
             if choice == 0:
@@ -76,7 +76,7 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
                     new_val = reinvest_choice == 0
                     if new_val != temp_op.auto_reinvest_enabled: temp_op.auto_reinvest_enabled = new_val; params_changed_in_submenu = True
             
-            elif choice == 4: # Índice de Ayuda
+            elif choice == 4:
                 show_help_popup('wizard_strategy_global')
 
         except UserInputCancelled: continue
@@ -84,7 +84,7 @@ def _edit_strategy_global_submenu(temp_op: Operacion) -> bool:
     return params_changed_in_submenu
 
 def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
-    from ...._helpers import show_help_popup # <-- Importación añadida
+    from ...._helpers import show_help_popup
     params_changed_in_submenu = False
     
     while True:
@@ -95,14 +95,14 @@ def _edit_individual_risk_submenu(temp_op: Operacion) -> bool:
             f"[2] Activación TSL ({temp_op.tsl_activacion_pct or 'Desactivado'}%)",
             f"[3] Distancia TSL ({temp_op.tsl_distancia_pct or 'N/A'}%)",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver"
         ]
         if temp_op.tsl_activacion_pct is None:
             menu_items[2] = "[3] Distancia TSL (N/A - Activa TSL primero)"
 
         choice = TerminalMenu(menu_items, **MENU_STYLE).show()
-        if choice is None or choice == 5: break # El índice de "Volver" ahora es 5
+        if choice is None or choice == 5: break
         
         try:
             if choice == 0:
@@ -143,27 +143,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
         temp_op.averaging_distance_pct = defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_LONG"] if side == 'long' else defaults["RISK"]["AVERAGING"]["DISTANCE_PCT_SHORT"]
         temp_op.sl_posicion_individual_pct = defaults["RISK"]["INDIVIDUAL_SL"]["PERCENTAGE"] if defaults["RISK"]["INDIVIDUAL_SL"]["ENABLED"] else None
         if defaults["RISK"]["INDIVIDUAL_TSL"]["ENABLED"]: temp_op.tsl_activacion_pct, temp_op.tsl_distancia_pct = defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_ACTIVATION_PCT"], defaults["RISK"]["INDIVIDUAL_TSL"]["TSL_DISTANCE_PCT"]
-        
-        # --- INICIO DE LA MODIFICACIÓN ---
-        # Refactorización de la inicialización de los parámetros de riesgo de operación
-        
-        # --- (SECCIÓN ORIGINAL COMENTADA PARA REFERENCIA) ---
-        # dynamic_sl_config = defaults["OPERATION_RISK"].get("DYNAMIC_ROI_SL", {})
-        # temp_op.dynamic_roi_sl_enabled = dynamic_sl_config.get("ENABLED", False)
-        # temp_op.dynamic_roi_sl_trail_pct = dynamic_sl_config.get("TRAIL_PCT")
-        # if temp_op.dynamic_roi_sl_enabled: temp_op.sl_roi_pct = None
-        # else: temp_op.sl_roi_pct = defaults["OPERATION_RISK"]["ROI_SL_TP"]["PERCENTAGE"] if defaults["OPERATION_RISK"]["ROI_SL_TP"]["ENABLED"] else None
-        # if defaults["OPERATION_RISK"]["ROI_TSL"]["ENABLED"]: temp_op.tsl_roi_activacion_pct, temp_op.tsl_roi_distancia_pct = defaults["OPERATION_RISK"]["ROI_TSL"].get("ACTIVATION_PCT"), defaults["OPERATION_RISK"]["ROI_TSL"].get("DISTANCE_PCT")
-        # temp_op.accion_por_sl_tp_roi = defaults["OPERATION_RISK"]["AFTER_STATE"]
-        # temp_op.accion_por_tsl_roi = 'PAUSAR'
-        # be_sl_tp_config = defaults["OPERATION_RISK"].get("BE_SL_TP", {})
-        # temp_op.be_sl_tp_enabled = be_sl_tp_config.get("ENABLED", False)
-        # if temp_op.be_sl_tp_enabled:
-        #     temp_op.be_sl_distance_pct = be_sl_tp_config.get("SL_DISTANCE_PCT")
-        #     temp_op.be_tp_distance_pct = be_sl_tp_config.get("TP_DISTANCE_PCT")
-        # temp_op.accion_por_be_sl_tp = defaults["OPERATION_RISK"].get("BE_SL_TP_AFTER_STATE", 'DETENER')
-
-        # --- LÓGICA NUEVA Y CORREGIDA ---
         op_risk_defaults = defaults["OPERATION_RISK"]
         default_action = op_risk_defaults.get("AFTER_STATE", 'DETENER')
 
@@ -209,7 +188,6 @@ def operation_setup_wizard(om_api: Any, side: str, is_modification: bool):
                 temp_op.be_sl = {'distancia': sl_dist, 'accion': default_action}
             if tp_dist is not None:
                 temp_op.be_tp = {'distancia': tp_dist, 'accion': default_action}
-        # --- FIN DE LA MODIFICACIÓN ---
 
         temp_op.auto_reinvest_enabled = defaults.get("PROFIT_MANAGEMENT", {}).get("AUTO_REINVEST_ENABLED", False)
         temp_op.max_comercios = defaults["OPERATION_LIMITS"]["MAX_TRADES"].get("VALUE") if defaults["OPERATION_LIMITS"]["MAX_TRADES"]["ENABLED"] else None
@@ -339,7 +317,6 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Gestión de Riesgo de Operación")
 
-    # --- INICIO DE LA ÚNICA SECCIÓN MODIFICADA ---
     op_risk_data = {}
     
     if operacion.dynamic_roi_sl:
@@ -368,7 +345,6 @@ def _display_setup_box(operacion: Operacion, box_width: int, is_modification: bo
         max_key = max(len(k) for k in sorted_risk_keys)
         for label in sorted_risk_keys:
             _print_line(label, op_risk_data[label], max_key)
-    # --- FIN DE LA ÚNICA SECCIÓN MODIFICADA ---
     
     print("├" + "─" * (box_width - 2) + "┤")
     _print_section_header("Condiciones de Entrada")
