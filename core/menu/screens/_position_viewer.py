@@ -56,7 +56,6 @@ def show_position_viewer_screen(pm_api: Any):
         else:
             break
 
-
 def _manage_side_positions(side: str, pm_api: Any):
     while True:
         clear_screen()
