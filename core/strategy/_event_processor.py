@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from core.strategy.pm import PositionManager
     from core.strategy.ta import TAManager
     from core.strategy.signal import SignalGenerator
-    from core.strategy.entities import Operacion # Importación para type hint
+    from core.strategy.entities import Operacion
 
 # --- Importaciones de Módulos del Proyecto ---
 try:
