@@ -16,7 +16,6 @@ from ...._helpers import (
     UserInputCancelled,
 )
 from core.strategy.entities import Operacion
-# Reemplaza la función _edit_entry_conditions_submenu completa en core/menu/screens/operation_manager/wizard_setup/_submenus_entry.py
 
 def _edit_entry_conditions_submenu(temp_op: Operacion):
     """
@@ -45,14 +44,13 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
             print(f"  - Precio INFERIOR a: {below_str}")
             print(f"  - Temporizador:      {timer_str}")
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             f"[1] Editar Condición 'Precio SUPERIOR a'",
             f"[2] Editar Condición 'Precio INFERIOR a'",
             f"[3] Editar Temporizador",
             None,
             "[d] Desactivar TODAS las condiciones (Activar en Market)",
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[b] Volver al menú anterior"
         ]
 
@@ -60,10 +58,8 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
         menu_options['clear_screen'] = False
         choice = TerminalMenu(menu_items, title="\nAcciones:", **menu_options).show()
 
-        if choice is None or choice == 6: # El índice de "Volver" ahora es 6
+        if choice is None or choice == 6:
             break
-        # --- FIN DE LA MODIFICACIÓN ---
-
         try:
             if choice == 0:
                 new_val = get_input("Activar si precio >", float, temp_op.cond_entrada_above, is_optional=True, context_info="Deja vacío para desactivar")
@@ -91,10 +87,8 @@ def _edit_entry_conditions_submenu(temp_op: Operacion):
                     params_changed_in_submenu = True
                     print("\nTodas las condiciones de entrada han sido desactivadas."); time.sleep(1.5)
 
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 5: # Índice de Ayuda
                 show_help_popup('wizard_entry_conditions')
-            # --- FIN DE LA MODIFICACIÓN ---
 
         except UserInputCancelled:
             print("\nEdición cancelada."); time.sleep(1)
