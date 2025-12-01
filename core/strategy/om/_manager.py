@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/strategy/om/_manager.py
+# core/strategy/om/_manager.py
 
 import datetime
 import uuid
@@ -147,13 +147,9 @@ class OperationManager:
                     target_op.comisiones_totales_usdt = 0.0
                     target_op.reinvestable_profit_balance = 0.0
                     target_op.capital_inicial_usdt = nuevo_capital_operativo if nuevas_posiciones is not None else target_op.capital_operativo_logico_actual
-                    
-                    # --- INICIO DE LA CORRECCIÓN COMPLETA ---
-                    # Reseteamos explícitamente TODOS los contadores globales de la operación
                     target_op.tiempo_acumulado_activo_seg = 0.0
                     target_op.tiempo_ultimo_inicio_activo = None
                     target_op.comercios_cerrados_contador = 0
-                    # --- FIN DE LA CORRECCIÓN COMPLETA ---
                 
                 if estado_original == 'DETENIENDO':
                     return True, f"Operación {side.upper()} actualizando en estado DETENIENDO."
