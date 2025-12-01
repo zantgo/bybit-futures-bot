@@ -13,11 +13,7 @@ from typing import Optional, Union, Dict
 import config
 from core.logging import memory_logger
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Solo importar la función, no ejecutarla.
 from connection._manager import get_connection_manager_instance
-# connection_manager = get_connection_manager_instance() # <-- COMENTADO/ELIMINADO
-# --- FIN DE LA MODIFICACIÓN ---
 
 # Importar excepciones específicas con fallbacks
 try:
@@ -37,7 +33,7 @@ def place_market_order(
     side: str,
     quantity: Union[float, str],
     reduce_only: bool = False,
-    position_idx: Optional[int] = None, # Lo recibimos, pero ya no lo calculamos aquí
+    position_idx: Optional[int] = None,
     account_name: Optional[str] = None
 ) -> Optional[dict]:
     """
@@ -81,11 +77,8 @@ def place_market_order(
         "reduceOnly": bool(reduce_only)
     }
     
-    # --- INICIO DE LA REVERSIÓN ---
-    # La lógica compleja se elimina. Simplemente añadimos el position_idx si se proporciona.
     if position_idx is not None:
         params["positionIdx"] = position_idx
-    # --- FIN DE LA REVERSIÓN ---
 
     # 4. Ejecutar la llamada a la API
     memory_logger.log(f"Enviando orden MARKET a cuenta '{target_account}': {params}", level="INFO")
