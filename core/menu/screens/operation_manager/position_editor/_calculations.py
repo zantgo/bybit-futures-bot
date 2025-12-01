@@ -221,13 +221,11 @@ def calculate_projected_risk_metrics(
         if tp_roi_pct_target is not None:
             projected_roi_tp_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tp_roi_pct_target)
 
-    # --- (INICIO DE LA MODIFICACIÓN) ---
     projected_roi_tsl_activation_price = None
     if operacion.roi_tsl:
         tsl_activation_target = operacion.roi_tsl.get('activacion')
         if tsl_activation_target is not None:
             projected_roi_tsl_activation_price = operacion.get_projected_sl_tp_price(start_price_for_simulation, tsl_activation_target)
-    # --- (FIN DE LA MODIFICACIÓN) ---
     
     # --- 6. Simulación de Cobertura Máxima Teórica ---
     avg_capital = utils.safe_division(sum(p.capital_asignado for p in all_positions), len(all_positions)) if all_positions else 0
@@ -248,9 +246,7 @@ def calculate_projected_risk_metrics(
         'projected_roi_sl_dynamic_price': projected_roi_sl_dynamic_price,
         'projected_roi_tp_price': projected_roi_tp_price,
         
-        # --- (INICIO DE LA MODIFICACIÓN) ---
         'projected_roi_tsl_activation_price': projected_roi_tsl_activation_price,
-        # --- (FIN DE LA MODIFICACIÓN) ---
         
         'liquidation_distance_pct': liquidation_distance_pct,
         'total_capital_at_risk': sum(p.capital_asignado for p in all_positions),
