@@ -1,4 +1,4 @@
-# Contenido completo y unificado para: core/menu/screens/_session_config_editor.py
+# core/menu/screens/_session_config_editor.py
 
 """
 Módulo para la Pantalla de Edición de Configuración de la Sesión.
@@ -48,12 +48,10 @@ def _create_config_box_line(content: str, width: int, is_header=False) -> str:
         padding_total = width - len(clean_content) - 4
         left_pad = padding_total // 2
         right_pad = padding_total - left_pad
-        # Usamos 2 espacios para que el texto no quede pegado a los guiones
         return f"│{'─' * left_pad} \033[96m{content}\033[0m {'─' * right_pad}│"
 
     padding_needed = width - len(clean_content) - 4
     return f"│ {content}{' ' * padding_needed} │"
-
 
 # --- Lógica Principal del Módulo ---
 
@@ -73,7 +71,6 @@ def show_session_config_editor_screen(config_module: Any) -> Dict[str, Any]:
     changes_made, changed_keys = _show_main_config_menu(temp_session_config)
 
     if changes_made:
-        # Aplicamos los cambios a SESSION_CONFIG para la sesión actual
         _apply_changes_to_real_config(temp_session_config, config_module.SESSION_CONFIG, logger)
         
         if 'RISK' in temp_session_config and 'MAINTENANCE_MARGIN_RATE' in temp_session_config['RISK']:
@@ -108,14 +105,9 @@ def _apply_changes_to_real_config(temp_cfg: Dict, real_cfg: Dict, logger: Any):
                 logger.log(f"  -> {category}: '{real_cfg.get(category)}' -> '{new_value}'", "WARN")
                 real_cfg[category] = new_value
 
-
-
-
-# Reemplaza la función _show_main_config_menu completa en core/menu/screens/_session_config_editor.py
-
 def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
     """Muestra el menú principal agrupado y gestiona la navegación a submenús."""
-    from .._helpers import show_help_popup # <-- Importación añadida
+    from .._helpers import show_help_popup
     changed_keys = {}
 
     while True:
@@ -126,7 +118,6 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
         box_width = min(_get_terminal_width() - 2, 90)
         _display_config_box(temp_cfg, box_width)
 
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Editar Parámetros de Ticker",
             "[2] Editar Parámetros de Análisis Técnico (TA)",
@@ -134,11 +125,10 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
             "[4] Editar Parámetros de Profit",
             "[5] Editar Parámetros de Riesgo",
             None,
-            "[h] Ayuda", # Botón de ayuda añadido
+            "[h] Ayuda",
             "[s] Guardar Cambios y Volver",
             "[c] Cancelar (Descartar Cambios)"
         ]
-        # --- FIN DE LA MODIFICACIÓN ---
         
         menu_options = MENU_STYLE.copy()
         menu_options['clear_screen'] = False
@@ -169,10 +159,8 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
                 if _edit_risk_submenu(temp_cfg['RISK'], changed_keys):
                     changed_keys['RISK'] = True
             
-            # --- INICIO DE LA MODIFICACIÓN ---
             elif choice == 6: # Índice de Ayuda
                 show_help_popup('session_config_editor')
-            # --- FIN DE LA MODIFICACIÓN ---
 
             elif choice == 7: # Índice de Guardar
                 if changed_keys:
@@ -195,6 +183,7 @@ def _show_main_config_menu(temp_cfg: Dict) -> tuple[bool, Dict]:
 
         except UserInputCancelled:
             print("\n\nEdición cancelada."); time.sleep(1)
+            
 # --- Submenús de edición ---
 def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict) -> bool:
     changes_in_submenu = False
@@ -231,7 +220,6 @@ def _edit_ta_submenu(ta_cfg: Dict, changed_keys: Dict) -> bool:
         else:
             break
     return changes_in_submenu
-
 
 def _edit_profit_submenu(profit_cfg: Dict, changed_keys: Dict) -> bool:
     changes_in_submenu = False
@@ -280,7 +268,6 @@ def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict) -> bool:
     changes_in_submenu = False
     while True:
         current_mmr_pct = risk_cfg.get('MAINTENANCE_MARGIN_RATE', 0.0) * 100
-        # --- INICIO DE LA MODIFICACIÓN ---
         current_max_failures = risk_cfg.get('MAX_SYNC_FAILURES', 100)
         
         menu_items = [
@@ -289,7 +276,6 @@ def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict) -> bool:
             None,
             "[b] Volver"
         ]
-        # --- FIN DE LA MODIFICACIÓN ---
         
         submenu_options = MENU_STYLE.copy()
         submenu_options['clear_screen'] = False
@@ -305,21 +291,16 @@ def _edit_risk_submenu(risk_cfg: Dict, changed_keys: Dict) -> bool:
                 changed_keys['MAINTENANCE_MARGIN_RATE'] = risk_cfg['MAINTENANCE_MARGIN_RATE'] = new_val_decimal
                 changes_in_submenu = True
                 
-        # --- INICIO DE LA MODIFICACIÓN ---
         elif submenu == 1:
             original_val = current_max_failures
             new_val = get_input("Nuevo número de reintentos de sincronización", int, original_val, min_val=1)
             if new_val != original_val:
                 changed_keys['MAX_SYNC_FAILURES'] = risk_cfg['MAX_SYNC_FAILURES'] = new_val
                 changes_in_submenu = True
-        # --- FIN DE LA MODIFICACIÓN ---
 
         else:
             break
     return changes_in_submenu
-
-
-# En: core/menu/screens/_session_config_editor.py
 
 def _display_config_box(temp_cfg: Dict, box_width: int):
     """Muestra la caja de configuración con formato y alineación adaptativos."""
@@ -336,10 +317,8 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
             "Período W.Dec": temp_cfg['TA']['WEIGHTED_DEC_WINDOW'],
         },
         "Generación de Señal": {
-            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
             "Umbral Caída para Comprar (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_BUY_PERCENTAGE'],
             "Umbral Subida para Vender (%)": temp_cfg['SIGNAL']['PRICE_CHANGE_SELL_PERCENTAGE'],
-            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
             "Umbral Decremento": temp_cfg['SIGNAL']['WEIGHTED_DECREMENT_THRESHOLD'],
             "Umbral Incremento": temp_cfg['SIGNAL']['WEIGHTED_INCREMENT_THRESHOLD'],
         },
@@ -351,9 +330,7 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
         },
         "Gestión de Riesgo": {
             "Tasa Margen Mantenimiento (%)": f"{temp_cfg.get('RISK', {}).get('MAINTENANCE_MARGIN_RATE', 0.0) * 100:.3f}",
-            # --- INICIO DE LA MODIFICACIÓN ---
             "Máx. Reintentos Sincronización": temp_cfg.get('RISK', {}).get('MAX_SYNC_FAILURES', 100),
-            # --- FIN DE LA MODIFICACIÓN ---
         }
     }
     
@@ -377,11 +354,9 @@ def _display_config_box(temp_cfg: Dict, box_width: int):
 
     print("└" + "─" * (box_width - 2) + "┘")
 
-
 def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict) -> bool:
     changes_in_submenu = False
     while True:
-        # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
         menu_items = [
             f"[1] Umbral Caída para Comprar (%) ({signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']})",
             f"[2] Umbral Subida para Vender (%) ({signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']})",
@@ -390,23 +365,18 @@ def _edit_signal_submenu(signal_cfg: Dict, changed_keys: Dict) -> bool:
             None,
             "[b] Volver"
         ]
-        # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
         submenu_options = MENU_STYLE.copy()
         submenu_options['clear_screen'] = False
         submenu = TerminalMenu(menu_items, title="\nEditando Parámetros de Señal:", **submenu_options).show()
         if submenu == 0:
             original = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE']
-            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
             new_val = get_input("Nuevo Umbral Caída para Comprar (%)", float, original)
-            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
             if new_val != original: 
                 changed_keys['PRICE_CHANGE_BUY_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_BUY_PERCENTAGE'] = new_val
                 changes_in_submenu = True
         elif submenu == 1:
             original = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE']
-            # --- INICIO DE LA CORRECCIÓN DE ETIQUETAS ---
             new_val = get_input("Nuevo Umbral Subida para Vender (%)", float, original)
-            # --- FIN DE LA CORRECCIÓN DE ETIQUETAS ---
             if new_val != original: 
                 changed_keys['PRICE_CHANGE_SELL_PERCENTAGE'] = signal_cfg['PRICE_CHANGE_SELL_PERCENTAGE'] = new_val
                 changes_in_submenu = True
