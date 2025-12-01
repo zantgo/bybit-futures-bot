@@ -1,4 +1,4 @@
-# Reemplaza el archivo completo: core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
+# core/menu/screens/operation_manager/wizard_setup/_submenus_risk.py
 
 import time
 from typing import Any, Dict
@@ -86,7 +86,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
             break
 
         try:
-            # --- INICIO DE LA MODIFICACIÓN ---
             # Opción 1: SL por ROI
             if choice == 0:
                 current_val = temp_op.roi_sl.get('valor') if temp_op.roi_sl else None
@@ -133,7 +132,6 @@ def _edit_operation_risk_submenu(temp_op: Operacion):
                 else:
                     temp_op.roi_tp = None
                 params_changed_in_submenu = True
-            # --- FIN DE LA MODIFICACIÓN ---
 
             # Opción 3: TSL por ROI
             elif choice == 2:
