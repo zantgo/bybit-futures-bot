@@ -110,7 +110,6 @@ def _display_welcome_panel(bot_controller: Any):
     # Se filtran solo las cuentas que existen en balance_data.
     b_keys = [acc for acc in account_order if acc in balance_data]
     
-    # La lógica para las claves de configuración (c_keys) no cambia.
     c_keys = list(config_data.keys())
 
     num_rows = max(len(b_keys), len(c_keys))
@@ -164,11 +163,9 @@ def _run_position_test(bot_controller: Any):
 
 # --- Lógica Principal de la Pantalla ---
 
-# Reemplaza la función show_welcome_screen completa en core/menu/screens/_welcome.py
-
 def show_welcome_screen(bot_controller: Any):
     from ._general_config_editor import show_general_config_editor_screen
-    from .._helpers import show_help_popup # <-- Importación añadida
+    from .._helpers import show_help_popup
 
     config_module = _deps.get("config_module")
     if not TerminalMenu or not config_module:
@@ -192,7 +189,6 @@ def show_welcome_screen(bot_controller: Any):
         clear_screen()
         _display_welcome_panel(bot_controller)
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         menu_items = [
             "[1] Iniciar Sesión de Trading",
             None,
@@ -202,7 +198,7 @@ def show_welcome_screen(bot_controller: Any):
             "[4] Configuración General",
             "[5] Ver Logs de la Aplicación",
             None,
-            "[h] Ayuda", # Botón de Ayuda añadido
+            "[h] Ayuda",
             "[q] Salir del Bot"
         ]
         
@@ -210,7 +206,6 @@ def show_welcome_screen(bot_controller: Any):
             0: 'start_session', 2: 'test_transfers', 3: 'test_positions',
             5: 'edit_general_config', 6: 'view_logs', 8: 'help', 9: 'exit'
         }
-        # --- FIN DE LA MODIFICACIÓN ---
         
         welcome_menu_options = MENU_STYLE.copy()
         welcome_menu_options['clear_screen'] = False
@@ -233,10 +228,8 @@ def show_welcome_screen(bot_controller: Any):
         elif choice == 'test_positions': _run_position_test(bot_controller)
         elif choice == 'edit_general_config': show_general_config_editor_screen(config_module)
         elif choice == 'view_logs': _log_viewer.show_log_viewer()
-        # --- INICIO DE LA MODIFICACIÓN ---
         elif choice == 'help':
             show_help_popup('welcome_screen')
-        # --- FIN DE LA MODIFICACIÓN ---
         elif choice == 'exit' or choice is None:
             # La opción 'clear_screen' en True es necesaria aquí para que el
             # menú de confirmación aparezca sobre una pantalla limpia.
