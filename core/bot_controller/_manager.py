@@ -15,18 +15,15 @@ import time
 import traceback
 from typing import Dict, Any, Optional, Tuple
 
-# --- Dependencias del Proyecto (inyectadas a través de __init__) ---
+# --- Dependencias del Proyecto ---
 try:
-    # Clases que el BotController debe poder instanciar
     from core.strategy.sm._manager import SessionManager
     from core.strategy.om._manager import OperationManager
     from core.strategy.pm.manager import PositionManager
     from core.strategy.pm._position_state import PositionState
     from core.strategy.pm._executor import PositionExecutor
     from core.exchange._bybit_adapter import BybitAdapter
-    # --- INICIO DE LA INTEGRACIÓN: Importar el modelo StandardOrder ---
     from core.exchange._models import StandardOrder
-    # --- FIN DE LA INTEGRACIÓN ---
     
     # Módulos y APIs de soporte
     from core.logging import memory_logger as memory_logger_module
@@ -39,9 +36,7 @@ except ImportError:
     # Fallbacks para análisis estático y resiliencia
     SessionManager = OperationManager = PositionManager = None
     PositionState = PositionExecutor = BybitAdapter = ConnectionManager = None
-    # --- INICIO DE LA INTEGRACIÓN: Fallback para StandardOrder ---
     StandardOrder = None
-    # --- FIN DE LA INTEGRACIÓN ---
     memory_logger_module = type('obj', (object,), {'log': print})()
     trading_api = None
     UserInputCancelled = Exception
@@ -125,13 +120,11 @@ class BotController:
         
         try:
             self._connection_manager.initialize_all_clients()
-            
             self._connections_initialized = True
             msg = "Validación completada. Todas las conexiones requeridas fueron exitosas."
             time.sleep(1)
             self._memory_logger.log(f"BotController: {msg}", "INFO")
             return True, msg
-
         except SystemExit as e:
             self._connections_initialized = False
             error_msg = f"Error fatal de conexión: {e}"
@@ -341,7 +334,6 @@ class BotController:
 
         for key, value in params.items():
             original_value = None
-            # key_to_update = None
             
             # Mapeamos las claves públicas a las rutas internas del diccionario de configuración.
             if key == 'Exchange' and 'EXCHANGE_NAME' in bot_config:
@@ -363,13 +355,9 @@ class BotController:
                     config_changed = True
 
             elif key == 'Ticker Symbol' and 'TICKER' in bot_config and 'SYMBOL' in bot_config['TICKER']:
-                # Para el Ticker Symbol, se recomienda usar el método dedicado que incluye validación.
-                # Pero si se llama directamente, lo actualizamos.
                 original_value = bot_config['TICKER']['SYMBOL']
                 if original_value != value:
-                    # self.validate_and_update_ticker_symbol(value) # Usamos el método con validación
                     self.validate_and_update_ticker_symbol(value)
-                    # config_changed = True # Asumimos que cambió si se llamó a la función
                     config_changed = True
             
             if config_changed and original_value is not None:
