@@ -1,13 +1,5 @@
 """
 Módulo Ensamblador de Dependencias.
-
-v6.0 (Capital Lógico por Operación):
-- Se elimina la importación y el registro de la dependencia `BalanceManager`,
-  ya que la clase ha sido eliminada del sistema.
-
-v5.0 (Refactor Connection a OOP):
-- Se actualizan las importaciones del paquete 'connection' para registrar las
-  clases 'ConnectionManager' y 'Ticker'.
 """
 from typing import Dict, Any
 
@@ -81,22 +73,17 @@ def assemble_dependencies() -> Dict[str, Any]:
         dependencies["operation_manager_api_module"] = om_api
         dependencies["OperationManager"] = OperationManager
         
-        # --- INICIO DE LA MODIFICACIÓN ---
         # PositionManager (PM) y sus componentes
-        # Se elimina `BalanceManager` de la importación y del diccionario de dependencias.
         from core.strategy.pm import api as pm_api
-        # from core.strategy.pm import PositionManager, BalanceManager, PositionState, PositionExecutor
         from core.strategy.pm import PositionManager, PositionState, PositionExecutor
         from core.strategy.pm import _helpers as pm_helpers
         from core.strategy.pm import _calculations as pm_calculations
         dependencies["position_manager_api_module"] = pm_api
         dependencies["PositionManager"] = PositionManager
-        # dependencies["BalanceManager"] = BalanceManager # Comentado/Eliminado
         dependencies["PositionState"] = PositionState
         dependencies["PositionExecutor"] = PositionExecutor
         dependencies["pm_helpers_module"] = pm_helpers
         dependencies["pm_calculations_module"] = pm_calculations
-        # --- FIN DE LA MODIFICACIÓN ---
 
         print("Diccionario de dependencias ensamblado con éxito.")
         return dependencies
