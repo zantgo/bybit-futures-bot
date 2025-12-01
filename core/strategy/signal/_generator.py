@@ -59,9 +59,6 @@ class SignalGenerator:
         if self._memory_logger:
             self._memory_logger.log("SignalGenerator: Estado reseteado. Esperando cálculo de indicadores iniciales...", "INFO")
 
-# Reemplaza la función generate_signal completa en:
-# core/strategy/signal/_generator.py
-
     def generate_signal(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Punto de entrada principal. Orquesta la evaluación de indicadores técnicos
@@ -74,24 +71,6 @@ class SignalGenerator:
             reason = "Timestamp o Precio inválido en los datos procesados"
         
         else:
-            # --- INICIO DE LA MODIFICACIÓN: Lógica de habilitación corregida ---
-
-            # if not indicators_are_valid:
-            #     signal = "HOLD_INITIALIZING"
-            #     reason = "Calculando indicadores iniciales..."
-            
-            # elif self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
-            #     if not self._strategy_is_ready and self._memory_logger:
-            #         self._memory_logger.log("SignalGenerator: ¡Estrategia lista! Todos los indicadores iniciales han sido calculados.", "INFO")
-            #         self._strategy_is_ready = True
-
-            #     signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
-            
-            # else:
-            #     signal = "HOLD_STRATEGY_DISABLED"
-            #     reason = "Estrategia de Señal desactivada en config"
-            
-            # Nueva lógica:
             # 1. Primero, se comprueba si la generación de señales está habilitada en la configuración.
             if not self._config.SESSION_CONFIG["SIGNAL"]["ENABLED"]:
                 signal = "HOLD_STRATEGY_DISABLED"
@@ -114,7 +93,6 @@ class SignalGenerator:
                         self._strategy_is_ready = True
 
                     signal, reason = self._rules.evaluate_strategy(price, ema, inc_pct, dec_pct, w_inc, w_dec)
-            # --- FIN DE LA MODIFICACIÓN ---
 
         return self._data_handler.build_signal_dict(
             timestamp, price, ema, inc_pct, dec_pct, w_inc, w_dec, signal, reason
