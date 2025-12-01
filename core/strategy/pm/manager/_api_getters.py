@@ -73,24 +73,18 @@ class _ApiGetters:
             'capital_logico_total': f"L:${long_op.capital_operativo_logico_actual:.2f} / S:${short_op.capital_operativo_logico_actual:.2f}"
         }
 
-        # --- INICIO DE LA MODIFICACIÓN (Solución al AttributeError) ---
-        # Se elimina la conversión y el formateo. Ahora devolvemos la lista de OBJETOS directamente.
-        # Quien consuma esta API (la TUI, el SessionManager) será responsable de formatear o leer los datos.
         return {
             "initialized": True, "operation_mode": display_tendencia,
             "operation_status": op_status_summary, "operations_info": operations_info,
             "operation_long_pnl": operation_long_pnl, "operation_short_pnl": operation_short_pnl,
             "operation_long_roi": operation_long_roi, "operation_short_roi": operation_short_roi,
             "open_long_positions_count": len(open_longs), "open_short_positions_count": len(open_shorts),
-            # "open_long_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_longs], # <-- LÍNEA ORIGINAL COMENTADA
-            # "open_short_positions": [self._helpers.format_pos_for_summary(asdict(p)) for p in open_shorts], # <-- LÍNEA ORIGINAL COMENTADA
             "open_long_positions": open_longs,
             "open_short_positions": open_shorts,
             "total_realized_pnl_session": self.get_total_pnl_realized(),
             "initial_total_capital": initial_capital_ops,
             "current_market_price": current_market_price,
         }
-        # --- FIN DE LA MODIFICACIÓN ---
 
     def get_unrealized_pnl(self, current_price: float) -> float:
         total_pnl = 0.0
