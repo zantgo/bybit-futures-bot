@@ -1,4 +1,4 @@
-# Contenido completo y corregido para: core/strategy/pm/manager/_private_logic.py
+# core/strategy/pm/manager/_private_logic.py
 
 import datetime
 import uuid
@@ -119,8 +119,6 @@ class _PrivateLogic:
 
     def _update_trailing_stop(self, side: str, index: int, current_price: float):
         try:
-            #self._memory_logger.log(f"[DEBUG TSL] Iniciando check para {side.upper()} pos_idx={index} @ price={current_price}", "DEBUG")
-
             operacion = self._om_api.get_operation_by_side(side)
             if not operacion or operacion.estado not in ['ACTIVA', 'PAUSADA']:
                 return
@@ -136,16 +134,12 @@ class _PrivateLogic:
             is_ts_active = position_to_update.ts_is_active
             entry_price = position_to_update.entry_price
 
-            #self._memory_logger.log(f"[DEBUG TSL ID:{pos_id_short}] Valores: act_pct={activation_pct}, dist_pct={distance_pct}, entry={entry_price}", "DEBUG")
-
             if not (activation_pct is not None and activation_pct > 0 and distance_pct is not None and distance_pct > 0 and entry_price is not None):
                 return
 
             if not is_ts_active:
                 activation_price = entry_price * (1 + activation_pct / 100) if side == 'long' else entry_price * (1 - activation_pct / 100)
                 
-                #self._memory_logger.log(f"TSL Check [ID:{pos_id_short}]: Activo={is_ts_active}. Precio actual={current_price:.4f}, Precio de activación={activation_price:.4f}", "DEBUG")
-
                 if (side == 'long' and current_price >= activation_price) or \
                    (side == 'short' and current_price <= activation_price):
                     
@@ -159,7 +153,6 @@ class _PrivateLogic:
                 if (side == 'long' and current_price > current_peak) or \
                    (side == 'short' and current_price < current_peak):
                     
-                    #self._memory_logger.log(f"TSL Peak Update [ID:{pos_id_short}]: Nuevo pico {current_price:.4f} (anterior: {current_peak:.4f})", level="DEBUG")
                     position_to_update.ts_peak_price = current_price
                 
                 new_peak_price = position_to_update.ts_peak_price
@@ -180,19 +173,13 @@ class _PrivateLogic:
             self._memory_logger.log(traceback.format_exc(), level="ERROR")
     
     def _close_logical_position(self, side: str, index: int, exit_price: float, timestamp: datetime.datetime, reason: str) -> dict:
-        
-        # --- INICIO DE LA SOLUCIÓN ---
-        # Se activa la bandera de protección al inicio de cualquier proceso de cierre.
         self._manual_close_in_progress = True
         self._memory_logger.log(f"Bandera de protección de cierre ACTIVADA para {side.upper()} (Razón: {reason}).", "DEBUG")
         try:
-        # --- FIN DE LA SOLUCIÓN ---
-
             op_before = self._om_api.get_operation_by_side(side)
             
             if not self._executor or not op_before or index >= len(op_before.posiciones):
                 self._memory_logger.log(f"ERROR [Close Attempt] side={side} index={index} executor={self._executor is not None} op_before_exists={op_before is not None}", level="ERROR")
-                # --- MODIFICACIÓN DE LA SOLUCIÓN: El return debe estar dentro del try ---
                 return {'success': False, 'message': 'Índice o executor no válido'}
         
             pos_to_close = op_before.posiciones[index]
@@ -266,16 +253,11 @@ class _PrivateLogic:
                 
                 self._om_api.revisar_y_transicionar_a_detenida(side)
             
-            # --- MODIFICACIÓN DE LA SOLUCIÓN: El return debe estar dentro del try ---
             return result
 
-        # --- INICIO DE LA SOLUCIÓN ---
         finally:
-            # Este bloque se ejecutará siempre, incluso si hay un error dentro del 'try',
-            # garantizando que la bandera se desactive y el heartbeat de seguridad se reanude.
             self._manual_close_in_progress = False
             self._memory_logger.log(f"Bandera de protección de cierre DESACTIVADA para {side.upper()}.", "DEBUG")
-        # --- FIN DE LA SOLUCIÓN ---
         
     def _manual_open_position(self, side: str, entry_price: float, timestamp: datetime.datetime) -> dict:
         """
