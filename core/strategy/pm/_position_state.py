@@ -33,7 +33,6 @@ except ImportError:
         def log(self, msg, level="INFO"): print(f"[{level}] {msg}")
     memory_logger = MemoryLoggerFallback()
 
-
 class PositionState:
     """Gestiona el estado de las posiciones lógicas y físicas."""
 
@@ -170,9 +169,6 @@ class PositionState:
             
         return state_dict
 
-    # --- INICIO DE LA CORRECCIÓN ---
-    # La firma de la función ha sido modificada para aceptar explícitamente los
-    # argumentos con nombre (keyword arguments) que le envía el PositionExecutor.
     def update_physical_position_state(
         self,
         side: str,
@@ -187,13 +183,11 @@ class PositionState:
         
         target_physical = self.physical_long_position if side == 'long' else self.physical_short_position
         
-        # El cuerpo de la función ahora usa los nuevos nombres de los argumentos.
         target_physical.avg_entry_price = self._utils.safe_float_convert(avg_entry_price, 0.0)
         target_physical.total_size_contracts = self._utils.safe_float_convert(total_size_contracts, 0.0)
         target_physical.total_margin_usdt = self._utils.safe_float_convert(total_margin_usdt, 0.0)
         target_physical.est_liq_price = self._utils.safe_float_convert(liquidation_price)
         target_physical.last_update_ts = timestamp
-    # --- FIN DE LA CORRECCIÓN ---
 
     def reset_physical_position_state(self, side: str):
         """Resetea el estado físico a sus valores por defecto."""
