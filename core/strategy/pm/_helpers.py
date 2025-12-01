@@ -11,7 +11,7 @@ v2.0: Refactorizado para ser agnóstico al exchange.
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 import datetime
 import numpy as np
-import traceback # Importamos al inicio del módulo
+import traceback
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 # --- Dependencias del Proyecto ---
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from core import utils as ut_mod
     
 # --- Dependencias del Módulo (inyectadas al inicio) ---
-# Mantenemos este patrón simple del código original.
 _config: Optional['cfg_mod'] = None
 _utils: Optional['ut_mod'] = None
 
@@ -83,7 +82,7 @@ def calculate_and_round_quantity(
     entry_price: float,
     leverage: float,
     symbol: str,
-    is_live: bool, # Mantenido por compatibilidad, aunque ahora se asume siempre live
+    is_live: bool,
     exchange_adapter: AbstractExchange
 ) -> Dict[str, Any]:
     """
@@ -147,7 +146,7 @@ def calculate_and_round_quantity(
 def format_quantity_for_api(
     quantity_float: float,
     symbol: str,
-    is_live: bool, # Mantenido por compatibilidad
+    is_live: bool,
     exchange_adapter: AbstractExchange
 ) -> Dict[str, Any]:
     """
