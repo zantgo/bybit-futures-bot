@@ -1,4 +1,4 @@
-#connection/_ticker.py
+# connection/_ticker.py
 
 import threading
 import time
